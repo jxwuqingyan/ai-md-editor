@@ -1,6 +1,5 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'node:path';
-import { is } from '@electron-toolkit/utils';
 
 /**
  * 创建主窗口。
@@ -36,7 +35,8 @@ function createWindow(): void {
   });
 
   // 开发环境：加载 dev server（支持热更新）；生产环境：加载本地打包文件
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  // 判断依据：dev 模式下 electron-vite 会注入 ELECTRON_RENDERER_URL 环境变量
+  if (process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
   } else {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
