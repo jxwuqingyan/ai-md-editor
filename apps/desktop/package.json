@@ -11,10 +11,10 @@
     "dist": "electron-vite build && electron-builder"
   },
   "dependencies": {
-    "@ai-md-editor/shared": "workspace:*",
-    "@ai-md-editor/theme": "workspace:*",
-    "@ai-md-editor/markdown-core": "workspace:*",
-    "@ai-md-editor/editor": "workspace:*"
+    "@ai-md-editor/shared": "*",
+    "@ai-md-editor/theme": "*",
+    "@ai-md-editor/markdown-core": "*",
+    "@ai-md-editor/editor": "*"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",

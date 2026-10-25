@@ -4,11 +4,14 @@
   "private": true,
   "description": "对标 Typora 的跨平台 Markdown 编辑器与预览器（纯本地，WYSIWYG）",
   "license": "MIT",
-  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "pnpm --filter @ai-md-editor/desktop dev",
-    "build": "pnpm --filter @ai-md-editor/desktop build",
-    "dist": "pnpm --filter @ai-md-editor/desktop dist"
+    "dev": "npm run dev --workspace @ai-md-editor/desktop",
+    "build": "npm run build --workspace @ai-md-editor/desktop",
+    "dist": "npm run dist --workspace @ai-md-editor/desktop"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

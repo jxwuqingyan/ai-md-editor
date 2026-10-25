@@ -9,6 +9,6 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@ai-md-editor/markdown-core": "workspace:*"
+    "@ai-md-editor/markdown-core": "*"
   }
 }
