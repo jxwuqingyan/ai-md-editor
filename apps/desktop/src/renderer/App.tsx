@@ -52,7 +52,7 @@ export default function App(): JSX.Element {
     <div className="app" style={cssVars}>
       {/* 顶部栏 */}
       <header className="topbar">
-        <span className="brand">ai-md-editor</span>
+        <span className="brand">MarkdownNote</span>
         <span className="doc-title">未命名.md</span>
         <div className="spacer" />
         <button className="icon-btn" onClick={() => setSidebarOpen((v) => !v)} title="切换侧边栏">

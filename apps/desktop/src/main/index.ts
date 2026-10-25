@@ -1,6 +1,9 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'node:path';
 
+// 设置应用显示名（macOS 菜单栏 / 关于面板 / 默认窗口标题）
+app.setName('MarkdownNote');
+
 /**
  * 创建主窗口。
  * 遵循安全基线：contextIsolation 开启、nodeIntegration 关闭、sandbox 开启。
@@ -14,7 +17,7 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     autoHideMenuBar: true,
-    title: 'ai-md-editor',
+    title: 'MarkdownNote',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

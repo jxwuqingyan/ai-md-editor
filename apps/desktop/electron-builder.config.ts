@@ -3,12 +3,12 @@
  * macOS 产出 dmg/zip（arm64 + x64），Windows 产出 nsis/zip。
  */
 const config = {
-  appId: 'com.example.ai-md-editor',
-  productName: 'ai-md-editor',
+  appId: 'com.markdownnote.app',
+  productName: 'MarkdownNote',
   directories: {
     output: 'release'
   },
-  files: ['dist/**/*', 'package.json'],
+  files: ['out/**/*', 'package.json'],
   mac: {
     target: ['dmg', 'zip'],
     arch: ['arm64', 'x64'],
