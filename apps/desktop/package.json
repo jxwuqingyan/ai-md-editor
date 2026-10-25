@@ -1,0 +1,29 @@
+{
+  "name": "@ai-md-editor/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ai-md-editor 桌面端（Electron）",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "dist": "electron-vite build && electron-builder"
+  },
+  "dependencies": {
+    "@ai-md-editor/shared": "workspace:*",
+    "@ai-md-editor/theme": "workspace:*",
+    "@ai-md-editor/markdown-core": "workspace:*",
+    "@ai-md-editor/editor": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "electron": "^31.3.1",
+    "electron-builder": "^24.13.3",
+    "electron-vite": "^2.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.3.5"
+  }
+}

@@ -1,0 +1,175 @@
+/**
+ * 全局样式：落地 UI-UX 设计规范。
+ * - 现代极简，中性界面
+ * - 克制动效（高频操作零动效，低频操作 < 300ms）
+ * - 去 AI 味（无渐变、无静止阴影、无胶囊圆角）
+ */
+
+/* 缓动曲线（自定义，禁止 ease-in） */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  /* 字体：系统无衬线 + 等宽（代码） */
+  --font-sans: -apple-system, 'SF Pro Text', 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+/* ============ 应用骨架 ============ */
+.app {
+  display: grid;
+  grid-template-rows: 40px 1fr 26px;
+  height: 100%;
+}
+
+/* 顶部栏（极简，无阴影） */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+
+.brand {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.doc-title {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* 幽灵按钮：hover 出背景色阶，按下轻微缩放 */
+.icon-btn {
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  /* 只动画背景色与缩放，150ms，符合克制动效 */
+  transition: background 150ms var(--ease-out), transform 160ms var(--ease-out);
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.icon-btn:active {
+  transform: scale(0.96);
+}
+
+/* ============ 主体布局 ============ */
+.main {
+  display: flex;
+  min-height: 0;
+}
+
+/* 侧边栏 */
+.sidebar {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border-subtle);
+  overflow-y: auto;
+}
+
+.sidebar-head {
+  padding: 12px 16px 8px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+}
+
+.outline-item {
+  padding: 4px 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 150ms var(--ease-out);
+}
+
+.outline-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* 编辑区（主角，纯色无边框无阴影） */
+.editor-wrap {
+  flex: 1;
+  background: var(--bg-panel);
+  overflow-y: auto;
+}
+
+.editor-inner {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 24px 120px;
+}
+
+.sample {
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 状态栏（安静，细边框之上极简一行） */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+/* 无障碍：偏好减少动效时，禁用过渡 */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+    animation: none !important;
+  }
+}

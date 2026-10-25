@@ -1,0 +1,11 @@
+{
+  "name": "@ai-md-editor/theme",
+  "version": "0.1.0",
+  "private": true,
+  "description": "主题系统（design tokens + 主题 CSS）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}
