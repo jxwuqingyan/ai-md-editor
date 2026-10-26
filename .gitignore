@@ -8,6 +8,11 @@ out/
 release/
 *.tsbuildinfo
 
+# 构建/工具产生的临时文件
+electron.vite.config.*.mjs
+*.tmp
+*_tmp_*
+
 # 日志
 logs/
 *.log

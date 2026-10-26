@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { themes, tokensToCssVars, type ThemeId } from '@ai-md-editor/theme';
 import { extractOutline } from '@ai-md-editor/markdown-core';
+import MarkdownEditor from './MarkdownEditor';
 
-/** M0 阶段用于演示的示例文档内容 */
-const SAMPLE_DOC = `# ai-md-editor
+/** M1 阶段的示例文档内容 */
+const SAMPLE_DOC = `# MarkdownNote
 
 对标 Typora 的跨平台 Markdown 编辑器，所见即所得。
 
@@ -18,18 +19,21 @@ const SAMPLE_DOC = `# ai-md-editor
 - Electron + React + TypeScript
 - Milkdown（ProseMirror + remark）
 
-> 这是 M0 工程骨架阶段，编辑器内核将在 M1 接入。
+> 这是 M1 阶段：已接入 Milkdown 编辑器内核，支持实时渲染。
 `;
 
 /**
  * 应用根组件。
  * 落地 UI-UX 设计规范：应用骨架（顶部栏/侧边栏/编辑区/状态栏）、主题切换、克制动效。
+ * M1：编辑区接入 Milkdown，打通内容 ↔ 状态栏 ↔ 大纲的数据流。
  */
 export default function App(): JSX.Element {
   // 主题状态，默认 light
   const [themeId, setThemeId] = useState<ThemeId>('light');
   // 侧边栏折叠状态
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // 当前文档内容（由编辑器变化回调驱动）
+  const [content, setContent] = useState(SAMPLE_DOC);
 
   const tokens = themes[themeId];
   // 将 token 转为 CSS 变量，注入到根容器
@@ -40,13 +44,27 @@ export default function App(): JSX.Element {
     document.documentElement.setAttribute('data-theme', themeId);
   }, [themeId]);
 
-  // 从示例文档提取大纲
-  const outline = useMemo(() => extractOutline(SAMPLE_DOC), []);
+  // 从当前内容提取大纲（实时跟随编辑）
+  const outline = useMemo(() => extractOutline(content), [content]);
+
+  // 内容变化回调
+  const handleChange = useCallback((markdown: string) => {
+    setContent(markdown);
+  }, []);
 
   // 切换主题
   const toggleTheme = (): void => {
     setThemeId((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
+
+  // 统计信息
+  const stats = useMemo(() => {
+    const lines = content.split('\n');
+    const lineCount = lines.length;
+    const charCount = content.length;
+    const wordCount = content.replace(/\s/g, '').length;
+    return { lineCount, charCount, wordCount };
+  }, [content]);
 
   return (
     <div className="app" style={cssVars}>
@@ -77,11 +95,10 @@ export default function App(): JSX.Element {
           </aside>
         )}
 
-        {/* 编辑区（主角） */}
+        {/* 编辑区（主角，接入 Milkdown WYSIWYG 编辑器） */}
         <main className="editor-wrap">
           <div className="editor-inner">
-            {/* M0 阶段先展示示例内容，M1 接入 Milkdown 编辑器 */}
-            <pre className="sample">{SAMPLE_DOC}</pre>
+            <MarkdownEditor initialValue={SAMPLE_DOC} onChange={handleChange} />
           </div>
         </main>
       </div>
@@ -91,8 +108,8 @@ export default function App(): JSX.Element {
         <span>Markdown</span>
         <span>UTF-8</span>
         <div className="spacer" />
-        <span>行 0, 列 0</span>
-        <span>字数 0</span>
+        <span>{stats.lineCount} 行</span>
+        <span>{stats.wordCount} 字</span>
       </footer>
     </div>
   );

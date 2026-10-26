@@ -145,13 +145,160 @@ body {
   padding: 24px 24px 120px;
 }
 
-.sample {
-  font-family: var(--font-mono);
-  font-size: 13.5px;
-  line-height: 1.7;
+/* ============ Milkdown 编辑器容器与内容排版 ============ */
+.milkdown-container {
+  height: 100%;
+  outline: none;
+}
+
+/* ProseMirror 可编辑内容区：贴合设计规范的排版 */
+.milkdown-container .ProseMirror {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.75;
   color: var(--text-primary);
-  white-space: pre-wrap;
+  outline: none;
+  min-height: 60vh;
   word-break: break-word;
+}
+
+/* 标题层级（克制的字号差，去 AI 味的夸张对比） */
+.milkdown-container .ProseMirror h1 {
+  font-size: 1.7em;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 1.2em 0 0.6em;
+}
+
+.milkdown-container .ProseMirror h2 {
+  font-size: 1.4em;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 1.1em 0 0.5em;
+}
+
+.milkdown-container .ProseMirror h3 {
+  font-size: 1.2em;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 1em 0 0.45em;
+}
+
+.milkdown-container .ProseMirror h4,
+.milkdown-container .ProseMirror h5,
+.milkdown-container .ProseMirror h6 {
+  font-size: 1.05em;
+  font-weight: 600;
+  margin: 0.9em 0 0.4em;
+}
+
+/* 段落与块级间距 */
+.milkdown-container .ProseMirror p {
+  margin: 0.5em 0;
+}
+
+/* 引用块：安静左侧色条，无背景填充（去 AI 味） */
+.milkdown-container .ProseMirror blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 0 0.1em 1em;
+  border-left: 3px solid var(--border);
+  color: var(--text-secondary);
+}
+
+/* 列表 */
+.milkdown-container .ProseMirror ul,
+.milkdown-container .ProseMirror ol {
+  padding-left: 1.6em;
+  margin: 0.5em 0;
+}
+
+.milkdown-container .ProseMirror li {
+  margin: 0.2em 0;
+}
+
+.milkdown-container .ProseMirror li > p {
+  margin: 0.1em 0;
+}
+
+/* 任务列表复选框 */
+.milkdown-container .ProseMirror li[data-checked='true'] {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+/* 行内代码与代码块 */
+.milkdown-container .ProseMirror code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-subtle);
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.milkdown-container .ProseMirror pre {
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin: 0.8em 0;
+  overflow-x: auto;
+}
+
+.milkdown-container .ProseMirror pre code {
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* 链接（强调色，无下划线装饰，hover 才出现下划线） */
+.milkdown-container .ProseMirror a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.milkdown-container .ProseMirror a:hover {
+  text-decoration: underline;
+}
+
+/* 分割线：细线，无渐变 */
+.milkdown-container .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5em 0;
+}
+
+/* 加粗、斜体、删除线 */
+.milkdown-container .ProseMirror strong {
+  font-weight: 650;
+}
+
+.milkdown-container .ProseMirror del {
+  color: var(--text-tertiary);
+}
+
+/* 表格（GFM）：极简边框 */
+.milkdown-container .ProseMirror table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  width: 100%;
+}
+
+.milkdown-container .ProseMirror th,
+.milkdown-container .ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  text-align: left;
+}
+
+.milkdown-container .ProseMirror th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+}
+
+/* 选中文本：强调色浅底 */
+.milkdown-container .ProseMirror ::selection {
+  background: var(--accent-subtle);
 }
 
 /* 状态栏（安静，细边框之上极简一行） */

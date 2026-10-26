@@ -2,6 +2,19 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.2.0 - 2026-10-26
+
+### M1 里程碑：接入 Milkdown 实现 WYSIWYG 编辑
+
+- 接入 Milkdown 7.22.3（`@milkdown/kit` + `@milkdown/react`）编辑器内核
+- 封装 `createEditor` 接口（`packages/editor`）：getMarkdown / setMarkdown / destroy / onChange
+- 启用 CommonMark + GFM 预设（标题、列表、任务列表、表格、代码块、引用、链接等）
+- 新增 `MarkdownEditor` React 组件，命令式管理编辑器生命周期
+- 打通数据流：编辑器内容 ↔ 状态栏（行数/字数）↔ 侧边栏大纲（实时提取）
+- 自定义 Milkdown 主题样式，贴合 UI-UX 设计规范（克制动效、极简排版）
+- 中文 IME 适配：基于 ProseMirror 内置 composition 事件，拼音组合输入正常
+- 补齐缺失的 `@types/react`、`@types/react-dom` 类型包
+
 ## 0.1.0 - 2026-10-25
 
 ### 工程初始化（M0 里程碑）

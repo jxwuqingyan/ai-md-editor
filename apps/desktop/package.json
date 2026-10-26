@@ -17,6 +17,8 @@
     "@ai-md-editor/editor": "*"
   },
   "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
     "electron": "^45.0.0",
     "electron-builder": "^24.13.3",

@@ -4,5 +4,11 @@
     "composite": true,
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/**/*", "src/renderer/**/*.tsx"]
+  "include": [
+    "src/renderer/**/*",
+    "src/renderer/**/*.tsx",
+    "../../packages/theme/src/**/*",
+    "../../packages/markdown-core/src/**/*",
+    "../../packages/editor/src/**/*"
+  ]
 }
