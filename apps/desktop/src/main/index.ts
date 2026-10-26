@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'node:path';
+import { registerIpcHandlers } from './ipc';
 
 // 设置应用显示名（macOS 菜单栏 / 关于面板 / 默认窗口标题）
 app.setName('MarkdownNote');
@@ -51,6 +52,9 @@ function createWindow(): void {
  * macOS 特有：点击 dock 图标且无窗口时重新创建窗口。
  */
 app.whenReady().then(() => {
+  // 注册文件操作相关 IPC handler
+  registerIpcHandlers();
+
   createWindow();
 
   app.on('activate', () => {

@@ -4,5 +4,11 @@
     "composite": true,
     "types": ["node", "electron-vite/node"]
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "electron.vite.config.ts", "electron-builder.config.ts"]
+  "include": [
+    "src/main/**/*",
+    "src/preload/**/*",
+    "electron.vite.config.ts",
+    "electron-builder.config.ts",
+    "../../packages/shared/src/**/*"
+  ]
 }
