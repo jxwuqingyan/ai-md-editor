@@ -53,6 +53,8 @@ export default function App(): JSX.Element {
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', DEFAULT_DOC)]);
   // 当前活动标签 id
   const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
+  // 视图模式：wysiwyg（所见即所得）| source（源码）
+  const [viewMode, setViewMode] = useState<'wysiwyg' | 'source'>('wysiwyg');
 
   // 编辑器实例引用（通过 onReady 获取）
   const editorRef = useRef<EditorInstance | null>(null);
@@ -61,6 +63,8 @@ export default function App(): JSX.Element {
   tabsRef.current = tabs;
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+  const viewModeRef = useRef(viewMode);
+  viewModeRef.current = viewMode;
 
   const tokens = themes[themeId];
   const cssVars = useMemo(() => tokensToCssVars(tokens), [tokens]);
@@ -91,6 +95,18 @@ export default function App(): JSX.Element {
   const toggleTheme = (): void => {
     setThemeId((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
+
+  /** 切换源码/渲染模式 */
+  const toggleViewMode = useCallback(() => {
+    const next = viewModeRef.current === 'wysiwyg' ? 'source' : 'wysiwyg';
+    if (next === 'source') {
+      // 渲染 → 源码：清空编辑器实例引用（MarkdownEditor 即将卸载销毁实例）
+      // 源码 textarea 是受控的，直接绑定 activeTab.content
+      editorRef.current = null;
+    }
+    // 源码 → 渲染：MarkdownEditor 重新挂载时用 initialValue（activeTab.content）初始化，无需手动 setMarkdown
+    setViewMode(next);
+  }, []);
 
   /** 切换标签：载入目标标签内容到编辑器 */
   const handleSelectTab = useCallback((id: string) => {
@@ -225,18 +241,21 @@ export default function App(): JSX.Element {
     }
   }, []);
 
-  // 键盘快捷键：Cmd/Ctrl+S 保存
+  // 键盘快捷键：Cmd/Ctrl+S 保存、Cmd/Ctrl+/ 切换源码/渲染模式
   useEffect(() => {
     const onKeydown = (event: KeyboardEvent): void => {
       const mod = event.metaKey || event.ctrlKey;
       if (mod && event.key.toLowerCase() === 's') {
         event.preventDefault();
         void handleSave();
+      } else if (mod && event.key === '/') {
+        event.preventDefault();
+        toggleViewMode();
       }
     };
     window.addEventListener('keydown', onKeydown);
     return () => window.removeEventListener('keydown', onKeydown);
-  }, [handleSave]);
+  }, [handleSave, toggleViewMode]);
 
   // 图片粘贴监听
   useEffect(() => {
@@ -327,6 +346,9 @@ export default function App(): JSX.Element {
         <button className="icon-btn" onClick={() => void handleSaveAs()} title="另存为">
           另存为
         </button>
+        <button className="icon-btn" onClick={toggleViewMode} title="切换源码/渲染模式 (Cmd/Ctrl+/ )">
+          {viewMode === 'wysiwyg' ? '源码' : '渲染'}
+        </button>
         <button className="icon-btn" onClick={() => setSidebarOpen((v) => !v)} title="切换侧边栏">
           侧栏
         </button>
@@ -358,17 +380,27 @@ export default function App(): JSX.Element {
           </aside>
         )}
 
-        {/* 编辑区（主角，接入 Milkdown WYSIWYG 编辑器） */}
+        {/* 编辑区（主角）：wysiwyg 用 Milkdown，source 用源码 textarea */}
         <main className="editor-wrap">
           <div className="editor-inner">
-            <MarkdownEditor initialValue={activeTab?.content ?? ''} onChange={handleChange} onReady={handleReady} />
+            {viewMode === 'wysiwyg' ? (
+              <MarkdownEditor initialValue={activeTab?.content ?? ''} onChange={handleChange} onReady={handleReady} />
+            ) : (
+              <textarea
+                className="source-editor"
+                value={activeTab?.content ?? ''}
+                onChange={(e) => handleChange(e.target.value)}
+                placeholder="在此输入 Markdown 源码..."
+                spellCheck={false}
+              />
+            )}
           </div>
         </main>
       </div>
 
       {/* 状态栏 */}
       <footer className="statusbar">
-        <span>Markdown</span>
+        <span>{viewMode === 'wysiwyg' ? 'Markdown' : '源码'}</span>
         <span>UTF-8</span>
         <div className="spacer" />
         <span>{stats.lineCount} 行</span>

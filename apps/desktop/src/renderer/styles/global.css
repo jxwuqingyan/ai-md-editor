@@ -240,6 +240,22 @@ body {
   outline: none;
 }
 
+/* 源码模式编辑器：等宽字体，占满编辑区 */
+.source-editor {
+  width: 100%;
+  min-height: 60vh;
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ProseMirror 可编辑内容区：贴合设计规范的排版 */
 .milkdown-container .ProseMirror {
   font-family: var(--font-sans);
