@@ -3,6 +3,7 @@ import { themes, tokensToCssVars, type ThemeId } from '@ai-md-editor/theme';
 import { extractOutline } from '@ai-md-editor/markdown-core';
 import type { EditorInstance } from '@ai-md-editor/editor';
 import MarkdownEditor from './MarkdownEditor';
+import Tabs, { type Tab } from './Tabs';
 
 /** 默认文档内容 */
 const DEFAULT_DOC = `# MarkdownNote
@@ -20,47 +21,65 @@ const DEFAULT_DOC = `# MarkdownNote
 - Electron + React + TypeScript
 - Milkdown（ProseMirror + remark）
 
-> 支持打开 .md 文件、Cmd/Ctrl+S 保存、粘贴图片到 assets/ 目录。
+> 支持多标签页、打开 .md 文件、Cmd/Ctrl+S 保存、粘贴图片到 assets/ 目录。
 `;
+
+/** 生成唯一标签 id（时间戳 + 自增序号） */
+let tabSeq = 0;
+function genTabId(): string {
+  tabSeq += 1;
+  return `tab-${Date.now()}-${tabSeq}`;
+}
+
+/** 创建新标签的工厂函数 */
+function createTab(name = '未命名.md', content = '', path: string | null = null): Tab {
+  return { id: genTabId(), path, name, content, dirty: false };
+}
 
 /**
  * 应用根组件。
  * M1：接入 Milkdown，打通内容 ↔ 状态栏 ↔ 大纲数据流。
  * M2：接入文件打开/保存、图片粘贴（相对路径 assets 目录）。
+ * M3：多标签页管理。
+ *
+ * 架构：单编辑器实例 + 切换内容。切换标签时先保存旧标签内容，再载入新标签。
  */
 export default function App(): JSX.Element {
   // 主题状态，默认 light
   const [themeId, setThemeId] = useState<ThemeId>('light');
   // 侧边栏折叠状态
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  // 当前文档内容（由编辑器变化回调驱动）
-  const [content, setContent] = useState(DEFAULT_DOC);
-  // 当前文件信息（路径与文件名；未打开文件时为 null）
-  const [currentFile, setCurrentFile] = useState<{ path: string; name: string } | null>(null);
+  // 标签列表（初始一个未命名文档）
+  const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', DEFAULT_DOC)]);
+  // 当前活动标签 id
+  const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
 
   // 编辑器实例引用（通过 onReady 获取）
   const editorRef = useRef<EditorInstance | null>(null);
-  // 保存最新的 content，供事件回调使用（避免闭包过期）
-  const contentRef = useRef(content);
-  contentRef.current = content;
-  // 保存最新的 currentFile
-  const currentFileRef = useRef(currentFile);
-  currentFileRef.current = currentFile;
+  // 保存最新的 tabs 和 activeId，供事件回调使用（避免闭包过期）
+  const tabsRef = useRef(tabs);
+  tabsRef.current = tabs;
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
 
   const tokens = themes[themeId];
   const cssVars = useMemo(() => tokensToCssVars(tokens), [tokens]);
+
+  // 当前活动标签
+  const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
 
   // 应用主题到 <html>，保证全局 CSS 变量生效
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', themeId);
   }, [themeId]);
 
-  // 从当前内容提取大纲（实时跟随编辑）
-  const outline = useMemo(() => extractOutline(content), [content]);
+  // 从活动标签内容提取大纲（实时跟随编辑）
+  const outline = useMemo(() => extractOutline(activeTab?.content ?? ''), [activeTab]);
 
-  // 内容变化回调
+  // 内容变化回调：更新活动标签的 content + dirty
   const handleChange = useCallback((markdown: string) => {
-    setContent(markdown);
+    const id = activeIdRef.current;
+    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, content: markdown, dirty: true } : t)));
   }, []);
 
   // 编辑器就绪回调：保存实例引用
@@ -73,35 +92,94 @@ export default function App(): JSX.Element {
     setThemeId((prev) => (prev === 'light' ? 'dark' : 'light'));
   };
 
-  /** 打开文件：弹出对话框，读取内容并载入编辑器 */
+  /** 切换标签：载入目标标签内容到编辑器 */
+  const handleSelectTab = useCallback((id: string) => {
+    if (id === activeIdRef.current) return;
+    const target = tabsRef.current.find((t) => t.id === id);
+    if (!target) return;
+    setActiveId(id);
+    editorRef.current?.setMarkdown(target.content);
+  }, []);
+
+  /** 新建标签 */
+  const handleNewTab = useCallback(() => {
+    const tab = createTab('未命名.md', '');
+    setTabs((prev) => [...prev, tab]);
+    setActiveId(tab.id);
+    editorRef.current?.setMarkdown('');
+  }, []);
+
+  /** 关闭标签 */
+  const handleCloseTab = useCallback((id: string) => {
+    setTabs((prev) => {
+      const idx = prev.findIndex((t) => t.id === id);
+      const next = prev.filter((t) => t.id !== id);
+      // 关闭的是活动标签时，切换到相邻标签
+      if (id === activeIdRef.current) {
+        if (next.length === 0) {
+          // 关闭最后一个标签：保留一个空的未命名文档
+          const fallback = createTab('未命名.md', '');
+          setActiveId(fallback.id);
+          editorRef.current?.setMarkdown('');
+          return [fallback];
+        }
+        const newActive = next[Math.min(idx, next.length - 1)];
+        setActiveId(newActive.id);
+        editorRef.current?.setMarkdown(newActive.content);
+      }
+      return next;
+    });
+  }, []);
+
+  /** 打开文件：新建/复用标签载入内容 */
   const handleOpen = useCallback(async () => {
     const result = await window.api.openFile();
     if (result.canceled || !result.path || result.content === null) return;
-    // 载入内容 + 更新标题栏文件名
+    const name = result.name ?? '未命名.md';
+    // 若已有相同路径的标签，直接切换到它
+    const existing = tabsRef.current.find((t) => t.path === result.path);
+    if (existing) {
+      setActiveId(existing.id);
+      editorRef.current?.setMarkdown(existing.content);
+      return;
+    }
+    // 否则新建标签载入内容
+    const tab = createTab(name, result.content, result.path);
+    setTabs((prev) => [...prev, tab]);
+    setActiveId(tab.id);
     editorRef.current?.setMarkdown(result.content);
-    setContent(result.content);
-    setCurrentFile({ path: result.path, name: result.name ?? '未命名.md' });
   }, []);
 
-  /** 保存文件：有路径直接写，无路径则另存为 */
+  /** 保存活动标签：有路径直接写，无路径则另存为 */
   const handleSave = useCallback(async () => {
-    const current = contentRef.current;
-    const file = currentFileRef.current;
-    if (file) {
-      await window.api.writeFile(file.path, current);
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (!tab) return;
+    if (tab.path) {
+      await window.api.writeFile(tab.path, tab.content);
+      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, dirty: false } : t)));
     } else {
-      const result = await window.api.saveFileAs(current, '未命名.md');
+      const result = await window.api.saveFileAs(tab.content, tab.name);
       if (!result.canceled && result.path) {
-        setCurrentFile({ path: result.path, name: result.name ?? '未命名.md' });
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === tab.id ? { ...t, path: result.path, name: result.name ?? tab.name, dirty: false } : t
+          )
+        );
       }
     }
   }, []);
 
   /** 另存为：弹出保存对话框 */
   const handleSaveAs = useCallback(async () => {
-    const result = await window.api.saveFileAs(contentRef.current, '未命名.md');
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (!tab) return;
+    const result = await window.api.saveFileAs(tab.content, tab.name);
     if (!result.canceled && result.path) {
-      setCurrentFile({ path: result.path, name: result.name ?? '未命名.md' });
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tab.id ? { ...t, path: result.path, name: result.name ?? tab.name, dirty: false } : t
+        )
+      );
     }
   }, []);
 
@@ -110,32 +188,32 @@ export default function App(): JSX.Element {
     const items = event.clipboardData?.items;
     if (!items) return;
 
-    // 查找剪贴板中的图片项
     for (const item of items) {
       if (item.type.startsWith('image/')) {
         const blob = item.getAsFile();
         if (!blob) continue;
         event.preventDefault();
 
-        // 提取扩展名（image/png → png）
         const extension = item.type.split('/')[1] ?? 'png';
-        // 图片二进制数据
         const arrayBuffer = await blob.arrayBuffer();
         const data = new Uint8Array(arrayBuffer);
 
-        // 文档目录：当前文件的目录；未打开文件时为空（主进程会存到默认位置）
-        const file = currentFileRef.current;
-        const docDir = file ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+        // 文档目录：活动标签的文件目录；未打开文件时为空
+        const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+        const docDir = tab?.path ? tab.path.slice(0, tab.path.lastIndexOf('/')) : '';
 
         const result = await window.api.saveImage({ data, extension, docDir });
         if (result.relativePath) {
           // 简化实现：图片语法追加到文档末尾（后续优化为光标处插入）
           const imgMarkdown = `\n\n![图片](${result.relativePath})\n`;
-          const newContent = contentRef.current + imgMarkdown;
+          const newContent = tab ? tab.content + imgMarkdown : imgMarkdown;
+          if (tab) {
+            setTabs((prev) =>
+              prev.map((t) => (t.id === tab.id ? { ...t, content: newContent, dirty: true } : t))
+            );
+          }
           editorRef.current?.setMarkdown(newContent);
-          setContent(newContent);
         } else {
-          // 保存失败：控制台提示（后续可加 UI 提示）
           console.error('图片保存失败:', result.error);
         }
         break;
@@ -165,20 +243,18 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('paste', onPaste);
   }, [handlePaste]);
 
-  // 统计信息
+  // 统计信息（基于活动标签内容）
   const stats = useMemo(() => {
-    const lines = content.split('\n');
-    const lineCount = lines.length;
-    const wordCount = content.replace(/\s/g, '').length;
-    return { lineCount, wordCount };
-  }, [content]);
+    const text = activeTab?.content ?? '';
+    const lines = text.split('\n');
+    return { lineCount: lines.length, wordCount: text.replace(/\s/g, '').length };
+  }, [activeTab]);
 
   return (
     <div className="app" style={cssVars}>
       {/* 顶部栏 */}
       <header className="topbar">
         <span className="brand">MarkdownNote</span>
-        <span className="doc-title">{currentFile?.name ?? '未命名.md'}</span>
         <div className="spacer" />
         <button className="icon-btn" onClick={() => void handleOpen()} title="打开文件 (Cmd/Ctrl+O)">
           打开
@@ -197,6 +273,15 @@ export default function App(): JSX.Element {
         </button>
       </header>
 
+      {/* 标签栏 */}
+      <Tabs
+        tabs={tabs}
+        activeId={activeId}
+        onSelect={handleSelectTab}
+        onClose={handleCloseTab}
+        onNew={handleNewTab}
+      />
+
       {/* 主体 */}
       <div className="main">
         {/* 侧边栏（大纲） */}
@@ -214,7 +299,7 @@ export default function App(): JSX.Element {
         {/* 编辑区（主角，接入 Milkdown WYSIWYG 编辑器） */}
         <main className="editor-wrap">
           <div className="editor-inner">
-            <MarkdownEditor initialValue={DEFAULT_DOC} onChange={handleChange} onReady={handleReady} />
+            <MarkdownEditor initialValue={activeTab?.content ?? ''} onChange={handleChange} onReady={handleReady} />
           </div>
         </main>
       </div>
