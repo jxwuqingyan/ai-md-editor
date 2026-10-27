@@ -4,6 +4,13 @@
 
 ## 0.6.0 - 2026-10-27
 
+### M5：打包配置与图标
+
+- 补齐打包配置：固定 electron 版本（45.0.0）、补 author/description 字段
+- 生成应用图标：手绘 SVG 图标 → icon.png/icon.icns（圆角蓝底 + 白色 M 字标）
+- electron-builder 配置完善：buildResources 目录、dmg 内容布局（应用 + Applications 链接）
+- 更新 README：项目简介、特性、技术栈、目录结构、开发/打包说明
+
 ### M4：源码/渲染模式切换
 
 - 新增视图模式切换：wysiwyg（Milkdown 所见即所得）与 source（源码 textarea）
