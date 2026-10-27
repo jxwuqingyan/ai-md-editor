@@ -4,6 +4,7 @@ import { extractOutline } from '@ai-md-editor/markdown-core';
 import type { EditorInstance } from '@ai-md-editor/editor';
 import MarkdownEditor from './MarkdownEditor';
 import Tabs, { type Tab } from './Tabs';
+import RecentFiles from './RecentFiles';
 
 /** 默认文档内容 */
 const DEFAULT_DOC = `# MarkdownNote
@@ -169,6 +170,17 @@ export default function App(): JSX.Element {
     if (result.canceled || !result.path || result.content === null) return;
     openFileContent(result.path, result.name ?? '未命名.md', result.content);
   }, [openFileContent]);
+
+  /** 打开最近文件列表中的某个文件 */
+  const handleOpenRecent = useCallback(
+    async (file: { path: string; name: string }) => {
+      const result = await window.api.openPath(file.path);
+      if (!result.canceled && result.path && result.content !== null) {
+        openFileContent(result.path, result.name ?? file.name, result.content);
+      }
+    },
+    [openFileContent]
+  );
 
   /** 保存活动标签：有路径直接写，无路径则另存为 */
   const handleSave = useCallback(async () => {
@@ -340,6 +352,7 @@ export default function App(): JSX.Element {
         <button className="icon-btn" onClick={() => void handleOpen()} title="打开文件 (Cmd/Ctrl+O)">
           打开
         </button>
+        <RecentFiles onSelect={(file) => void handleOpenRecent(file)} />
         <button className="icon-btn" onClick={() => void handleSave()} title="保存 (Cmd/Ctrl+S)">
           保存
         </button>

@@ -183,6 +183,62 @@ body {
   color: var(--text-primary);
 }
 
+/* ============ 最近文件下拉菜单 ============ */
+.recent-wrap {
+  position: relative;
+}
+
+.recent-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 260px;
+  max-width: 360px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  padding: 4px;
+}
+
+.recent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 150ms var(--ease-out);
+}
+
+.recent-item:hover {
+  background: var(--bg-hover);
+}
+
+.recent-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.recent-path {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recent-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
 /* ============ 主体布局 ============ */
 .main {
   display: flex;
