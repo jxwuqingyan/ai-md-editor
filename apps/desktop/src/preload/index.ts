@@ -14,11 +14,6 @@ import { IpcChannel } from '@ai-md-editor/shared';
  * 文件操作均通过 ipcRenderer.invoke 走主进程，渲染进程无直接文件系统权限。
  */
 const api = {
-  /** 应用版本号 */
-  getVersion: (): string => process.env['npm_package_version'] ?? '0.1.0',
-  /** 当前平台（darwin / win32） */
-  getPlatform: (): string => process.platform,
-
   /** 打开文件对话框，返回选中的文件路径与内容 */
   openFile: (): Promise<OpenFileResult> => ipcRenderer.invoke(IpcChannel.OpenFile),
 

@@ -49,14 +49,25 @@ npm run dev
 # 构建产物
 npm run build
 
-# 打包（macOS dmg / Windows nsis）
-npm run dist
+# 打包（本地）
+cd apps/desktop
+npx electron-builder --mac --arm64      # macOS Apple Silicon (arm64) dmg
+# Windows x64 安装包需在 Windows 环境或 CI 中打包
 ```
 
 > 国内环境下载 Electron 二进制较慢，可设置镜像：
 > ```bash
 > export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
 > ```
+
+## 打包与分发
+
+- **本地打包**：macOS 本机只打 `arm64` dmg（Apple Silicon）；Windows x64 安装包由 CI 打包
+- **CI 自动打包**：推送 `main` 或打 `v*` tag 时，GitHub Actions 自动产出三架构：
+  - macOS x64（Intel）dmg
+  - macOS arm64（Apple Silicon）dmg
+  - Windows x64 安装包（nsis exe）
+- 打 `v*` tag 时自动创建 GitHub Release 并上传所有产物
 
 ## 版本
 

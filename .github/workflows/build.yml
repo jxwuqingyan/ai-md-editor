@@ -1,0 +1,100 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }} ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS x64（Intel）
+          - os: macos-13
+            arch: x64
+            target: mac
+          # macOS arm64（Apple Silicon）
+          - os: macos-14
+            arch: arm64
+            target: mac
+          # Windows x64
+          - os: windows-latest
+            arch: x64
+            target: win
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        # 国内镜像加速 Electron 二进制下载，避免 CI 超时
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        run: npm install
+
+      - name: 构建渲染/主进程产物
+        run: npm run build
+
+      - name: 打包（macOS）
+        if: matrix.target == 'mac'
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          # macOS 打包需跳过签名（无证书），否则 CI 会失败
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          cd apps/desktop
+          npx electron-builder --mac --${{ matrix.arch }} --publish never
+
+      - name: 打包（Windows）
+        if: matrix.target == 'win'
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        run: |
+          cd apps/desktop
+          npx electron-builder --win --x64 --publish never
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: markdownnote-${{ matrix.target }}-${{ matrix.arch }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+          if-no-files-found: warn
+
+  # 发布到 Release（仅在打 tag 时触发）
+  release:
+    name: 发布 Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载所有产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.exe
+          draft: false
+          generate_release_notes: true

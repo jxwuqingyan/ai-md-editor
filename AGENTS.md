@@ -28,34 +28,38 @@
 
 | 层 | 选型 |
 |----|------|
-| 应用框架 | Electron + React 18 + TypeScript |
-| 编辑器内核 | Milkdown（ProseMirror + remark） |
-| 构建 | Vite + electron-builder + pnpm（Monorepo） |
-| 动效 | Motion (Framer Motion) |
+| 应用框架 | Electron 45 + React 18 + TypeScript |
+| 编辑器内核 | Milkdown 7（ProseMirror + remark，`@milkdown/kit` 统一入口） |
+| 构建 | Vite（electron-vite）+ electron-builder + npm workspaces（Monorepo） |
+| 动效 | Motion (Framer Motion)（v1.1 引入） |
 | 数学公式 | KaTeX（v1.1） |
 | 图表 | Mermaid + ZenUML（v1.1） |
-| 代码高亮 | Shiki |
-| 搜索 | ripgrep |
+| 代码高亮 | Shiki（v1.1） |
+| 搜索 | ripgrep（v1.2） |
 
 > ⚠️ 本项目**不是** Python/FastAPI/Vue 后端项目，不使用 MVC 后端目录结构、不用 MySQL/Redis/DashScope。不要套用后端约定。
+
+> 注：已从 pnpm 迁移到 npm workspaces（2026-10-25），依赖安装用 `npm install`。
 
 ## 5. 项目目录结构（Monorepo）
 
 ```
 ai-md-editor/
 ├── apps/
-│   └── desktop/              # Electron 主进程 + 打包配置
-│       ├── main/             # 主进程（窗口/菜单/IPC/文件服务）
-│       ├── preload/          # preload 桥接（contextBridge）
-│       └── build/            # electron-builder 配置
+│   └── desktop/              # Electron 桌面端
+│       ├── src/main/         # 主进程（窗口、IPC、文件 I/O、最近文件）
+│       ├── src/preload/      # preload 桥接（contextBridge 白名单 API）
+│       ├── src/renderer/     # 渲染进程（React + Milkdown）
+│       ├── build/            # 应用图标（icon.svg/png/icns）
+│       └── electron-builder.config.ts  # 打包配置
 ├── packages/
-│   ├── editor/               # Milkdown 编辑器封装
+│   ├── editor/               # Milkdown 编辑器封装（createEditor）
 │   ├── markdown-core/        # 解析/序列化/大纲（纯函数）
-│   ├── theme/                # 主题系统
-│   └── shared/               # 共享类型与工具
+│   ├── theme/                # 主题系统（design tokens）
+│   └── shared/               # 跨进程共享类型（IPC 契约）
+├── .github/workflows/        # CI 打包（macOS x64+arm64 / Windows x64）
 ├── docs/                     # 文档（技术方案、设计规范）
-├── prototype/                # UI 原型
-└── package.json              # pnpm workspace
+└── package.json              # npm workspaces
 ```
 
 ## 6. 代码风格
@@ -115,10 +119,19 @@ ai-md-editor/
 | 4 | 中文输入法（IME）：需专项适配，M1 纳入 |
 | 5 | 编辑体验：WYSIWYG 所见即所得（Milkdown） |
 | 6 | 视觉：现代极简，动效用 Motion，去 AI 味 |
+| 7 | 包管理器：npm workspaces（已从 pnpm 迁移） |
+| 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
+| 9 | 分发：CI 打包 macOS（x64 + arm64）dmg + Windows x64 安装包 |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
 
-## 13. 参考文档
+## 13. 开发交付约定（用户明确要求，必须遵守）
+
+1. **测试**：每完成一个功能，都必须做一遍测试（类型检查 `tsc --noEmit` + 构建 `npm run build` + 功能验证）。受沙箱限制无法跑 GUI 时，明确告知用户需在系统终端验证的具体步骤。
+2. **文档同步**：开发功能的同时，同步更新 `README.md`（项目说明）与 `AGENTS.md`（协作规范），不得等到最后一次性补。
+3. **CI 打包**：仓库需配置 GitHub Actions workflow，自动打包 **macOS（x64 与 arm64 两种架构的 dmg）** 与 **Windows（x64 安装包）**。
+
+## 14. 参考文档
 
 - `docs/技术方案文档.md` — 完整技术方案（架构/模块/WYSIWYG 方案/里程碑/风险）
 - `docs/UI-UX设计规范.md` — UI/UX 设计规范（原则/去 AI 味清单/design tokens/动效/检查清单）
