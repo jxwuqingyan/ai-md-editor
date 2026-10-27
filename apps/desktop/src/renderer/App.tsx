@@ -131,24 +131,28 @@ export default function App(): JSX.Element {
     });
   }, []);
 
-  /** 打开文件：新建/复用标签载入内容 */
-  const handleOpen = useCallback(async () => {
-    const result = await window.api.openFile();
-    if (result.canceled || !result.path || result.content === null) return;
-    const name = result.name ?? '未命名.md';
+  /** 打开文件内容（新建/复用标签），供对话框、拖拽、open-file 事件复用 */
+  const openFileContent = useCallback((path: string, name: string, content: string) => {
     // 若已有相同路径的标签，直接切换到它
-    const existing = tabsRef.current.find((t) => t.path === result.path);
+    const existing = tabsRef.current.find((t) => t.path === path);
     if (existing) {
       setActiveId(existing.id);
       editorRef.current?.setMarkdown(existing.content);
       return;
     }
     // 否则新建标签载入内容
-    const tab = createTab(name, result.content, result.path);
+    const tab = createTab(name, content, path);
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
-    editorRef.current?.setMarkdown(result.content);
+    editorRef.current?.setMarkdown(content);
   }, []);
+
+  /** 打开文件：弹出对话框选择文件 */
+  const handleOpen = useCallback(async () => {
+    const result = await window.api.openFile();
+    if (result.canceled || !result.path || result.content === null) return;
+    openFileContent(result.path, result.name ?? '未命名.md', result.content);
+  }, [openFileContent]);
 
   /** 保存活动标签：有路径直接写，无路径则另存为 */
   const handleSave = useCallback(async () => {
@@ -242,6 +246,64 @@ export default function App(): JSX.Element {
     window.addEventListener('paste', onPaste);
     return () => window.removeEventListener('paste', onPaste);
   }, [handlePaste]);
+
+  // 拖拽打开：把 .md 文件拖到窗口内打开
+  useEffect(() => {
+    const onDragOver = (event: DragEvent): void => {
+      // 有文件拖入时阻止默认（否则会导航到文件）
+      if (event.dataTransfer?.types.includes('Files')) {
+        event.preventDefault();
+      }
+    };
+    const onDrop = (event: DragEvent): void => {
+      const files = event.dataTransfer?.files;
+      if (!files || files.length === 0) return;
+      event.preventDefault();
+      const file = files[0];
+      const filePath = (file as File & { path?: string }).path;
+      // Electron 的 File 对象带 path 属性（拖拽的文件）
+      if (filePath) {
+        void (async () => {
+          const result = await window.api.openPath(filePath);
+          if (!result.canceled && result.path && result.content !== null) {
+            openFileContent(result.path, result.name ?? '未命名.md', result.content);
+          }
+        })();
+      }
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [openFileContent]);
+
+  // 监听主进程的 open-file 事件（拖到 Dock 图标 / Finder 打开方式）
+  useEffect(() => {
+    const off = window.api.onOpenFile((filePath) => {
+      void (async () => {
+        const result = await window.api.openPath(filePath);
+        if (!result.canceled && result.path && result.content !== null) {
+          openFileContent(result.path, result.name ?? '未命名.md', result.content);
+        }
+      })();
+    });
+    return off;
+  }, [openFileContent]);
+
+  // 自动保存：编辑内容变化后防抖 1.5s 自动写入（仅当标签有路径且 dirty）
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      if (tab && tab.path && tab.dirty) {
+        void window.api.writeFile(tab.path, tab.content).then(() => {
+          setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, dirty: false } : t)));
+        });
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [tabs]);
 
   // 统计信息（基于活动标签内容）
   const stats = useMemo(() => {

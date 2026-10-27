@@ -7,8 +7,10 @@
   "include": [
     "src/renderer/**/*",
     "src/renderer/**/*.tsx",
+    "src/preload/**/*",
     "../../packages/theme/src/**/*",
     "../../packages/markdown-core/src/**/*",
-    "../../packages/editor/src/**/*"
+    "../../packages/editor/src/**/*",
+    "../../packages/shared/src/**/*"
   ]
 }

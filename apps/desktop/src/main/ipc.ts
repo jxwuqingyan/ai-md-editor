@@ -11,9 +11,11 @@ import type {
   OpenFileResult,
   SaveFileResult,
   SaveImageInput,
-  SaveImageResult
+  SaveImageResult,
+  RecentFile
 } from '@ai-md-editor/shared';
 import { IpcChannel } from '@ai-md-editor/shared';
+import { getRecent, addRecent } from './recent';
 
 /** Markdown 文件扩展名过滤 */
 const MD_FILTERS = [
@@ -23,6 +25,7 @@ const MD_FILTERS = [
 
 /**
  * 打开文件对话框，读取选中的 Markdown 文件内容。
+ * 打开成功后记录到最近文件。
  */
 async function handleOpenFile(win: BrowserWindow | null): Promise<OpenFileResult> {
   const options = {
@@ -34,9 +37,25 @@ async function handleOpenFile(win: BrowserWindow | null): Promise<OpenFileResult
     return { canceled: true, path: null, name: null, content: null };
   }
   const filePath = result.filePaths[0];
-  // 以 UTF-8 读取；后续可扩展编码检测（GBK 等）
   const content = await readFile(filePath, 'utf-8');
-  return { canceled: false, path: filePath, name: basename(filePath), content };
+  const name = basename(filePath);
+  await addRecent(filePath, name);
+  return { canceled: false, path: filePath, name, content };
+}
+
+/**
+ * 打开指定路径的文件（供拖拽打开使用）。
+ * 读取内容并记录最近文件。
+ */
+async function handleOpenPath(_win: BrowserWindow | null, filePath: string): Promise<OpenFileResult> {
+  try {
+    const content = await readFile(filePath, 'utf-8');
+    const name = basename(filePath);
+    await addRecent(filePath, name);
+    return { canceled: false, path: filePath, name, content };
+  } catch {
+    return { canceled: true, path: null, name: null, content: null };
+  }
 }
 
 /**
@@ -114,6 +133,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.OpenFile, (event) =>
     handleOpenFile(BrowserWindow.fromWebContents(event.sender))
   );
+  ipcMain.handle(IpcChannel.OpenPath, (event, filePath: string) =>
+    handleOpenPath(BrowserWindow.fromWebContents(event.sender), filePath)
+  );
   ipcMain.handle(IpcChannel.SaveFileAs, (event, content: string, defaultName: string) =>
     handleSaveFileAs(BrowserWindow.fromWebContents(event.sender), content, defaultName)
   );
@@ -126,4 +148,6 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.SaveImage, (event, input: SaveImageInput) =>
     handleSaveImage(BrowserWindow.fromWebContents(event.sender), input)
   );
+  ipcMain.handle(IpcChannel.GetRecent, (): RecentFile[] => getRecent());
+  ipcMain.handle(IpcChannel.AddRecent, (_event, path: string, name: string) => addRecent(path, name));
 }

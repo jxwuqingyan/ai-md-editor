@@ -14,7 +14,13 @@ export const IpcChannel = {
   /** 写入内容到指定路径 */
   WriteFile: 'file:write',
   /** 保存粘贴的图片到 assets 目录（返回相对路径） */
-  SaveImage: 'image:save'
+  SaveImage: 'image:save',
+  /** 读取最近文件列表 */
+  GetRecent: 'recent:get',
+  /** 添加一条最近文件记录 */
+  AddRecent: 'recent:add',
+  /** 通过系统对话框打开文件并返回内容（供拖拽/菜单复用） */
+  OpenPath: 'file:open-path'
 } as const;
 
 /** 应用基础信息 */
@@ -31,6 +37,16 @@ export interface DocMeta {
   name: string;
   /** 最近修改时间戳（毫秒） */
   modifiedAt: number;
+}
+
+/** 最近文件条目 */
+export interface RecentFile {
+  /** 绝对路径 */
+  path: string;
+  /** 文件名 */
+  name: string;
+  /** 最近打开时间戳（毫秒） */
+  openedAt: number;
 }
 
 /** 打开文件的结果 */
