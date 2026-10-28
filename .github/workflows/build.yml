@@ -47,6 +47,24 @@ jobs:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
         run: npm ci
 
+      - name: 确保 7zip-bin 二进制存在
+        # npm ci 偶发漏装 7zip-bin 的平台二进制（7za），导致 electron-builder 打包时报
+        # "ENOENT ... chmod '.../node_modules/7zip-bin/.../7za'"。
+        # 本地 npm install 正常，仅 CI 的 npm ci 会中招，故此处兜底重装并赋予执行权限。
+        shell: bash
+        run: |
+          if [ "${{ matrix.target }}" = "mac" ]; then
+            BIN="node_modules/7zip-bin/mac/${{ matrix.arch }}/7za"
+          else
+            BIN="node_modules/7zip-bin/win/${{ matrix.arch }}/7za.exe"
+          fi
+          if [ ! -f "$BIN" ]; then
+            echo "7zip-bin 二进制缺失，重装..."
+            rm -rf node_modules/7zip-bin
+            npm install --no-save 7zip-bin
+          fi
+          chmod -R +x node_modules/7zip-bin 2>/dev/null || true
+
       - name: 构建渲染/主进程产物
         run: npm run build
 
