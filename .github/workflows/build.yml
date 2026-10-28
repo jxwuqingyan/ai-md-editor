@@ -41,10 +41,11 @@ jobs:
           cache: npm
 
       - name: 安装依赖
-        # 国内镜像加速 Electron 二进制下载，避免 CI 超时
+        # npm 包从官方 registry 下载（package-lock 已指向 npmjs）；
+        # Electron 二进制单独走国内镜像加速，避免下载超时
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
-        run: npm install
+        run: npm ci
 
       - name: 构建渲染/主进程产物
         run: npm run build
@@ -53,7 +54,7 @@ jobs:
         if: matrix.target == 'mac'
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
-          # macOS 打包需跳过签名（无证书），否则 CI 会失败
+          # macOS 打包跳过签名（无证书），否则 CI 会失败
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: |
           cd apps/desktop
@@ -63,9 +64,11 @@ jobs:
         if: matrix.target == 'win'
         env:
           ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+          # Windows 打包跳过签名
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: |
           cd apps/desktop
-          npx electron-builder --win --x64 --publish never
+          npx electron-builder --win --${{ matrix.arch }} --publish never
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
@@ -88,6 +91,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          merge-multiple: true
 
       - name: 创建 Release
         uses: softprops/action-gh-release@v2
