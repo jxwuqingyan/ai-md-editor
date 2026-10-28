@@ -31,6 +31,40 @@ export interface ThemeTokens {
   accent: string;
   /** 强调色浅底 */
   accentSubtle: string;
+  /** 代码块语法高亮配色（Shiki CSS 变量主题的 token 颜色） */
+  syntax: SyntaxTokens;
+}
+
+/** 代码块语法高亮 token 配色（Shiki 用 var(--s-*) 引用这些值） */
+export interface SyntaxTokens {
+  /** 代码默认前景色 */
+  foreground: string;
+  /** 代码块背景色 */
+  background: string;
+  /** 关键字（const/let/return/if...） */
+  keyword: string;
+  /** 字符串 */
+  string: string;
+  /** 注释 */
+  comment: string;
+  /** 函数名 */
+  function: string;
+  /** 常量/数字 */
+  constant: string;
+  /** 参数/变量 */
+  parameter: string;
+  /** 标点 */
+  punctuation: string;
+  /** 链接 */
+  link: string;
+  /** 字符串内插值表达式 */
+  stringExpression: string;
+  /** 新增行（diff） */
+  inserted: string;
+  /** 删除行（diff） */
+  deleted: string;
+  /** 变更行（diff） */
+  changed: string;
 }
 
 /** 明亮主题（默认） */
@@ -45,7 +79,23 @@ export const lightTokens: ThemeTokens = {
   textSecondary: '#666666',
   textTertiary: '#999999',
   accent: '#2563eb',
-  accentSubtle: 'rgba(37, 99, 235, 0.1)'
+  accentSubtle: 'rgba(37, 99, 235, 0.1)',
+  syntax: {
+    foreground: '#24292e',
+    background: '#f6f8fa',
+    keyword: '#d73a49',
+    string: '#032f62',
+    comment: '#6a737d',
+    function: '#6f42c1',
+    constant: '#005cc5',
+    parameter: '#24292e',
+    punctuation: '#24292e',
+    link: '#032f62',
+    stringExpression: '#032f62',
+    inserted: '#22863a',
+    deleted: '#b31d28',
+    changed: '#e36209'
+  }
 };
 
 /** 深色主题（值反转，强调色略调亮保证对比度） */
@@ -60,7 +110,23 @@ export const darkTokens: ThemeTokens = {
   textSecondary: '#9a9a9a',
   textTertiary: '#666666',
   accent: '#3b82f6',
-  accentSubtle: 'rgba(59, 130, 246, 0.14)'
+  accentSubtle: 'rgba(59, 130, 246, 0.14)',
+  syntax: {
+    foreground: '#e1e4e8',
+    background: '#161b22',
+    keyword: '#ff7b72',
+    string: '#a5d6ff',
+    comment: '#8b949e',
+    function: '#d2a8ff',
+    constant: '#79c0ff',
+    parameter: '#e1e4e8',
+    punctuation: '#e1e4e8',
+    link: '#a5d6ff',
+    stringExpression: '#a5d6ff',
+    inserted: '#3fb950',
+    deleted: '#ffa198',
+    changed: '#d29922'
+  }
 };
 
 /** 主题注册表 */
@@ -85,7 +151,22 @@ export function tokensToCssVars(tokens: ThemeTokens): Record<string, string> {
     '--text-secondary': tokens.textSecondary,
     '--text-tertiary': tokens.textTertiary,
     '--accent': tokens.accent,
-    '--accent-subtle': tokens.accentSubtle
+    '--accent-subtle': tokens.accentSubtle,
+    // 代码块语法高亮（Shiki CSS 变量主题引用 --s-*）
+    '--s-foreground': tokens.syntax.foreground,
+    '--s-background': tokens.syntax.background,
+    '--s-token-keyword': tokens.syntax.keyword,
+    '--s-token-string': tokens.syntax.string,
+    '--s-token-comment': tokens.syntax.comment,
+    '--s-token-function': tokens.syntax.function,
+    '--s-token-constant': tokens.syntax.constant,
+    '--s-token-parameter': tokens.syntax.parameter,
+    '--s-token-punctuation': tokens.syntax.punctuation,
+    '--s-token-link': tokens.syntax.link,
+    '--s-token-string-expression': tokens.syntax.stringExpression,
+    '--s-token-inserted': tokens.syntax.inserted,
+    '--s-token-deleted': tokens.syntax.deleted,
+    '--s-token-changed': tokens.syntax.changed
   };
   return map;
 }

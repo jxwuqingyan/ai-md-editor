@@ -398,7 +398,7 @@ body {
 }
 
 .milkdown-container .ProseMirror pre {
-  background: var(--bg-subtle);
+  background: var(--s-background, var(--bg-subtle));
   border-radius: var(--radius-md);
   padding: 12px 16px;
   margin: 0.8em 0;

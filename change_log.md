@@ -4,6 +4,14 @@
 
 ## 0.6.0 - 2026-10-27
 
+### v1.1 引入：代码块语法高亮（Shiki）
+
+- 接入 `@milkdown/plugin-highlight` + Shiki 4.x，代码块按语言高亮
+- 用 Shiki CSS 变量主题：token 颜色输出为 `var(--s-token-*)`，明暗切换零成本（无需重建编辑器）
+- 主题系统新增 `syntax` token 集（GitHub Light / Dark 配色），`tokensToCssVars` 输出 `--s-*` 变量
+- 支持 28 种常用语言（JS/TS/JSX/Python/Go/Rust/Java/C/C++/Shell/SQL/YAML/Docker 等）
+- 代码块背景跟随 `--s-background`，明暗主题自动适配
+
 ### M5 补充：图片光标处插入 + 大纲点击跳转 + 最近文件 UI
 
 - 图片光标处插入：粘贴图片时在光标位置插入 markdown 图片语法（原为追加文档末尾）

@@ -17,6 +17,9 @@ interface MarkdownEditorProps {
  *
  * 中文 IME 适配：Milkdown（ProseMirror）已内置 composition 事件处理，
  * 拼音组合输入期间不会触发 markdown 解析，此处无需额外干预。
+ *
+ * 代码高亮主题：Shiki 用 CSS 变量主题，token 颜色为 var(--s-*)，
+ * 明暗切换由全局 CSS 变量驱动，无需重建编辑器。
  */
 export default function MarkdownEditor({
   initialValue,
@@ -37,7 +40,7 @@ export default function MarkdownEditor({
 
     let disposed = false;
 
-    // 异步创建编辑器（Milkdown 的 create 是异步的）
+    // 异步创建编辑器（Milkdown 的 create 是异步的，Shiki 高亮器也需要异步加载）
     void createEditor(container, {
       defaultValue: initialValue,
       onChange: (markdown) => {

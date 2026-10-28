@@ -19,6 +19,41 @@ import {
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
+import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight';
+import { createParser } from '@milkdown/plugin-highlight/shiki';
+import { createCssVariablesTheme, getSingletonHighlighter } from 'shiki';
+
+/** Shiki 支持的常用语言（按需加载，避免体积过大） */
+const HIGHLIGHT_LANGS = [
+  'javascript',
+  'typescript',
+  'jsx',
+  'tsx',
+  'json',
+  'html',
+  'css',
+  'scss',
+  'python',
+  'go',
+  'rust',
+  'java',
+  'c',
+  'cpp',
+  'csharp',
+  'bash',
+  'shell',
+  'sql',
+  'yaml',
+  'toml',
+  'markdown',
+  'docker',
+  'diff',
+  'xml',
+  'php',
+  'ruby',
+  'swift',
+  'kotlin'
+];
 
 /** 编辑器实例的统一接口（供渲染层调用） */
 export interface EditorInstance {
@@ -58,11 +93,37 @@ export async function createEditor(
   // 缓存最新的 Markdown 文本（由 markdownUpdated 回调更新）
   let currentMarkdown = defaultValue;
 
+  // 用 CSS 变量主题：token 颜色输出为 var(--s-token-xxx)，明暗切换只需改 CSS 变量，
+  // 无需重建编辑器或 parser（默认值取 GitHub Light 配色，dark 主题在 CSS 中覆盖）
+  const cssTheme = createCssVariablesTheme({
+    name: 'markdown-note',
+    variablePrefix: '--s-',
+    variableDefaults: {
+      foreground: '#24292e',
+      background: '#f6f8fa'
+    }
+  });
+
+  // 加载 Shiki 高亮器（单主题，语言按需加载）
+  const highlighter = await getSingletonHighlighter({
+    themes: [cssTheme],
+    langs: HIGHLIGHT_LANGS
+  });
+
+  // 创建高亮 parser
+  const highlightParser = createParser(highlighter);
+
   const editor = await Editor.make()
     // 配置挂载容器与初始内容
     .config((ctx) => {
       ctx.set(rootCtx, container);
       ctx.set(defaultValueCtx, defaultValue);
+    })
+    // 语法高亮：注入 CSS 变量主题的 parser
+    .config((ctx) => {
+      ctx.set(highlightPluginConfig.key, {
+        parser: highlightParser
+      });
     })
     // 监听器：在内容变化时同步缓存并触发回调
     .use(listener)
@@ -78,6 +139,8 @@ export async function createEditor(
     .use(commonmark)
     // GFM 扩展（表格、任务列表、删除线、自动链接等）
     .use(gfm)
+    // 代码块语法高亮（Shiki）
+    .use(highlight)
     .create();
 
   return {

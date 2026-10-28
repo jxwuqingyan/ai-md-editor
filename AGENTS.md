@@ -34,7 +34,7 @@
 | 动效 | Motion (Framer Motion)（v1.1 引入） |
 | 数学公式 | KaTeX（v1.1） |
 | 图表 | Mermaid + ZenUML（v1.1） |
-| 代码高亮 | Shiki（v1.1） |
+| 代码高亮 | Shiki（v1.1 已实现，`@milkdown/plugin-highlight` + CSS 变量主题） |
 | 搜索 | ripgrep（v1.2） |
 
 > ⚠️ 本项目**不是** Python/FastAPI/Vue 后端项目，不使用 MVC 后端目录结构、不用 MySQL/Redis/DashScope。不要套用后端约定。
