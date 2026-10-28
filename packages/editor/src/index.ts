@@ -26,6 +26,8 @@ export interface EditorInstance {
   getMarkdown(): string;
   /** 设置编辑器内容（替换全部） */
   setMarkdown(markdown: string): void;
+  /** 滚动到指定标题（大纲跳转），title 为标题文本 */
+  scrollToHeading(title: string): void;
   /** 销毁编辑器，释放资源 */
   destroy(): void;
 }
@@ -94,6 +96,28 @@ export async function createEditor(
         const tr = state.tr.replaceWith(0, state.doc.content.size, doc);
         view.dispatch(tr);
         currentMarkdown = markdown;
+      });
+    },
+
+    /** 滚动到指定标题（大纲跳转），按标题文本定位第一个匹配的标题节点 */
+    scrollToHeading(title: string): void {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        if (!view) return;
+        const { state } = view;
+        let found = false;
+        // 遍历文档节点，匹配标题节点且文本与目标一致
+        state.doc.descendants((node, pos) => {
+          if (found) return false;
+          if (node.type.name === 'heading' && node.textContent === title) {
+            found = true;
+            // 将标题滚动到可视区域顶部（带少量内边距），并聚焦编辑器
+            const dom = view.domAtPos(pos + 1).node as HTMLElement | null;
+            const el = dom?.parentElement;
+            el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            view.focus();
+          }
+        });
       });
     },
 

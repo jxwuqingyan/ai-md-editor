@@ -109,6 +109,25 @@ export default function App(): JSX.Element {
     setViewMode(next);
   }, []);
 
+  /** 大纲点击跳转：滚动编辑器到对应标题 */
+  const handleOutlineClick = useCallback((text: string) => {
+    // 源码模式下无编辑器实例，直接滚动源码 textarea 对应行
+    if (viewModeRef.current === 'source') {
+      const idx = outline.findIndex((i) => i.text === text);
+      if (idx >= 0) {
+        const targetLine = outline[idx].line;
+        const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
+        if (ta) {
+          // 估算行高，滚动到目标行
+          const lineHeight = 20;
+          ta.scrollTop = Math.max(0, (targetLine - 1) * lineHeight);
+        }
+      }
+      return;
+    }
+    editorRef.current?.scrollToHeading(text);
+  }, [outline]);
+
   /** 切换标签：载入目标标签内容到编辑器 */
   const handleSelectTab = useCallback((id: string) => {
     if (id === activeIdRef.current) return;
@@ -386,7 +405,15 @@ export default function App(): JSX.Element {
           <aside className="sidebar">
             <div className="sidebar-head">大纲</div>
             {outline.map((item) => (
-              <div key={item.line} className="outline-item" style={{ paddingLeft: 16 + (item.level - 1) * 14 }}>
+              <div
+                key={item.line}
+                className="outline-item"
+                style={{ paddingLeft: 16 + (item.level - 1) * 14 }}
+                onClick={() => handleOutlineClick(item.text)}
+                role="button"
+                tabIndex={0}
+                title={`跳转到「${item.text}」`}
+              >
                 {item.text}
               </div>
             ))}
