@@ -255,15 +255,27 @@ export default function App(): JSX.Element {
 
         const result = await window.api.saveImage({ data, extension, docDir });
         if (result.relativePath) {
-          // 简化实现：图片语法追加到文档末尾（后续优化为光标处插入）
-          const imgMarkdown = `\n\n![图片](${result.relativePath})\n`;
-          const newContent = tab ? tab.content + imgMarkdown : imgMarkdown;
-          if (tab) {
-            setTabs((prev) =>
-              prev.map((t) => (t.id === tab.id ? { ...t, content: newContent, dirty: true } : t))
-            );
+          const imgMarkdown = `![图片](${result.relativePath})`;
+          // 有编辑器实例（wysiwyg 模式）时在光标处插入；否则（源码模式）用当前选区插入
+          const editor = editorRef.current;
+          if (editor && viewModeRef.current === 'wysiwyg') {
+            editor.insertAtCursor(imgMarkdown);
+          } else {
+            // 源码模式：手动在 textarea 选区插入 markdown 图片语法
+            const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
+            const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+            if (ta && tab) {
+              const start = ta.selectionStart;
+              const end = ta.selectionEnd;
+              const next = tab.content.slice(0, start) + imgMarkdown + tab.content.slice(end);
+              setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, content: next, dirty: true } : t)));
+              // 光标定位到插入文本之后
+              requestAnimationFrame(() => {
+                ta.focus();
+                ta.setSelectionRange(start + imgMarkdown.length, start + imgMarkdown.length);
+              });
+            }
           }
-          editorRef.current?.setMarkdown(newContent);
         } else {
           console.error('图片保存失败:', result.error);
         }

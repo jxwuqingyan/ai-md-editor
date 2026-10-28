@@ -26,6 +26,8 @@ export interface EditorInstance {
   getMarkdown(): string;
   /** 设置编辑器内容（替换全部） */
   setMarkdown(markdown: string): void;
+  /** 在光标处插入 markdown 文本（如粘贴图片语法） */
+  insertAtCursor(markdown: string): void;
   /** 滚动到指定标题（大纲跳转），title 为标题文本 */
   scrollToHeading(title: string): void;
   /** 销毁编辑器，释放资源 */
@@ -96,6 +98,21 @@ export async function createEditor(
         const tr = state.tr.replaceWith(0, state.doc.content.size, doc);
         view.dispatch(tr);
         currentMarkdown = markdown;
+      });
+    },
+
+    /** 在光标处插入 markdown 文本（如粘贴图片语法），插入后光标落在文本末尾 */
+    insertAtCursor(markdown: string): void {
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const parser = ctx.get(parserCtx);
+        if (!view || !parser) return;
+        const { state } = view;
+        // 解析要插入的 markdown 片段为文档节点
+        const node = parser(markdown);
+        // 在光标位置（selection.from）替换空选区，即原地插入
+        const tr = state.tr.replaceWith(state.selection.from, state.selection.to, node);
+        view.dispatch(tr);
       });
     },
 
