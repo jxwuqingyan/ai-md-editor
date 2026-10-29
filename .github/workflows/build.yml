@@ -15,8 +15,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS x64（Intel）
-          - os: macos-13
+          # macOS x64（Intel）—— macos-13 已弃用（2025-12 下线），改用 macos-15-intel
+          - os: macos-15-intel
             arch: x64
             target: mac
           # macOS arm64（Apple Silicon）
