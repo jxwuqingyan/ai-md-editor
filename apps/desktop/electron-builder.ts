@@ -18,12 +18,10 @@ const config = {
   files: ['out/**/*', 'package.json'],
   mac: {
     target: ['dmg', 'zip'],
-    arch: ['arm64', 'x64'],
     category: 'public.app-category.productivity'
   },
   win: {
-    target: ['nsis', 'zip'],
-    arch: ['x64']
+    target: ['nsis', 'zip']
   },
   dmg: {
     title: 'MarkdownNote',
