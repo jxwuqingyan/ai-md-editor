@@ -1,0 +1,28 @@
+{
+  "appId": "com.markdownnote.app",
+  "productName": "MarkdownNote",
+  "directories": {
+    "output": "release",
+    "buildResources": "build"
+  },
+  "npmRebuild": false,
+  "files": ["out/**/*", "package.json"],
+  "mac": {
+    "target": ["dmg", "zip"],
+    "category": "public.app-category.productivity"
+  },
+  "win": {
+    "target": ["nsis", "zip"]
+  },
+  "dmg": {
+    "title": "MarkdownNote",
+    "contents": [
+      { "x": 130, "y": 220 },
+      { "x": 410, "y": 220, "type": "link", "path": "/Applications" }
+    ]
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  }
+}
