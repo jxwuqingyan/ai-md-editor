@@ -11,6 +11,10 @@ const config = {
     output: 'release',
     buildResources: 'build'
   },
+  // 所有第三方依赖（React/Milkdown/Shiki）均已被 electron-vite 打包进 out/，
+  // 无需在打包时重装 node_modules。跳过依赖重装可避免 npm 在 CI 上误删
+  // 7zip-bin 平台二进制（7za）导致的 "ENOENT chmod 7za" 打包失败。
+  npmRebuild: false,
   files: ['out/**/*', 'package.json'],
   mac: {
     target: ['dmg', 'zip'],

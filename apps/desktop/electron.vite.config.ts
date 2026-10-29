@@ -10,7 +10,10 @@ import { resolve } from 'node:path';
  */
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    // exclude 本地 workspace 包（@ai-md-editor/shared 等）使其内联打包，
+    // 这样 main 产物完全自包含，打包时无需复制 node_modules，
+    // 也避免 electron-builder 重装依赖时误删 7zip-bin 二进制。
+    plugins: [externalizeDepsPlugin({ exclude: ['@ai-md-editor/shared'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') }
@@ -18,7 +21,7 @@ export default defineConfig({
     }
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ['@ai-md-editor/shared'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/preload/index.ts') }
