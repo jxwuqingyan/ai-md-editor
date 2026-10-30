@@ -101,11 +101,14 @@ jobs:
             apps/desktop/release/*.exe
           if-no-files-found: warn
 
-      # 打 tag 时直接把安装包上传到 GitHub Release（不依赖 artifact，绕开存储配额）
+      # 打 tag 时直接把安装包上传到 GitHub Release（不依赖 artifact，绕开存储配额）。
+      # 注意：需要仓库 GITHUB_TOKEN 具备写 Release 权限（Settings → Actions →
+      # General → Workflow permissions → 选 "Read and write permissions"），否则报 403。
       - name: 上传安装包到 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             apps/desktop/release/*.dmg
             apps/desktop/release/*.zip
