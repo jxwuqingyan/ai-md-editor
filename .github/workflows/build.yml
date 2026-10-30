@@ -8,6 +8,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# 关键：显式声明写权限，否则 GITHUB_TOKEN 为只读，创建 Release 会 403
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build (${{ matrix.os }} ${{ matrix.arch }})
