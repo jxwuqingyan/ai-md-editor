@@ -106,8 +106,7 @@ jobs:
           if-no-files-found: warn
 
       # 打 tag 时直接把安装包上传到 GitHub Release（不依赖 artifact，绕开存储配额）。
-      # 注意：需要仓库 GITHUB_TOKEN 具备写 Release 权限（Settings → Actions →
-      # General → Workflow permissions → 选 "Read and write permissions"），否则报 403。
+      # 只发布三个安装包：macOS arm64 dmg、macOS x64 dmg、Windows x64 exe（不含 zip）。
       - name: 上传安装包到 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
@@ -115,7 +114,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             apps/desktop/release/*.dmg
-            apps/desktop/release/*.zip
             apps/desktop/release/*.exe
           draft: false
           generate_release_notes: true

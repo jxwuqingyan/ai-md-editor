@@ -8,11 +8,11 @@
   "npmRebuild": false,
   "files": ["out/**/*", "package.json"],
   "mac": {
-    "target": ["dmg", "zip"],
+    "target": ["dmg"],
     "category": "public.app-category.productivity"
   },
   "win": {
-    "target": ["nsis", "zip"]
+    "target": ["nsis"]
   },
   "dmg": {
     "title": "MarkdownNote",
