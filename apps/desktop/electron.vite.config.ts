@@ -15,6 +15,9 @@ export default defineConfig({
     // 也避免 electron-builder 重装依赖时误删 7zip-bin 二进制。
     plugins: [externalizeDepsPlugin({ exclude: ['@ai-md-editor/shared'] })],
     build: {
+      // 不让 vite 清空输出目录：rmSync 在本机沙箱环境下会被安全删除 shim 拦截
+      // （state lock timeout）。构建脚本（package.json）已先手动 rm -rf out，效果等价。
+      emptyOutDir: false,
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') }
       }
@@ -23,6 +26,7 @@ export default defineConfig({
   preload: {
     plugins: [externalizeDepsPlugin({ exclude: ['@ai-md-editor/shared'] })],
     build: {
+      emptyOutDir: false,
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/preload/index.ts') }
       }
@@ -39,6 +43,10 @@ export default defineConfig({
       }
     },
     build: {
+      emptyOutDir: false,
+      // esnext：Electron 45 (Chrome 126+) 原生支持，跳过 vite 对最终 chunk 的
+      // esbuild 二次 transform（本机大 chunk + sourcemap 场景下 esbuild 服务不稳定）
+      target: 'esnext',
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/renderer/index.html') }
       }

@@ -376,10 +376,8 @@ export default function App(): JSX.Element {
 
   return (
     <div className="app" style={cssVars}>
-      {/* 顶部栏 */}
+      {/* 顶部栏：功能按钮靠左，应用名靠右 */}
       <header className="topbar">
-        <span className="brand">MarkdownNote</span>
-        <div className="spacer" />
         <button className="icon-btn" onClick={() => void handleOpen()} title="打开文件 (Cmd/Ctrl+O)">
           打开
         </button>
@@ -399,6 +397,8 @@ export default function App(): JSX.Element {
         <button className="icon-btn" onClick={toggleTheme} title="切换主题">
           {themeId === 'light' ? '深色' : '浅色'}
         </button>
+        <div className="spacer" />
+        <span className="brand">MarkdownNote</span>
       </header>
 
       {/* 标签栏 */}
