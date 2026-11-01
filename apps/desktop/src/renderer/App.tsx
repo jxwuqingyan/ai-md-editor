@@ -122,24 +122,29 @@ export default function App(): JSX.Element {
     setViewMode(next);
   }, []);
 
-  /** 大纲点击跳转：滚动编辑器到对应标题 */
-  const handleOutlineClick = useCallback((text: string) => {
-    // 源码模式下无编辑器实例，直接滚动源码 textarea 对应行
-    if (viewModeRef.current === 'source') {
-      const idx = outline.findIndex((i) => i.text === text);
-      if (idx >= 0) {
-        const targetLine = outline[idx].line;
+  /** 大纲点击跳转：滚动编辑器到对应标题（同名标题按出现序号精确定位） */
+  const handleOutlineClick = useCallback(
+    (text: string, line: number) => {
+      // 计算该条目是同名标题中的第几个（0 起）
+      let occurrence = 0;
+      for (const item of outline) {
+        if (item.line === line) break;
+        if (item.text === text) occurrence += 1;
+      }
+      // 源码模式下无编辑器实例，直接滚动源码 textarea 对应行
+      if (viewModeRef.current === 'source') {
         const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
         if (ta) {
           // 估算行高，滚动到目标行
           const lineHeight = 20;
-          ta.scrollTop = Math.max(0, (targetLine - 1) * lineHeight);
+          ta.scrollTop = Math.max(0, (line - 1) * lineHeight);
         }
+        return;
       }
-      return;
-    }
-    editorRef.current?.scrollToHeading(text);
-  }, [outline]);
+      editorRef.current?.scrollToHeading(text, occurrence);
+    },
+    [outline]
+  );
 
   /** 切换标签：载入目标标签内容到编辑器 */
   const handleSelectTab = useCallback((id: string) => {
@@ -571,7 +576,7 @@ export default function App(): JSX.Element {
                         key={item.line}
                         className="outline-item"
                         style={{ paddingLeft: 16 + (item.level - 1) * 14 }}
-                        onClick={() => handleOutlineClick(item.text)}
+                        onClick={() => handleOutlineClick(item.text, item.line)}
                         role="button"
                         tabIndex={0}
                         title={`跳转到「${item.text}」`}

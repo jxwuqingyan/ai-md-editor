@@ -78,8 +78,8 @@ export interface EditorInstance {
   setMarkdown(markdown: string): void;
   /** 在光标处插入 markdown 文本（如粘贴图片语法） */
   insertAtCursor(markdown: string): void;
-  /** 滚动到指定标题（大纲跳转），title 为标题文本 */
-  scrollToHeading(title: string): void;
+  /** 滚动到指定标题（大纲跳转），title 为标题文本；occurrence 为同名标题序号（0 起），解决重复标题跳错位置 */
+  scrollToHeading(title: string, occurrence?: number): void;
   /** 应用格式化命令（工具栏用） */
   format(action: FormatAction, payload?: number | string): void;
   /** 聚焦编辑器 */
@@ -215,23 +215,27 @@ export async function createEditor(
       });
     },
 
-    /** 滚动到指定标题（大纲跳转），按标题文本定位第一个匹配的标题节点 */
-    scrollToHeading(title: string): void {
+    /** 滚动到指定标题（大纲跳转），按标题文本 + 同名序号定位（第 occurrence 个匹配的标题节点） */
+    scrollToHeading(title: string, occurrence = 0): void {
       editor.action((ctx) => {
         const view = ctx.get(editorViewCtx);
         if (!view) return;
         const { state } = view;
+        let seen = 0;
         let found = false;
-        // 遍历文档节点，匹配标题节点且文本与目标一致
+        // 遍历文档节点，匹配第 occurrence 个同名标题节点
         state.doc.descendants((node, pos) => {
           if (found) return false;
           if (node.type.name === 'heading' && node.textContent === title) {
-            found = true;
-            // 将标题滚动到可视区域顶部（带少量内边距），并聚焦编辑器
-            const dom = view.domAtPos(pos + 1).node as HTMLElement | null;
-            const el = dom?.parentElement;
-            el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            view.focus();
+            if (seen === occurrence) {
+              found = true;
+              // 将标题滚动到可视区域顶部（带少量内边距），并聚焦编辑器
+              const dom = view.domAtPos(pos + 1).node as HTMLElement | null;
+              const el = dom?.parentElement;
+              el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              view.focus();
+            }
+            seen += 1;
           }
         });
       });
