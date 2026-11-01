@@ -412,25 +412,50 @@ export default function App(): JSX.Element {
 
       {/* 主体 */}
       <div className="main">
-        {/* 侧边栏（大纲） */}
-        {sidebarOpen && (
-          <aside className="sidebar">
-            <div className="sidebar-head">大纲</div>
-            {outline.map((item) => (
-              <div
-                key={item.line}
-                className="outline-item"
-                style={{ paddingLeft: 16 + (item.level - 1) * 14 }}
-                onClick={() => handleOutlineClick(item.text)}
-                role="button"
-                tabIndex={0}
-                title={`跳转到「${item.text}」`}
-              >
-                {item.text}
+        {/* 侧边栏（文档结构/大纲），支持收缩 */}
+        <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
+          {sidebarOpen ? (
+            <>
+              <div className="sidebar-head">
+                <span>文档结构</span>
+                <button
+                  className="sidebar-toggle"
+                  onClick={() => setSidebarOpen(false)}
+                  title="收起侧栏"
+                >
+                  ‹
+                </button>
               </div>
-            ))}
-          </aside>
-        )}
+              <div className="outline-list">
+                {outline.length === 0 ? (
+                  <div className="outline-empty">暂无标题</div>
+                ) : (
+                  outline.map((item) => (
+                    <div
+                      key={item.line}
+                      className="outline-item"
+                      style={{ paddingLeft: 16 + (item.level - 1) * 14 }}
+                      onClick={() => handleOutlineClick(item.text)}
+                      role="button"
+                      tabIndex={0}
+                      title={`跳转到「${item.text}」`}
+                    >
+                      {item.text}
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <button
+              className="sidebar-collapsed-bar"
+              onClick={() => setSidebarOpen(true)}
+              title="展开侧栏"
+            >
+              ›
+            </button>
+          )}
+        </aside>
 
         {/* 编辑区（主角）：wysiwyg 用 Milkdown，source 用源码 textarea */}
         <main className="editor-wrap">
