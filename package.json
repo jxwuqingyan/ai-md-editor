@@ -1,6 +1,6 @@
 {
   "name": "ai-md-editor",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "private": true,
   "description": "对标 Typora 的跨平台 Markdown 编辑器与预览器（纯本地，WYSIWYG）",
   "license": "MIT",

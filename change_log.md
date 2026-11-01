@@ -2,7 +2,35 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
-## Unreleased - 2026-10-31
+## Unreleased - 2026-11-01
+
+### 五项功能开发（对标 Typora）
+
+#### 功能1：文件树 / 文件管理器
+
+- 新增左侧「文件」面板：浏览目录、懒加载展开/折叠、点击打开 `.md/.markdown/.txt` 文件
+- 主进程新增 `handleReadDir`（readdir + withFileTypes，过滤隐藏文件/node_modules，目录优先排序）与 `handleChooseFolder`（showOpenDialog openDirectory）
+- 打开文件时自动将文件树定位到该文件所在目录
+
+#### 功能2：底部常用工具栏
+
+- 新增 `Toolbar.tsx` 底部浮动工具栏：段落下拉（正文/H1-H4/引用/代码块）、加粗/斜体/行内代码/链接/图片/引用/无序列表、更多菜单（有序列表/分割线）
+- wysiwyg 模式走 `editor.format`（callCommand 分发），源码模式走选区降级
+
+#### 功能3：导出 PDF / HTML / Word
+
+- 新增 `export.ts`：`buildHtml`（marked 渲染 + 内联样式单文件）、`exportHtml`、`exportWord`（加 Word ProgId meta）、`exportPdf`（隐藏窗口 + printToPDF，A4）
+- 顶栏「导出」下拉菜单：HTML / PDF / Word 三种格式
+
+#### 功能4：数学公式（LaTeX）
+
+- 接入 `@milkdown/plugin-math` + KaTeX，支持 `$行内$` 与 `$$块级$$`
+- 引入 `katex.min.css` 样式
+
+#### 功能5：Mermaid 图表
+
+- 接入 `@milkdown/plugin-diagram`（7.7.0）+ mermaid（10.9.0），```` ```mermaid ```` 代码块渲染为 SVG
+- 编辑器新增 `diagram` 插件，与 `math` 同签名（`MilkdownPlugin[]`）
 
 ### 顶栏布局调整
 
