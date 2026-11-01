@@ -6,6 +6,7 @@ import MarkdownEditor from './MarkdownEditor';
 import Tabs, { type Tab } from './Tabs';
 import RecentFiles from './RecentFiles';
 import FileTree from './FileTree';
+import Toolbar from './Toolbar';
 
 /** 默认文档内容 */
 const DEFAULT_DOC = `# MarkdownNote
@@ -61,6 +62,8 @@ export default function App(): JSX.Element {
   const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
   // 视图模式：wysiwyg（所见即所得）| source（源码）
   const [viewMode, setViewMode] = useState<'wysiwyg' | 'source'>('wysiwyg');
+  // 编辑器实例就绪标记（驱动工具栏拿到非 null 的 editor 引用）
+  const [editorReady, setEditorReady] = useState(false);
 
   // 编辑器实例引用（通过 onReady 获取）
   const editorRef = useRef<EditorInstance | null>(null);
@@ -95,6 +98,7 @@ export default function App(): JSX.Element {
   // 编辑器就绪回调：保存实例引用
   const handleReady = useCallback((instance: EditorInstance) => {
     editorRef.current = instance;
+    setEditorReady(true);
   }, []);
 
   // 切换主题
@@ -109,6 +113,7 @@ export default function App(): JSX.Element {
       // 渲染 → 源码：清空编辑器实例引用（MarkdownEditor 即将卸载销毁实例）
       // 源码 textarea 是受控的，直接绑定 activeTab.content
       editorRef.current = null;
+      setEditorReady(false);
     }
     // 源码 → 渲染：MarkdownEditor 重新挂载时用 initialValue（activeTab.content）初始化，无需手动 setMarkdown
     setViewMode(next);
@@ -383,6 +388,56 @@ export default function App(): JSX.Element {
     return () => clearTimeout(timer);
   }, [tabs]);
 
+  /** 源码模式：在 textarea 选区前后包裹语法 */
+  const handleSourceWrap = useCallback((before: string, after: string) => {
+    const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (!ta || !tab) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const selected = tab.content.slice(start, end);
+    const next = tab.content.slice(0, start) + before + selected + after + tab.content.slice(end);
+    setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, content: next, dirty: true } : t)));
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(start + before.length, start + before.length + selected.length);
+    });
+  }, []);
+
+  /** 源码模式：给选区所在行加前缀（标题/引用/列表），空 prefix 表示转正文 */
+  const handleSourceLinePrefix = useCallback((prefix: string) => {
+    const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (!ta || !tab) return;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    // 找到受影响行的起止
+    const lineStart = tab.content.lastIndexOf('\n', start - 1) + 1;
+    let lineEnd = tab.content.indexOf('\n', end);
+    if (lineEnd === -1) lineEnd = tab.content.length;
+    // 去掉已有行前缀（标题/引用/列表）再统一加新前缀
+    const lines = tab.content.slice(lineStart, lineEnd).split('\n');
+    const replaced = lines
+      .map((line) => {
+        const stripped = line.replace(/^(#{1,6}\s|>\s|[-*]\s|\d+\.\s)/, '');
+        return prefix ? prefix + stripped : stripped;
+      })
+      .join('\n');
+    const next = tab.content.slice(0, lineStart) + replaced + tab.content.slice(lineEnd);
+    setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, content: next, dirty: true } : t)));
+    requestAnimationFrame(() => ta.focus());
+  }, []);
+
+  /** 工具栏插入图片：插入占位语法（图片粘贴已有完整链路） */
+  const handleToolbarImage = useCallback(() => {
+    if (viewModeRef.current === 'wysiwyg' && editorRef.current) {
+      editorRef.current.insertAtCursor('![图片](url)');
+      editorRef.current.focus();
+    } else {
+      handleSourceWrap('![图片](', ')');
+    }
+  }, [handleSourceWrap]);
+
   // 统计信息（基于活动标签内容）
   const stats = useMemo(() => {
     const text = activeTab?.content ?? '';
@@ -515,6 +570,14 @@ export default function App(): JSX.Element {
               />
             )}
           </div>
+          {/* 底部浮动工具栏 */}
+          <Toolbar
+            editor={editorReady ? editorRef.current : null}
+            viewMode={viewMode}
+            onSourceWrap={handleSourceWrap}
+            onSourceLinePrefix={handleSourceLinePrefix}
+            onInsertImage={handleToolbarImage}
+          />
         </main>
       </div>
 

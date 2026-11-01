@@ -19,6 +19,19 @@ import {
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
+import { callCommand } from '@milkdown/kit/utils';
+import {
+  toggleStrongCommand,
+  toggleEmphasisCommand,
+  toggleInlineCodeCommand,
+  wrapInBlockquoteCommand,
+  wrapInBulletListCommand,
+  wrapInOrderedListCommand,
+  wrapInHeadingCommand,
+  turnIntoTextCommand,
+  createCodeBlockCommand,
+  insertHrCommand
+} from '@milkdown/kit/preset/commonmark';
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight';
 import { createParser } from '@milkdown/plugin-highlight/shiki';
 import { createCssVariablesTheme, getSingletonHighlighter } from 'shiki';
@@ -65,9 +78,26 @@ export interface EditorInstance {
   insertAtCursor(markdown: string): void;
   /** 滚动到指定标题（大纲跳转），title 为标题文本 */
   scrollToHeading(title: string): void;
+  /** 应用格式化命令（工具栏用） */
+  format(action: FormatAction, payload?: number | string): void;
+  /** 聚焦编辑器 */
+  focus(): void;
   /** 销毁编辑器，释放资源 */
   destroy(): void;
 }
+
+/** 工具栏支持的格式化动作 */
+export type FormatAction =
+  | 'bold'
+  | 'italic'
+  | 'code'
+  | 'quote'
+  | 'bulletList'
+  | 'orderedList'
+  | 'heading'
+  | 'paragraph'
+  | 'codeBlock'
+  | 'hr';
 
 /** 编辑器创建选项 */
 export interface CreateEditorOptions {
@@ -198,6 +228,50 @@ export async function createEditor(
             view.focus();
           }
         });
+      });
+    },
+
+    /** 应用格式化命令（工具栏用） */
+    format(action: FormatAction, payload?: number | string): void {
+      // 统一走 callCommand（命令均为 $command，可带 payload）
+      switch (action) {
+        case 'bold':
+          editor.action(callCommand(toggleStrongCommand.key));
+          break;
+        case 'italic':
+          editor.action(callCommand(toggleEmphasisCommand.key));
+          break;
+        case 'code':
+          editor.action(callCommand(toggleInlineCodeCommand.key));
+          break;
+        case 'quote':
+          editor.action(callCommand(wrapInBlockquoteCommand.key));
+          break;
+        case 'bulletList':
+          editor.action(callCommand(wrapInBulletListCommand.key));
+          break;
+        case 'orderedList':
+          editor.action(callCommand(wrapInOrderedListCommand.key));
+          break;
+        case 'heading':
+          editor.action(callCommand(wrapInHeadingCommand.key, typeof payload === 'number' ? payload : 1));
+          break;
+        case 'paragraph':
+          editor.action(callCommand(turnIntoTextCommand.key));
+          break;
+        case 'codeBlock':
+          editor.action(callCommand(createCodeBlockCommand.key));
+          break;
+        case 'hr':
+          editor.action(callCommand(insertHrCommand.key));
+          break;
+      }
+    },
+
+    /** 聚焦编辑器 */
+    focus(): void {
+      editor.action((ctx) => {
+        ctx.get(editorViewCtx).focus();
       });
     },
 
