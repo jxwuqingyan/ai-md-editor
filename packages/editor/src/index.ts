@@ -36,6 +36,7 @@ import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight';
 import { createParser } from '@milkdown/plugin-highlight/shiki';
 import { createCssVariablesTheme, getSingletonHighlighter } from 'shiki';
 import { math } from '@milkdown/plugin-math';
+import { diagram } from '@milkdown/plugin-diagram';
 
 /** Shiki 支持的常用语言（按需加载，避免体积过大） */
 const HIGHLIGHT_LANGS = [
@@ -174,6 +175,8 @@ export async function createEditor(
     .use(highlight)
     // 数学公式（KaTeX）：$行内$ / $$块级$$
     .use(math)
+    // Mermaid 图表：```mermaid 代码块渲染为 SVG
+    .use(diagram)
     .create();
 
   return {

@@ -11,10 +11,12 @@
   "dependencies": {
     "@ai-md-editor/markdown-core": "*",
     "@milkdown/kit": "^7.22.3",
+    "@milkdown/plugin-diagram": "^7.7.0",
     "@milkdown/plugin-highlight": "^7.22.3",
     "@milkdown/plugin-math": "^7.5.9",
     "@milkdown/react": "^7.22.3",
     "katex": "^0.19.1",
+    "mermaid": "^10.9.0",
     "shiki": "^4.5.0"
   }
 }
