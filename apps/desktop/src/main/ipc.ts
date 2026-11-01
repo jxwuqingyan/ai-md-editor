@@ -5,14 +5,16 @@
  */
 
 import { dialog, ipcMain, BrowserWindow } from 'electron';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import { join, basename } from 'node:path';
 import type {
   OpenFileResult,
   SaveFileResult,
   SaveImageInput,
   SaveImageResult,
-  RecentFile
+  RecentFile,
+  FsEntry,
+  ReadDirResult
 } from '@ai-md-editor/shared';
 import { IpcChannel } from '@ai-md-editor/shared';
 import { getRecent, addRecent } from './recent';
@@ -126,6 +128,49 @@ async function handleSaveImage(
 }
 
 /**
+ * 读取目录列表（文件树用）。
+ * 返回子目录与 Markdown 文件（.md/.markdown/.txt），隐藏文件（.开头）与 node_modules 排除。
+ * 结果按 目录在前、名称不区分大小写排序。
+ */
+async function handleReadDir(_win: BrowserWindow | null, dirPath: string): Promise<ReadDirResult> {
+  try {
+    const raw = await readdir(dirPath, { withFileTypes: true });
+    const entries: FsEntry[] = [];
+    for (const item of raw) {
+      // 排除隐藏文件/目录与常见噪声目录
+      if (item.name.startsWith('.') || item.name === 'node_modules') continue;
+      if (item.isDirectory()) {
+        entries.push({ name: item.name, path: join(dirPath, item.name), kind: 'dir' });
+      } else if (item.isFile() && /\.(md|markdown|txt)$/i.test(item.name)) {
+        entries.push({ name: item.name, path: join(dirPath, item.name), kind: 'md' });
+      }
+    }
+    // 目录在前，同类型按名称排序（不区分大小写）
+    entries.sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    });
+    return { ok: true, entries, error: null };
+  } catch (err) {
+    return { ok: false, entries: [], error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * 弹出文件夹选择对话框（文件树打开目录用）。
+ */
+async function handleChooseFolder(win: BrowserWindow | null): Promise<{ canceled: boolean; path: string | null }> {
+  const options = { properties: ['openDirectory' as const] };
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
+  if (result.canceled || result.filePaths.length === 0) {
+    return { canceled: true, path: null };
+  }
+  return { canceled: false, path: result.filePaths[0] };
+}
+
+/**
  * 注册所有 IPC handler。
  * 每个 handler 通过 event.sender 获取发起请求的窗口，作为对话框的父窗口。
  */
@@ -150,4 +195,10 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(IpcChannel.GetRecent, (): RecentFile[] => getRecent());
   ipcMain.handle(IpcChannel.AddRecent, (_event, path: string, name: string) => addRecent(path, name));
+  ipcMain.handle(IpcChannel.ReadDir, (event, dirPath: string) =>
+    handleReadDir(BrowserWindow.fromWebContents(event.sender), dirPath)
+  );
+  ipcMain.handle(IpcChannel.ChooseFolder, (event) =>
+    handleChooseFolder(BrowserWindow.fromWebContents(event.sender))
+  );
 }

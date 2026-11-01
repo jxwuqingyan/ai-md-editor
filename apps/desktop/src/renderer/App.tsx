@@ -5,6 +5,7 @@ import type { EditorInstance } from '@ai-md-editor/editor';
 import MarkdownEditor from './MarkdownEditor';
 import Tabs, { type Tab } from './Tabs';
 import RecentFiles from './RecentFiles';
+import FileTree from './FileTree';
 
 /** 默认文档内容 */
 const DEFAULT_DOC = `# MarkdownNote
@@ -50,6 +51,10 @@ export default function App(): JSX.Element {
   const [themeId, setThemeId] = useState<ThemeId>('light');
   // 侧边栏折叠状态
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // 侧栏当前面板：files（文件树）| outline（文档结构）
+  const [sidebarPanel, setSidebarPanel] = useState<'files' | 'outline'>('files');
+  // 文件树根目录（打开文件夹或首个文档的目录）
+  const [treeRoot, setTreeRoot] = useState<string | null>(null);
   // 标签列表（初始一个未命名文档）
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', DEFAULT_DOC)]);
   // 当前活动标签 id
@@ -181,6 +186,17 @@ export default function App(): JSX.Element {
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
     editorRef.current?.setMarkdown(content);
+    // 文件树根目录切到该文档所在目录
+    const dir = path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')));
+    if (dir) setTreeRoot(dir);
+  }, []);
+
+  /** 选择文件夹作为文件树根目录 */
+  const handleChooseFolder = useCallback(async () => {
+    const result = await window.api.chooseFolder();
+    if (!result.canceled && result.path) {
+      setTreeRoot(result.path);
+    }
   }, []);
 
   /** 打开文件：弹出对话框选择文件 */
@@ -412,12 +428,24 @@ export default function App(): JSX.Element {
 
       {/* 主体 */}
       <div className="main">
-        {/* 侧边栏（文档结构/大纲），支持收缩 */}
+        {/* 侧边栏（文件树 + 文档结构），支持收缩 */}
         <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : 'sidebar-collapsed'}`}>
           {sidebarOpen ? (
             <>
-              <div className="sidebar-head">
-                <span>文档结构</span>
+              <div className="sidebar-tabs">
+                <button
+                  className={`sidebar-tab ${sidebarPanel === 'files' ? 'sidebar-tab-active' : ''}`}
+                  onClick={() => setSidebarPanel('files')}
+                >
+                  文件
+                </button>
+                <button
+                  className={`sidebar-tab ${sidebarPanel === 'outline' ? 'sidebar-tab-active' : ''}`}
+                  onClick={() => setSidebarPanel('outline')}
+                >
+                  大纲
+                </button>
+                <span className="sidebar-flex" />
                 <button
                   className="sidebar-toggle"
                   onClick={() => setSidebarOpen(false)}
@@ -426,25 +454,40 @@ export default function App(): JSX.Element {
                   ‹
                 </button>
               </div>
-              <div className="outline-list">
-                {outline.length === 0 ? (
-                  <div className="outline-empty">暂无标题</div>
-                ) : (
-                  outline.map((item) => (
-                    <div
-                      key={item.line}
-                      className="outline-item"
-                      style={{ paddingLeft: 16 + (item.level - 1) * 14 }}
-                      onClick={() => handleOutlineClick(item.text)}
-                      role="button"
-                      tabIndex={0}
-                      title={`跳转到「${item.text}」`}
-                    >
-                      {item.text}
-                    </div>
-                  ))
-                )}
-              </div>
+              {sidebarPanel === 'files' ? (
+                <FileTree
+                  rootDir={treeRoot}
+                  activePath={activeTab?.path ?? null}
+                  onOpenFile={(path, name) => {
+                    void window.api.openPath(path).then((result) => {
+                      if (!result.canceled && result.path && result.content !== null) {
+                        openFileContent(result.path, result.name ?? name, result.content);
+                      }
+                    });
+                  }}
+                  onChooseFolder={() => void handleChooseFolder()}
+                />
+              ) : (
+                <div className="outline-list">
+                  {outline.length === 0 ? (
+                    <div className="outline-empty">暂无标题</div>
+                  ) : (
+                    outline.map((item) => (
+                      <div
+                        key={item.line}
+                        className="outline-item"
+                        style={{ paddingLeft: 16 + (item.level - 1) * 14 }}
+                        onClick={() => handleOutlineClick(item.text)}
+                        role="button"
+                        tabIndex={0}
+                        title={`跳转到「${item.text}」`}
+                      >
+                        {item.text}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <button

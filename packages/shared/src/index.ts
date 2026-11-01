@@ -20,8 +20,35 @@ export const IpcChannel = {
   /** 添加一条最近文件记录 */
   AddRecent: 'recent:add',
   /** 通过系统对话框打开文件并返回内容（供拖拽/菜单复用） */
-  OpenPath: 'file:open-path'
+  OpenPath: 'file:open-path',
+  /** 读取目录列表（文件树用，返回子目录与 Markdown 文件条目） */
+  ReadDir: 'fs:read-dir',
+  /** 选择文件夹（文件树打开目录用） */
+  ChooseFolder: 'fs:choose-folder'
 } as const;
+
+/** 文件树条目类型：目录或 Markdown 文件 */
+export type FsEntryKind = 'dir' | 'md';
+
+/** 文件树目录条目 */
+export interface FsEntry {
+  /** 条目名（文件/目录名，不含路径） */
+  name: string;
+  /** 绝对路径 */
+  path: string;
+  /** 类型：目录 or markdown 文件 */
+  kind: FsEntryKind;
+}
+
+/** 读取目录的结果 */
+export interface ReadDirResult {
+  /** 是否成功 */
+  ok: boolean;
+  /** 目录条目（按 目录在前、名称排序） */
+  entries: FsEntry[];
+  /** 错误信息（成功为 null） */
+  error: string | null;
+}
 
 /** 应用基础信息 */
 export interface AppInfo {

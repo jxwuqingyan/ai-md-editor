@@ -4,7 +4,8 @@ import type {
   SaveFileResult,
   SaveImageInput,
   SaveImageResult,
-  RecentFile
+  RecentFile,
+  ReadDirResult
 } from '@ai-md-editor/shared';
 import { IpcChannel } from '@ai-md-editor/shared';
 
@@ -42,6 +43,14 @@ const api = {
   /** 添加最近文件记录 */
   addRecent: (path: string, name: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.AddRecent, path, name),
+
+  /** 读取目录列表（文件树用）：返回子目录与 Markdown 文件条目 */
+  readDir: (dirPath: string): Promise<ReadDirResult> =>
+    ipcRenderer.invoke(IpcChannel.ReadDir, dirPath),
+
+  /** 弹出文件夹选择对话框（文件树打开目录用） */
+  chooseFolder: (): Promise<{ canceled: boolean; path: string | null }> =>
+    ipcRenderer.invoke(IpcChannel.ChooseFolder),
 
   /** 监听主进程的「打开文件」事件（拖拽到 Dock/命令行打开） */
   onOpenFile: (callback: (filePath: string) => void): (() => void) => {
