@@ -14,10 +14,13 @@ import type {
   SaveImageResult,
   RecentFile,
   FsEntry,
-  ReadDirResult
+  ReadDirResult,
+  ExportInput,
+  ExportResult
 } from '@ai-md-editor/shared';
 import { IpcChannel } from '@ai-md-editor/shared';
 import { getRecent, addRecent } from './recent';
+import { exportFile } from './export';
 
 /** Markdown 文件扩展名过滤 */
 const MD_FILTERS = [
@@ -170,6 +173,41 @@ async function handleChooseFolder(win: BrowserWindow | null): Promise<{ canceled
   return { canceled: false, path: result.filePaths[0] };
 }
 
+/** 导出格式 → 文件扩展名 + 过滤器 */
+const EXPORT_FILTERS: Record<ExportInput['format'], { ext: string; name: string }> = {
+  html: { ext: '.html', name: 'HTML' },
+  pdf: { ext: '.pdf', name: 'PDF' },
+  word: { ext: '.doc', name: 'Word 文档' }
+};
+
+/**
+ * 导出 Markdown 为 HTML/PDF/Word。
+ * 弹保存对话框确定路径，然后写文件。
+ */
+async function handleExport(
+  win: BrowserWindow | null,
+  input: ExportInput
+): Promise<ExportResult> {
+  const { ext, name } = EXPORT_FILTERS[input.format];
+  const defaultPath = input.defaultName.replace(/\.(md|markdown|txt)$/i, '') + ext;
+  const options = {
+    defaultPath,
+    filters: [{ name, extensions: [ext.slice(1)] }]
+  };
+  const result = win
+    ? await dialog.showSaveDialog(win, options)
+    : await dialog.showSaveDialog(options);
+  if (result.canceled || !result.filePath) {
+    return { ok: false, path: null, error: '已取消' };
+  }
+  try {
+    await exportFile(input.format, input.markdown, result.filePath, input.defaultName);
+    return { ok: true, path: result.filePath, error: null };
+  } catch (err) {
+    return { ok: false, path: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 /**
  * 注册所有 IPC handler。
  * 每个 handler 通过 event.sender 获取发起请求的窗口，作为对话框的父窗口。
@@ -200,5 +238,8 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(IpcChannel.ChooseFolder, (event) =>
     handleChooseFolder(BrowserWindow.fromWebContents(event.sender))
+  );
+  ipcMain.handle(IpcChannel.Export, (event, input: ExportInput) =>
+    handleExport(BrowserWindow.fromWebContents(event.sender), input)
   );
 }

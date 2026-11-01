@@ -56,6 +56,8 @@ export default function App(): JSX.Element {
   const [sidebarPanel, setSidebarPanel] = useState<'files' | 'outline'>('files');
   // 文件树根目录（打开文件夹或首个文档的目录）
   const [treeRoot, setTreeRoot] = useState<string | null>(null);
+  // 导出下拉展开状态
+  const [exportOpen, setExportOpen] = useState(false);
   // 标签列表（初始一个未命名文档）
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', DEFAULT_DOC)]);
   // 当前活动标签 id
@@ -438,6 +440,20 @@ export default function App(): JSX.Element {
     }
   }, [handleSourceWrap]);
 
+  /** 导出当前文档为 HTML/PDF/Word */
+  const handleExport = useCallback(async (format: 'html' | 'pdf' | 'word') => {
+    const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+    if (!tab) return;
+    const result = await window.api.exportFile({
+      format,
+      markdown: tab.content,
+      defaultName: tab.name
+    });
+    if (!result.ok && result.error !== '已取消') {
+      console.error('导出失败:', result.error);
+    }
+  }, []);
+
   // 统计信息（基于活动标签内容）
   const stats = useMemo(() => {
     const text = activeTab?.content ?? '';
@@ -468,6 +484,28 @@ export default function App(): JSX.Element {
         <button className="icon-btn" onClick={toggleTheme} title="切换主题">
           {themeId === 'light' ? '深色' : '浅色'}
         </button>
+        <div className="export-wrap">
+          <button
+            className="icon-btn"
+            onClick={() => setExportOpen((v) => !v)}
+            title="导出"
+          >
+            导出
+          </button>
+          {exportOpen && (
+            <div className="export-menu">
+              <div className="export-item" onClick={() => { setExportOpen(false); void handleExport('html'); }}>
+                HTML
+              </div>
+              <div className="export-item" onClick={() => { setExportOpen(false); void handleExport('pdf'); }}>
+                PDF
+              </div>
+              <div className="export-item" onClick={() => { setExportOpen(false); void handleExport('word'); }}>
+                Word
+              </div>
+            </div>
+          )}
+        </div>
         <div className="spacer" />
         <span className="brand">MarkdownNote</span>
       </header>

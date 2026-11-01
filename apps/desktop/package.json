@@ -12,10 +12,11 @@
     "dist": "electron-vite build && electron-builder"
   },
   "dependencies": {
+    "@ai-md-editor/editor": "*",
+    "@ai-md-editor/markdown-core": "*",
     "@ai-md-editor/shared": "*",
     "@ai-md-editor/theme": "*",
-    "@ai-md-editor/markdown-core": "*",
-    "@ai-md-editor/editor": "*"
+    "marked": "^18.1.2"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",

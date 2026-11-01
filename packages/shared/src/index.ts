@@ -24,8 +24,33 @@ export const IpcChannel = {
   /** 读取目录列表（文件树用，返回子目录与 Markdown 文件条目） */
   ReadDir: 'fs:read-dir',
   /** 选择文件夹（文件树打开目录用） */
-  ChooseFolder: 'fs:choose-folder'
+  ChooseFolder: 'fs:choose-folder',
+  /** 导出（html/pdf/word） */
+  Export: 'export:file'
 } as const;
+
+/** 导出类型 */
+export type ExportFormat = 'html' | 'pdf' | 'word';
+
+/** 导出请求入参 */
+export interface ExportInput {
+  /** 导出格式 */
+  format: ExportFormat;
+  /** Markdown 源文本 */
+  markdown: string;
+  /** 默认文件名（不含扩展名） */
+  defaultName: string;
+}
+
+/** 导出结果 */
+export interface ExportResult {
+  /** 是否成功 */
+  ok: boolean;
+  /** 保存的绝对路径（失败为 null） */
+  path: string | null;
+  /** 错误信息（成功为 null） */
+  error: string | null;
+}
 
 /** 文件树条目类型：目录或 Markdown 文件 */
 export type FsEntryKind = 'dir' | 'md';

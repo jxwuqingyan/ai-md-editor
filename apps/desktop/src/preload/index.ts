@@ -5,7 +5,9 @@ import type {
   SaveImageInput,
   SaveImageResult,
   RecentFile,
-  ReadDirResult
+  ReadDirResult,
+  ExportInput,
+  ExportResult
 } from '@ai-md-editor/shared';
 import { IpcChannel } from '@ai-md-editor/shared';
 
@@ -51,6 +53,10 @@ const api = {
   /** 弹出文件夹选择对话框（文件树打开目录用） */
   chooseFolder: (): Promise<{ canceled: boolean; path: string | null }> =>
     ipcRenderer.invoke(IpcChannel.ChooseFolder),
+
+  /** 导出 Markdown 为 HTML/PDF/Word */
+  exportFile: (input: ExportInput): Promise<ExportResult> =>
+    ipcRenderer.invoke(IpcChannel.Export, input),
 
   /** 监听主进程的「打开文件」事件（拖拽到 Dock/命令行打开） */
   onOpenFile: (callback: (filePath: string) => void): (() => void) => {
