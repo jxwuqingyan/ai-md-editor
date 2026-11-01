@@ -18,6 +18,7 @@ const DEFAULT_DOC = `# MarkdownNote
 - 输入即渲染（WYSIWYG）
 - 克制动效，专注内容
 - 现代极简，去 AI 味
+- 支持数学公式：$c = \\pm\\sqrt{a^2 + b^2}$
 
 ## 技术栈
 

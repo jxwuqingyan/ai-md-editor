@@ -16,6 +16,7 @@
     "@ai-md-editor/markdown-core": "*",
     "@ai-md-editor/shared": "*",
     "@ai-md-editor/theme": "*",
+    "katex": "^0.19.1",
     "marked": "^18.1.2"
   },
   "devDependencies": {
