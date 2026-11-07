@@ -8,6 +8,7 @@
 
 - **始终使用简体中文**回答与沟通。
 - 代码注释、文档、提交说明一律使用简体中文。
+- **文档用语**：不出现第三方产品名、品牌标识或竞品内部组件名，也不用「对标 XX」这类表述；统一用中性描述（如「跨平台本地 Markdown 编辑器」「常见扩展语法」）。
 
 ## 2. 核心理念与原则
 
@@ -111,6 +112,7 @@ ai-md-editor/
 
 ## 8. 功能更新记录（CHANGELOG.md）
 
+- 变更记录文件名固定为 **`CHANGELOG.md`**（全大写，位于仓库根目录）。
 - **重要功能更新必须记录到 `CHANGELOG.md`**。
 - 后期编写整体功能说明时，必须参考该文件。
 - 记录格式：日期 + 功能点摘要 + 影响范围。
@@ -119,7 +121,9 @@ ai-md-editor/
 
 - 每次功能更新完成后，同步更新以下位置的版本号：
   1. 根 `package.json` 的 `version` 字段。
-  2. `CHANGELOG.md` 记录本次更新摘要。
+  2. `apps/desktop/package.json` 的 `version` 字段。
+  3. `package-lock.json` 中的 **root 与 `apps/desktop` 两条**（只改这两处，**不要全局替换**：第三方包版本号可能与项目版本号相同）。
+  4. `CHANGELOG.md` 记录本次更新摘要。
 - 版本号格式：`主版本.次版本.修订号`（如 `1.2.1`）。
   - 主版本：重大架构变更或里程碑功能
   - 次版本：新增功能模块
@@ -192,8 +196,12 @@ ai-md-editor/
 1. **测试**：每完成一个功能，都必须做一遍测试（类型检查 `tsc --noEmit` + 构建 `npm run build` + 功能验证）。受沙箱限制无法跑 GUI 时，明确告知用户需在系统终端验证的具体步骤。
    - 改到菜单 / 表格 / 缩放 / 剪贴板 / 文件树行为时，跑 `npm test`（`test/menuAccelerators.cjs` 静态校验快捷键 + `test/e2e.cjs` 真实 Electron 端到端）。
    - 受限沙箱（无 GUI 会话）里需摘掉注入的环境变量：`env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS npm test`。
-2. **文档同步**：开发功能的同时，同步更新 `README.md`（项目说明）与 `AGENTS.md`（协作规范），不得等到最后一次性补。
-3. **CI 打包**：仓库需配置 GitHub Actions workflow，自动打包 **macOS（x64 与 arm64 两种架构的 dmg）** 与 **Windows（x64 安装包）**。
+2. **文档同步**：开发功能的同时，同步更新 `README.md`（项目说明）、`AGENTS.md`（协作规范）与 `docs/` 下的设计与方案文档，不得等到最后一次性补。文档中如与实际实现不符（依赖未引入、主题数量、包管理器等），一并订正。
+3. **提交前检查**（每次 `git commit` 前逐条确认）：
+   - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号四处一致（见第 9 节）。
+   - 删除无用文件：构建临时配置（`electron.vite.config.*.mjs`）、`*.tsbuildinfo`、空的 `release/`、游离的测试产物与截屏、`.DS_Store`；`out/` 可整体重建后再构建，避免残留旧 chunk。
+   - 全仓库检索确认无第三方产品名/品牌标识（含注释、界面示例文案、包描述）。
+4. **CI 打包**：仓库需配置 GitHub Actions workflow，自动打包 **macOS（x64 与 arm64 两种架构的 dmg）** 与 **Windows（x64 安装包）**。
 
 ## 14. 参考文档
 
