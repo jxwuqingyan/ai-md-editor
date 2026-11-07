@@ -1,9 +1,9 @@
 /**
  * 警告框与目录块的渲染增强（不改 Markdown 文本，只用 ProseMirror 装饰）。
  *
- * - 警告框：GitHub / Typora 的 `> [!NOTE]` 语法本身只是引用块里的文本，
+ * - 警告框：GitHub 风格的 `> [!NOTE]` 语法本身只是引用块里的文本，
  *   这里给对应 blockquote 加类名并隐藏源码标记，让它渲染成带色条的提示框；
- * - 目录：`[TOC]` 是 Typora 的目录占位符，这里在占位符下方渲染实时的标题列表，
+ * - 目录：`[TOC]` 是常见的目录占位符写法，这里在占位符下方渲染实时的标题列表，
  *   点击可跳转。文本仍然是 `[TOC]`，保证 Markdown 往返不被改写。
  */
 import { $prose } from '@milkdown/kit/utils';

@@ -244,6 +244,12 @@ export interface MenuViewState {
   fullscreen: boolean;
   /** 当前文档已关联磁盘路径（决定重命名/重载等菜单项是否可用） */
   hasPath: boolean;
+  /** 光标在表格内（决定表格增删行列菜单项是否可用） */
+  inTable: boolean;
+  /** 光标在表头行内 */
+  inTableHeader: boolean;
+  /** 当前界面缩放百分比（100 表示原始大小） */
+  zoomPercent: number;
 }
 
 /** 默认菜单状态（主进程启动时使用） */
@@ -260,7 +266,10 @@ export const DEFAULT_MENU_VIEW_STATE: MenuViewState = {
   outlineWindowVisible: false,
   alwaysOnTop: false,
   fullscreen: false,
-  hasPath: false
+  hasPath: false,
+  inTable: false,
+  inTableHeader: false,
+  zoomPercent: 100
 };
 
 /** 原生应用菜单可触发的动作（集中定义，避免跨进程魔法字符串） */

@@ -42,7 +42,7 @@ function textHandler(
 export function configureStringify(ctx: Ctx): void {
   ctx.update(remarkStringifyOptionsCtx, (prev) => ({
     ...prev,
-    // 与 Typora / GitHub 的书写习惯保持一致，减少保存时的无意义改写
+    // 与 GitHub 等常见书写习惯保持一致，减少保存时的无意义改写
     bullet: '-',
     rule: '-',
     handlers: {

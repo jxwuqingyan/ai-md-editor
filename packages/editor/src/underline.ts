@@ -1,7 +1,7 @@
 /**
- * 下划线能力（Typora「格式 → 下划线」）。
+ * 下划线能力（格式 → 下划线）。
  *
- * CommonMark 本身没有下划线语法，Typora 用 `<u>…</u>` 承载。
+ * CommonMark 本身没有下划线语法，常见做法是用 `<u>…</u>` 承载。
  * 这里做三件事，让它在 WYSIWYG 下也是真正的行内样式而非字面量标签：
  * 1. remark 转换器：把 remark-parse 生成的两个 html 节点合成一个 `underline` mdast 节点；
  * 2. Milkdown mark schema：解析/序列化该节点，DOM 用 `<u>` 渲染；

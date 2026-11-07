@@ -284,12 +284,31 @@ async function handleClipboardWrite(input: ClipboardWriteInput): Promise<void> {
   await clipboard.writeText(stripMarkdown(input.markdown));
 }
 
-/** 界面缩放（Electron webContents 缩放级别，范围限制在 -3 ~ 3） */
-function handleZoom(win: BrowserWindow | null, action: ZoomAction): void {
-  if (!win) return;
-  const current = win.webContents.getZoomLevel();
-  const next = action === 'reset' ? 0 : Math.max(-3, Math.min(3, current + (action === 'in' ? 0.5 : -0.5)));
-  win.webContents.setZoomLevel(next);
+/**
+ * 界面缩放档位（离散百分比，50% ~ 300%）。
+ * 用 setZoomFactor 而不是 setZoomLevel：档位是精确比例，
+ * 状态栏与菜单里显示的百分比不会出现 110%、132% 这类奇怪的中间值。
+ */
+const ZOOM_STEPS = [0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3];
+
+/** 100% 所在的档位下标 */
+const ZOOM_DEFAULT_INDEX = ZOOM_STEPS.indexOf(1);
+
+/**
+ * 调整界面缩放，返回调整后的百分比。
+ * @returns 新的缩放百分比（如 110）
+ */
+function handleZoom(win: BrowserWindow | null, action: ZoomAction): number {
+  if (!win) return 100;
+  const current = win.webContents.getZoomFactor();
+  // 找最接近当前值的档位，避免浮点误差导致「放大」无效
+  let index = ZOOM_STEPS.findIndex((step) => Math.abs(step - current) < 0.02);
+  if (index < 0) index = ZOOM_DEFAULT_INDEX;
+  const target = action === 'reset'
+    ? ZOOM_DEFAULT_INDEX
+    : Math.max(0, Math.min(ZOOM_STEPS.length - 1, index + (action === 'in' ? 1 : -1)));
+  win.webContents.setZoomFactor(ZOOM_STEPS[target]);
+  return Math.round(ZOOM_STEPS[target] * 100);
 }
 
 /**
@@ -344,7 +363,7 @@ export function registerIpcHandlers(): void {
     handleClipboardWrite(input)
   );
   ipcMain.handle(IpcChannel.ClipboardReadText, () => clipboard.readText());
-  ipcMain.handle(IpcChannel.Zoom, (event, action: ZoomAction) =>
+  ipcMain.handle(IpcChannel.Zoom, (event, action: ZoomAction): number =>
     handleZoom(BrowserWindow.fromWebContents(event.sender), action)
   );
   ipcMain.handle(IpcChannel.AlwaysOnTop, (event, enabled: boolean) => {

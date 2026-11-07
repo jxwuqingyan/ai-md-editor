@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createEditor, type EditorInstance } from '@ai-md-editor/editor';
+import { createEditor, type EditorInstance, type TableContext } from '@ai-md-editor/editor';
 
 /** MarkdownEditor 组件的属性 */
 interface MarkdownEditorProps {
@@ -9,6 +9,8 @@ interface MarkdownEditorProps {
   onChange?: (markdown: string) => void;
   /** 编辑器实例就绪回调（用于向上暴露实例，如大纲跳转等） */
   onReady?: (instance: EditorInstance) => void;
+  /** 光标进出表格时回调（原生菜单置灰用） */
+  onTableContext?: (context: TableContext) => void;
 }
 
 /**
@@ -24,7 +26,8 @@ interface MarkdownEditorProps {
 export default function MarkdownEditor({
   initialValue,
   onChange,
-  onReady
+  onReady,
+  onTableContext
 }: MarkdownEditorProps): JSX.Element {
   // 编辑器挂载容器
   const containerRef = useRef<HTMLDivElement>(null);
@@ -32,9 +35,11 @@ export default function MarkdownEditor({
   const instanceRef = useRef<EditorInstance | null>(null);
   // 初始化失败原因（避免出错时只留一片空白）
   const [error, setError] = useState<string | null>(null);
-  // 保存最新的 onChange，避免闭包过期
+  // 保存最新的 onChange / onTableContext，避免闭包过期
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onTableContextRef = useRef(onTableContext);
+  onTableContextRef.current = onTableContext;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -47,6 +52,9 @@ export default function MarkdownEditor({
       defaultValue: initialValue,
       onChange: (markdown) => {
         onChangeRef.current?.(markdown);
+      },
+      onTableContext: (context) => {
+        onTableContextRef.current?.(context);
       }
     })
       .then((instance) => {

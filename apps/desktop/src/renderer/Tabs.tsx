@@ -1,18 +1,8 @@
 import type { ReactNode } from 'react';
+import type { Tab } from './types';
 
-/** 单个标签的数据模型 */
-export interface Tab {
-  /** 唯一标识 */
-  id: string;
-  /** 文件绝对路径（未保存的新文档为 null） */
-  path: string | null;
-  /** 标签显示名（文件名） */
-  name: string;
-  /** 当前内容（与编辑器同步） */
-  content: string;
-  /** 是否有未保存修改 */
-  dirty: boolean;
-}
+// 兼容既有引用：Tab 类型已移到 types.ts
+export type { Tab };
 
 /** Tabs 组件的属性 */
 interface TabsProps {

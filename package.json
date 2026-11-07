@@ -1,8 +1,8 @@
 {
   "name": "ai-md-editor",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
-  "description": "对标 Typora 的跨平台 Markdown 编辑器与预览器（纯本地，WYSIWYG）",
+  "description": "跨平台本地 Markdown 编辑器与预览器（纯本地，所见即所得）",
   "license": "MIT",
   "workspaces": [
     "apps/*",
@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "npm run dev --workspace @ai-md-editor/desktop",
     "build": "npm run build --workspace @ai-md-editor/desktop",
-    "dist": "npm run dist --workspace @ai-md-editor/desktop"
+    "dist": "npm run dist --workspace @ai-md-editor/desktop",
+    "test": "npm run test:menu --workspace @ai-md-editor/desktop && npm run test:e2e --workspace @ai-md-editor/desktop"
   },
   "devDependencies": {
     "typescript": "^5.5.4"

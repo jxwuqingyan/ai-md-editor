@@ -1,5 +1,5 @@
 /**
- * 原生应用菜单（对标 Typora 的文件 / 编辑 / 段落 / 格式 / 显示）。
+ * 原生应用菜单（文件 / 编辑 / 段落 / 格式 / 显示）。
  * - macOS 菜单位于屏幕顶部，不占用应用窗口；Windows 上隐藏窗口内菜单但保留快捷键。
  * - 菜单动作经白名单 IPC 转发到渲染层执行，主进程只负责菜单结构与系统级动作。
  * - 界面勾选项状态由渲染层通过 MenuStateChannel 同步，保持菜单与界面一致。
@@ -208,10 +208,14 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           submenu: [
             item('插入 3×3 表格', MenuActions.InsertTable),
             sep,
-            item('在下方插入行', MenuActions.TableAddRow),
-            item('在右侧插入列', MenuActions.TableAddCol),
-            item('删除当前表格行', MenuActions.TableDeleteRow),
-            item('删除当前表格列', MenuActions.TableDeleteCol)
+            // 增删行列只在光标位于表格内时可用：渲染层把光标上下文同步到 inTable / inTableHeader
+            item('在下方插入行', MenuActions.TableAddRow, { enabled: s.inTable }),
+            item('在右侧插入列', MenuActions.TableAddCol, { enabled: s.inTable }),
+            // 表头行也能删：编辑器会删掉旧表头并把首个数据行升级为新表头
+            item(s.inTableHeader ? '删除当前表格行（表头）' : '删除当前表格行', MenuActions.TableDeleteRow, {
+              enabled: s.inTable
+            }),
+            item('删除当前表格列', MenuActions.TableDeleteCol, { enabled: s.inTable })
           ]
         },
         item('公式块', MenuActions.InsertMathBlock, {
@@ -360,9 +364,17 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('字数统计窗口', MenuActions.ToggleWordCount, { checked: s.wordCountVisible }),
         item('大纲窗口', MenuActions.ToggleOutlineWindow, { checked: s.outlineWindowVisible }),
         sep,
-        item('实际大小', MenuActions.ZoomReset, { accelerator: 'Shift+CommandOrControl+0' }),
-        item('放大', MenuActions.ZoomIn, { accelerator: 'Shift+CommandOrControl+=' }),
-        item('缩小', MenuActions.ZoomOut, { accelerator: 'Shift+CommandOrControl+-' }),
+        {
+          // 缩放档位由主进程统一维护（离散百分比），当前比例在菜单里直接可见
+          label: '缩放',
+          submenu: [
+            { label: `当前缩放 ${s.zoomPercent}%`, enabled: false },
+            sep,
+            item('放大', MenuActions.ZoomIn, { accelerator: 'Shift+CommandOrControl+=' }),
+            item('缩小', MenuActions.ZoomOut, { accelerator: 'Shift+CommandOrControl+-' }),
+            item('实际大小', MenuActions.ZoomReset, { accelerator: 'Shift+CommandOrControl+0' })
+          ]
+        },
         sep,
         // 以下三项统一用自定义菜单项，不用系统 role：
         // role 版（togglefullscreen / minimize）由 macOS 注入图标与额外缩进，
@@ -394,7 +406,7 @@ export function refreshRecentMenu(): void {
   rebuildMenu();
 }
 
-/** 安装 Typora 风格的原生应用菜单 */
+/** 安装原生应用菜单 */
 export function setupApplicationMenu(): void {
   rebuildMenu();
 }

@@ -87,8 +87,8 @@ const api = {
   /** 读取剪贴板纯文本 */
   readClipboardText: (): Promise<string> => ipcRenderer.invoke(IpcChannel.ClipboardReadText),
 
-  /** 界面缩放 */
-  zoom: (action: ZoomAction): Promise<void> => ipcRenderer.invoke(IpcChannel.Zoom, action),
+  /** 界面缩放，返回新的缩放百分比（如 110） */
+  zoom: (action: ZoomAction): Promise<number> => ipcRenderer.invoke(IpcChannel.Zoom, action),
 
   /** 窗口置顶 */
   setAlwaysOnTop: (enabled: boolean): Promise<void> =>

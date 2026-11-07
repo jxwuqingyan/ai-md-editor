@@ -1,5 +1,5 @@
 /**
- * YAML Front Matter 支持（Typora「段落 → YAML Front Matter」）。
+ * YAML Front Matter 支持（段落 → YAML Front Matter）。
  *
  * CommonMark 不识别文件头的 `---` 区块，会把首尾两条分隔线当成分割线 / Setext 下划线，
  * 导致插入后再序列化时被改写成 `***` 与正文，属于内容损坏。这里补三件事：

@@ -843,7 +843,7 @@ button:focus-visible {
   white-space: pre-wrap;
 }
 
-/* 警告框（GitHub / Typora 的 > [!NOTE] 语法） */
+/* 警告框（GitHub 风格的 > [!NOTE] 语法） */
 .milkdown-container .ProseMirror blockquote.callout {
   border-left: 3px solid var(--callout-color, var(--accent));
   background: var(--bg-panel);

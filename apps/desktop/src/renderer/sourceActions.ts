@@ -4,7 +4,7 @@
  * WYSIWYG 模式由 packages/editor 走 ProseMirror 命令；源码模式没有编辑器实例，
  * 这里直接对 Markdown 字符串 + textarea 选区做等价变换，保证两个模式的菜单行为一致。
  */
-import type { FormatAction } from '@ai-md-editor/editor';
+import type { FormatAction, TableContext } from '@ai-md-editor/editor';
 
 /** 源码上下文：完整内容与当前选区 */
 export interface SourceContext {
@@ -134,45 +134,135 @@ function clearInlineMarks(ctx: SourceContext): SourceResult {
   };
 }
 
-/** 表格行操作：仅在当前行是表格行时生效 */
+/** 判断一行是否是表格行（以 | 开头，允许前导空白） */
+function isTableRow(line: string | undefined): boolean {
+  return Boolean(line && /^\s*\|/.test(line));
+}
+
+/** 判断一行是否是 GFM 表格的分隔行（|---|---|） */
+function isTableSeparator(line: string | undefined): boolean {
+  if (!line) return false;
+  return /^\s*\|[\s:|-]+\|\s*$/.test(line) && /-{2,}/.test(line);
+}
+
+/** 表格块：同一张表在源码中的行范围 */
+interface TableBlock {
+  /** 起始行号（0 起） */
+  start: number;
+  /** 结束行号（不含） */
+  end: number;
+  /** 表格所有行 */
+  lines: string[];
+}
+
+/** 找到光标所在的表格块（连续的以 | 开头的行） */
+function findTableBlock(content: string, caret: number): TableBlock | null {
+  const lines = content.split('\n');
+  const index = currentLineIndex(content, caret);
+  if (!isTableRow(lines[index])) return null;
+  let start = index;
+  while (start > 0 && isTableRow(lines[start - 1])) start -= 1;
+  let end = index;
+  while (end + 1 < lines.length && isTableRow(lines[end + 1])) end += 1;
+  return { start, end: end + 1, lines: lines.slice(start, end + 1) };
+}
+
+/** 把一行拆成单元格原始文本（保留各自原有的空白，避免整表被重排） */
+function rowCells(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+  return trimmed.split('|');
+}
+
+/** 用单元格拼回一行（保留原有空白） */
+function joinCells(cells: string[]): string {
+  return `|${cells.join('|')}|`;
+}
+
+/** 光标所在列（0 起）；不在表格行内返回 -1 */
+function caretColumn(line: string, columnInLine: number): number {
+  const before = line.slice(0, columnInLine);
+  const pipes = (before.match(/\|/g) ?? []).length;
+  // 行以 | 开头时第一个 | 之前没有单元格，因此列号要减一
+  return pipes - 1;
+}
+
+/** 表格行操作：增删行 / 增删列（以整张表为单位，保证列数一致） */
 function tableLineOperation(ctx: SourceContext, op: 'addRow' | 'addCol' | 'deleteRow' | 'deleteCol'): SourceResult {
+  const block = findTableBlock(ctx.content, ctx.selectionStart);
+  if (!block) return unchanged(ctx);
+
   const { content, selectionStart } = ctx;
-  const { lineStart, lineEnd } = lineBounds(content, selectionStart, selectionStart);
-  const line = content.slice(lineStart, lineEnd);
-  if (!line.trim().startsWith('|')) return unchanged(ctx);
+  const lines = content.split('\n');
+  const rowIndex = currentLineIndex(content, selectionStart) - block.start;
+  const lineStart = content.lastIndexOf('\n', selectionStart - 1) + 1;
+  const columnInLine = selectionStart - lineStart;
+  const hasHeader = isTableSeparator(block.lines[1]);
+
+  /** 用新的表格行替换原块，光标落在指定行首 */
+  const rebuild = (rows: string[], caretRow: number): SourceResult => {
+    const before = lines.slice(0, block.start);
+    const after = lines.slice(block.end);
+    const nextLines = [...before, ...rows, ...after];
+    let offset = 0;
+    for (let i = 0; i < block.start + caretRow; i += 1) offset += nextLines[i].length + 1;
+    return { content: nextLines.join('\n'), selectionStart: offset, selectionEnd: offset };
+  };
 
   if (op === 'deleteRow') {
-    return {
-      content: content.slice(0, lineStart) + content.slice(Math.min(lineEnd + 1, content.length)),
-      selectionStart: lineStart,
-      selectionEnd: lineStart
-    };
+    // 表头行：删掉旧表头，把分隔行下移一行，让首个数据行成为新表头（GFM 必须保留表头）
+    if (hasHeader && rowIndex === 0) {
+      if (block.lines.length < 3) return unchanged(ctx);
+      const rows = [block.lines[2], block.lines[1], ...block.lines.slice(3)];
+      return rebuild(rows, 0);
+    }
+    // 只剩表头时不允许删掉唯一的数据行
+    if (block.lines.length <= 2) return unchanged(ctx);
+    return rebuild(block.lines.filter((_line, i) => i !== rowIndex), Math.max(0, rowIndex - 1));
   }
+
   if (op === 'addRow') {
-    const columns = Math.max(2, line.split('|').length - 2);
-    const row = `|${'  |'.repeat(columns)}\n`;
-    return {
-      content: content.slice(0, lineEnd + 1) + row + content.slice(lineEnd + 1),
-      selectionStart: lineEnd + 1,
-      selectionEnd: lineEnd + 1
-    };
+    const cellCount = rowCells(block.lines[0]).length;
+    // 「在下方插入行」：表头下方应插在分隔行之后，否则会破坏表格结构
+    const insertAt = hasHeader && rowIndex === 0 ? 2 : rowIndex + 1;
+    const emptyRow = joinCells(Array.from({ length: cellCount }, () => '  '));
+    const rows = [...block.lines.slice(0, insertAt), emptyRow, ...block.lines.slice(insertAt)];
+    return rebuild(rows, insertAt);
   }
+
+  const column = caretColumn(block.lines[rowIndex], columnInLine);
+  if (column < 0) return unchanged(ctx);
+  const cellCount = rowCells(block.lines[rowIndex]).length;
+
   if (op === 'addCol') {
-    const withColumn = line.replace(/\|\s*$/, '  |');
-    return {
-      content: content.slice(0, lineStart) + withColumn + content.slice(lineEnd),
-      selectionStart: lineStart + withColumn.length,
-      selectionEnd: lineStart + withColumn.length
-    };
+    const rows = block.lines.map((line, i) => {
+      const cells = rowCells(line);
+      if (column + 1 > cells.length) return line;
+      cells.splice(column + 1, 0, i === 1 ? ' --- ' : '  ');
+      return joinCells(cells);
+    });
+    return rebuild(rows, rowIndex);
   }
-  // 删除最后一列
-  const cells = line.split('|');
-  const trimmed = cells.length > 3 ? cells.slice(0, -2).concat('|').join('|') : line;
-  return {
-    content: content.slice(0, lineStart) + trimmed + content.slice(lineEnd),
-    selectionStart: lineStart + trimmed.length,
-    selectionEnd: lineStart + trimmed.length
-  };
+
+  // 只剩一列时删列等于删表，交给「删除行」处理更安全
+  if (cellCount <= 1) return unchanged(ctx);
+  const rows = block.lines.map((line) => {
+    const cells = rowCells(line);
+    if (column >= cells.length) return line;
+    cells.splice(column, 1);
+    return joinCells(cells);
+  });
+  return rebuild(rows, rowIndex);
+}
+
+/**
+ * 源码模式的表格上下文：按光标所在行判断是否在表格 / 表头。
+ * 与 WYSIWYG 模式的 editor.getTableContext() 对齐，供原生菜单置灰使用。
+ */
+export function sourceTableContext(content: string, caret: number): TableContext {
+  const block = findTableBlock(content, caret);
+  if (!block) return { inTable: false, inHeader: false };
+  const rowIndex = currentLineIndex(content, caret) - block.start;
+  return { inTable: true, inHeader: isTableSeparator(block.lines[1]) && rowIndex === 0 };
 }
 
 /** 3×3 表格片段 */

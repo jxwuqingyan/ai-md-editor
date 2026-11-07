@@ -42,7 +42,7 @@ function ToolbarSvg({ name }: { name: ToolbarIcon }): JSX.Element {
 }
 
 /**
- * 编辑区底部浮动工具栏（贴合 Typora 风格）。
+ * 编辑区底部浮动工具栏。
  * wysiwyg 模式走 Milkdown 命令；源码模式在 textarea 选区包裹语法。
  */
 export default function Toolbar({
