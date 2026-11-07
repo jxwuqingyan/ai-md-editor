@@ -26,6 +26,10 @@ interface UseEditingOptions {
   history: SourceHistory;
   /** 替换当前标签内容 */
   setActiveContent: (content: string, dirty?: boolean) => void;
+  /** 确保当前文档已落盘，返回绝对路径（取消返回 null） */
+  ensureDocPath: () => Promise<string | null>;
+  /** 向用户提示错误（状态栏短暂显示） */
+  onError?: (message: string) => void;
 }
 
 /**
@@ -39,7 +43,9 @@ export function useEditing({
   viewModeRef,
   readOnlyRef,
   history,
-  setActiveContent
+  setActiveContent,
+  ensureDocPath,
+  onError
 }: UseEditingOptions) {
   /** 取当前标签 */
   const activeTab = useCallback(
@@ -136,7 +142,7 @@ export function useEditing({
     [applyFormat]
   );
 
-  /** 处理图片粘贴：保存到 assets/ 目录，插入 markdown 图片语法 */
+  /** 处理图片粘贴：保存到文档同级 img/ 目录，插入 markdown 图片语法 */
   const handlePaste = useCallback(
     async (event: ClipboardEvent) => {
       if (readOnlyRef.current) return;
@@ -150,12 +156,17 @@ export function useEditing({
         event.preventDefault();
         const extension = item.type.split('/')[1] ?? 'png';
         const data = new Uint8Array(await blob.arrayBuffer());
-        const tab = activeTab();
-        const docDir = tab?.path ? tab.path.slice(0, tab.path.lastIndexOf('/')) : '';
-        const result = await window.api.saveImage({ data, extension, docDir });
+
+        // 图片必须放在文档同级的 img/ 目录，新文档先落盘再继续
+        const docPath = await ensureDocPath();
+        if (!docPath) {
+          onError?.('文档尚未保存，已取消插入图片');
+          return;
+        }
+        const result = await window.api.saveImage({ data, extension, docPath });
         if (!result.relativePath) {
-          console.error('图片保存失败:', result.error);
-          break;
+          onError?.(`图片保存失败：${result.error ?? '未知错误'}`);
+          return;
         }
         const imageMarkdown = `![图片](${result.relativePath})`;
         if (viewModeRef.current === 'wysiwyg' && editorRef.current) {
@@ -176,17 +187,24 @@ export function useEditing({
         break;
       }
     },
-    [readOnlyRef, activeTab, viewModeRef, editorRef, sourceTextarea, setActiveContent]
+    [readOnlyRef, activeTab, viewModeRef, editorRef, sourceTextarea, setActiveContent, ensureDocPath, onError]
   );
 
-  /** 从本地文件选择图片并插入相对路径（复用粘贴图片的 assets 保存链路） */
+  /** 从本地文件选择图片并插入相对路径（保存到文档同级 img/ 目录） */
   const chooseImage = useCallback(async () => {
     if (readOnlyRef.current) return;
-    const tab = activeTab();
-    const docDir = tab?.path ? tab.path.slice(0, tab.path.lastIndexOf('/')) : '';
-    const result = await window.api.chooseImage(docDir);
-    if (result.relativePath) applyFormat('snippet', `![图片](${result.relativePath})`);
-  }, [readOnlyRef, activeTab, applyFormat]);
+    const docPath = await ensureDocPath();
+    if (!docPath) {
+      onError?.('文档尚未保存，已取消插入图片');
+      return;
+    }
+    const result = await window.api.chooseImage(docPath);
+    if (result.relativePath) {
+      applyFormat('snippet', `![图片](${result.relativePath})`);
+      return;
+    }
+    if (result.error && result.error !== '已取消') onError?.(`图片插入失败：${result.error}`);
+  }, [readOnlyRef, ensureDocPath, onError, applyFormat]);
 
   /** 粘贴为纯文本：读剪贴板纯文本后在光标处插入 */
   const pastePlain = useCallback(async () => {

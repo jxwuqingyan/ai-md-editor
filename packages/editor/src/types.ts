@@ -60,6 +60,11 @@ export interface EditorInstance {
   centerCaret(): void;
   /** 查询当前光标是否在表格 / 表头内 */
   getTableContext(): TableContext;
+  /**
+   * 设置当前文档所在目录（用于把 Markdown 里的相对图片路径解析成可显示的绝对地址）。
+   * 传入 null 表示未保存的新文档，图片不解析。
+   */
+  setImageBaseDir(dir: string | null): void;
   /** 聚焦编辑器 */
   focus(): void;
   /** 销毁编辑器，释放资源 */

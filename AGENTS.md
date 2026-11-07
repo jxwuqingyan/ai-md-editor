@@ -142,7 +142,7 @@ ai-md-editor/
 
 | # | 决策 |
 |---|------|
-| 1 | 图片粘贴：默认存相对路径 `assets/` 目录 |
+| 1 | 图片粘贴：存到文档同级 `img/` 目录，Markdown 用相对路径 `img/xxx.png` 引用（文档 + img 目录整体可移植） |
 | 2 | 数学公式：v1.1 引入（不在第一版） |
 | 3 | 自动更新：不做 |
 | 4 | 中文输入法（IME）：需专项适配，M1 纳入 |
@@ -176,6 +176,8 @@ ai-md-editor/
 | 片段插入 | `packages/editor/src/commands.ts` `insertSnippet` | 行内片段替换选区；块级片段插到当前顶层块之后（空段落直接替换），否则定义类节点会拆坏段落 |
 | 表格行/列增删 | `packages/editor/src/commands.ts` | 删行：正文行直接删，表头行整表重建；删列：`table_row` 与 `table_header_row` 都要遍历 |
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
+| 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
+| 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
 
@@ -190,6 +192,8 @@ ai-md-editor/
 | 删除表格列无反应 | 只处理 `table_row`，漏掉 `table_header_row`，列数不一致被 prosemirror-tables 自动补齐 | 两种行类型都要遍历 |
 | 删除表头行后表头被清空、凭空多一行 | 事务里「先删表头行、再 replaceWith 提升新表头」，中途文档违反「表格必须以表头行开头」的内容表达式，第二步坐标错位 | 按新的行序列构造整张表，`replaceWith` 一次替换（见 `commands.ts` `deleteTableRow`） |
 | 表格菜单项不按上下文置灰 | 光标上下文从未同步到主进程 | 编辑器插件 + 源码模式行判断 → `MenuViewState.inTable` / `inTableHeader` |
+| 插入图片失败 / 图片落到奇怪位置 | 渲染层传「文档目录」，未保存文档传空串，主进程 `join('.', 'img')` 写到进程 cwd（打包后不可写） | 传文档绝对路径，主进程 `dirname` 计算；无路径先另存为 |
+| 粘贴的图片在编辑器里不显示 | `<img src="img/x.png">` 按渲染页基址解析到应用目录 | 插件把 `src` 换成绝对 `file://`，文本仍是相对路径；CSP `img-src` 放行 `file:` |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 

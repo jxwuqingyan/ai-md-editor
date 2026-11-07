@@ -8,6 +8,7 @@
  * - 复制为纯文本 / Markdown / HTML 代码
  * - 全屏 / 最小化
  * - 深层目录下「在文件树中显示」逐级展开
+ * - 图片存到文档同级 img/ 目录、Markdown 保持相对路径、编辑器内正常显示、粘贴链路
  * - 源码模式撤销栈的连续键入合并
  *
  * 运行（必须关掉内嵌 Node 模式与 NODE_OPTIONS 注入）：
@@ -17,7 +18,7 @@
  * 或用 npm 脚本：npm run test:e2e
  */
 const { app, BrowserWindow, Menu, clipboard, dialog } = require('electron');
-const { mkdirSync, writeFileSync } = require('node:fs');
+const { mkdirSync, writeFileSync, existsSync } = require('node:fs');
 const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 
@@ -30,6 +31,14 @@ function check(name, passed, detail = '') {
   results.push({ name, passed, detail });
   const mark = passed ? '✓' : '✗';
   console.log(`${mark} ${name}${detail ? ` — ${detail}` : ''}`);
+}
+
+/** 环境不满足时跳过（计入通过，但单独统计） */
+const skips = [];
+function skip(name, reason) {
+  skips.push(name);
+  results.push({ name, passed: true, detail: reason });
+  console.log(`⊘ ${name} — 跳过：${reason}`);
 }
 
 /** 等待条件成立（轮询，超时抛错） */
@@ -140,9 +149,12 @@ async function ensureWysiwygMode() {
     menuAction('view:toggle-mode');
     await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror'))`), { label: '进入所见即所得模式' });
   }
-  // 等编辑器异步初始化完成（Shiki 高亮器加载）
+  // 等编辑器异步初始化完成（Shiki 高亮器加载）；注意只有标题的文档没有 <p>
   await waitFor(
-    () => exec(`Boolean(document.querySelector('.ProseMirror table, .ProseMirror p'))`),
+    () =>
+      exec(
+        `Boolean(document.querySelector('.ProseMirror :is(h1,h2,h3,h4,h5,h6,p,ul,ol,blockquote,table,pre,hr)'))`
+      ),
     { label: '编辑器挂载' }
   );
 }
@@ -356,30 +368,6 @@ async function runTests() {
   win.webContents.print = originalPrint;
   check('文件 → 打印触发主进程打印', printed === true, `printed=${printed}`);
 
-  // ===== 7. 全屏 / 最小化 =====
-  menuAction('view:toggle-fullscreen');
-  // macOS 全屏有系统动画，isFullScreen 需要等动画结束后才为 true
-  const enteredFullScreen = await waitFor(
-    async () => win.isFullScreen() === true,
-    { timeout: 8000, label: '进入全屏' }
-  ).catch(() => false);
-  check('进入全屏', enteredFullScreen === true, `isFullScreen=${win.isFullScreen()} visible=${win.isVisible()}`);
-  menuAction('view:toggle-fullscreen');
-  const leftFullScreen = await waitFor(
-    async () => win.isFullScreen() === false,
-    { timeout: 8000, label: '退出全屏' }
-  ).catch(() => false);
-  check('退出全屏', leftFullScreen === true, `isFullScreen=${win.isFullScreen()}`);
-
-  menuAction('view:minimize-window');
-  const minimized = await waitFor(
-    async () => win.isMinimized() === true,
-    { timeout: 8000, label: '最小化' }
-  ).catch(() => false);
-  check('最小化窗口', minimized === true, `isMinimized=${win.isMinimized()}`);
-  win.restore();
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
   // ===== 8. 深层目录：在文件树中定位 =====
   const root = join(tmpdir(), `md-note-e2e-${Date.now()}`);
   const deepDir = join(root, 'a', 'b', 'c');
@@ -409,6 +397,146 @@ async function runTests() {
   check('深层目录逐级展开并高亮目标文件', activeTitle === deepFile, `active=${activeTitle}`);
   check('逐级展开三级目录', Number(expandedDirs) >= 3, `nodeCount=${expandedDirs}`);
   check('深层文件已作为标签打开', openTabName === 'deep.md', `tab=${openTabName}`);
+
+  // ===== 9. 图片：存到文档同级 img/、相对引用、编辑器内正常显示 =====
+  await ensureWysiwygMode();
+  const imgDir = join(root, 'img');
+  mkdirSync(imgDir, { recursive: true });
+  // 1×1 透明 PNG
+  writeFileSync(
+    join(imgDir, 'a.png'),
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64')
+  );
+  const imgDoc = join(root, 'img-test.md');
+  writeFileSync(imgDoc, '# 图片\n\n![图片](img/a.png)\n', 'utf-8');
+
+  win.webContents.send('open-file', imgDoc);
+  const imgState = await waitFor(
+    () =>
+      exec(`(() => {
+        const img = document.querySelector('.ProseMirror img:not(.ProseMirror-separator)');
+        if (!img) return null;
+        if (!img.src || img.naturalWidth === 0) return null;
+        return JSON.stringify({ src: img.src, attr: img.getAttribute('src'), width: img.naturalWidth });
+      })()`),
+    { label: '图片加载', timeout: 20000 }
+  );
+  const parsed = JSON.parse(imgState);
+  check(
+    '相对图片路径解析为文件地址并成功加载',
+    parsed.src.startsWith('file://') && parsed.src.endsWith('/img/a.png') && parsed.width > 0,
+    parsed.src
+  );
+
+  // 保存回写仍是相对路径
+  await ensureSourceMode();
+  const imgSource = String(await exec(READ_SOURCE));
+  check('Markdown 文本保持相对路径', imgSource.includes('![图片](img/a.png)'), JSON.stringify(imgSource));
+
+  // 未保存文档（无路径）时保存图片应明确报错，而不是写到进程目录
+  const noPathResult = await exec(
+    `window.api.saveImage({ data: new Uint8Array([137,80,78,71]), extension: 'png', docPath: '' })`
+  );
+  check('未保存文档时拒绝保存图片并给出原因', Boolean(noPathResult.error), JSON.stringify(noPathResult.error));
+
+  // 已有路径：图片落到同级 img/ 目录并返回相对路径
+  const saved = await exec(
+    `window.api.saveImage({ data: new Uint8Array([137,80,78,71]), extension: 'png', docPath: ${JSON.stringify(imgDoc)} })`
+  );
+  const savedFile = saved.relativePath ? join(root, saved.relativePath) : '';
+  check(
+    '图片保存到文档同级 img/ 目录',
+    Boolean(saved.relativePath && saved.relativePath.startsWith('img/')) && existsSync(savedFile),
+    `${saved.relativePath}`
+  );
+
+  // 端到端粘贴：合成带图片的 paste 事件，走真实的粘贴链路
+  const pasteResult = await exec(`(() => {
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+    const file = new File([bytes], 'paste.png', { type: 'image/png' });
+    const ta = document.querySelector('.source-editor');
+    if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    // 模拟真实的 paste 事件：只依赖 clipboardData.items 这一条 DOM 契约
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { items: [{ type: 'image/png', getAsFile: () => file }] }
+    });
+    window.dispatchEvent(event);
+    return 'sent:' + file.size;
+  })()`);
+  // 文档里本来就有一张图，必须等「第二张」出现，否则会读到插入前的旧内容
+  const countImages = (text) =>
+    [...text.matchAll(/!\[图片\]\((img\/[^)]+)\)/g)].map((match) => match[1]);
+  const pastedMarkdown = await waitFor(
+    async () => {
+      const text = String(await exec(READ_SOURCE));
+      return countImages(text).length >= 2 ? text : null;
+    },
+    { label: '粘贴后插入图片语法', timeout: 20000 }
+  );
+  const pastedNames = countImages(pastedMarkdown);
+  const pastedName = pastedNames[pastedNames.length - 1];
+  check(
+    '粘贴图片：插入新的 img/ 相对路径且文件已落盘',
+    pastedNames.length === 2 && pastedName !== 'img/a.png' && existsSync(join(root, pastedName)),
+    `${pastedName}（事件项=${pasteResult}，图片数量=${pastedNames.length}）`
+  );
+  // 切到另一个文档再切回来，图片应仍然按当前文档目录重新解析
+  await ensureWysiwygMode();
+  win.webContents.send('open-file', deepFile);
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  await exec(`[...document.querySelectorAll('.tab')].find((t) => t.textContent.includes('img-test.md'))?.click()`);
+  const imgAfterSwitch = await waitFor(
+    () =>
+      exec(`(() => {
+        const img = document.querySelector('.ProseMirror img:not(.ProseMirror-separator)');
+        return img && img.naturalWidth > 0 ? img.getAttribute('src') : null;
+      })()`),
+    { label: '切换标签后图片加载', timeout: 20000 }
+  );
+  check(
+    '切换标签后图片仍按文档目录解析',
+    String(imgAfterSwitch).startsWith('file://') && String(imgAfterSwitch).endsWith('/img/a.png'),
+    String(imgAfterSwitch)
+  );
+
+  // ===== 10. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
+  app.focus({ steal: true });
+  win.show();
+  win.focus();
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  // macOS 只有在应用可激活时才允许改窗口状态；无 GUI 会话的沙箱里窗口无法获得焦点
+  const activatable = win.isFocused() || BrowserWindow.getFocusedWindow() !== null;
+  if (!activatable) {
+    skip('进入全屏 / 退出全屏', '当前会话窗口无法激活，系统拒绝切换全屏');
+    skip('最小化窗口', '当前会话窗口无法激活，系统拒绝最小化');
+  } else {
+    menuAction('view:toggle-fullscreen');
+    // macOS 全屏有系统动画，isFullScreen 需要等动画结束后才为 true
+    const enteredFullScreen = await waitFor(
+      async () => win.isFullScreen() === true,
+      { timeout: 8000, label: '进入全屏' }
+    ).catch(() => false);
+    check('进入全屏', enteredFullScreen === true, `isFullScreen=${win.isFullScreen()}`);
+
+    menuAction('view:toggle-fullscreen');
+    const leftFullScreen = await waitFor(
+      async () => win.isFullScreen() === false,
+      { timeout: 8000, label: '退出全屏' }
+    ).catch(() => false);
+    check('退出全屏', leftFullScreen === true, `isFullScreen=${win.isFullScreen()}`);
+
+    menuAction('view:minimize-window');
+    const minimized = await waitFor(
+      async () => win.isMinimized() === true,
+      { timeout: 8000, label: '最小化' }
+    ).catch(() => false);
+    check('最小化窗口', minimized === true, `isMinimized=${win.isMinimized()}`);
+    win.restore();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
 }
 
 // ===== 启动 =====
@@ -421,7 +549,8 @@ app.whenReady().then(async () => {
     console.error('测试执行异常:', error);
   }
   const passed = results.filter((r) => r.passed).length;
-  console.log(`\n结果：${passed}/${results.length} 通过`);
+  const skippedText = skips.length > 0 ? `（其中跳过 ${skips.length} 项）` : '';
+  console.log(`\n结果：${passed}/${results.length} 通过${skippedText}`);
   if (results.some((r) => !r.passed)) failed = true;
   setTimeout(() => app.exit(failed ? 1 : 0), 200);
 });

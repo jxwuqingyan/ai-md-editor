@@ -49,6 +49,7 @@ import { configureStringify } from './stringify';
 import { calloutPlugin, tocPlugin } from './decorations';
 import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
+import { applyImageSources, imageSourcePlugin } from './images';
 import {
   applyTaskState,
   clearFormat,
@@ -81,6 +82,8 @@ export async function createEditor(
   let currentMarkdown = defaultValue;
 
   const highlightParser = await createHighlightParser();
+  // 当前文档所在目录：用于把 `img/xxx.png` 之类的相对路径解析成可显示的绝对地址
+  const imageState = { dir: '' };
 
   const editor = await Editor.make()
     .config((ctx) => {
@@ -113,6 +116,8 @@ export async function createEditor(
     .use(tocPlugin)
     // 光标进出表格时通知渲染层，用于原生菜单置灰
     .use(selectionContextPlugin((context) => onTableContext?.(context)))
+    // 相对图片路径 → 绝对 file:// 地址（只改 DOM，不改 Markdown 文本）
+    .use(imageSourcePlugin(() => imageState.dir))
     .use(highlight)
     .use(math)
     .use(diagram)
@@ -411,6 +416,11 @@ export async function createEditor(
         const delta = coords.top - target;
         if (Math.abs(delta) > 2) scroller.scrollTop += delta;
       });
+    },
+
+    setImageBaseDir(dir: string | null): void {
+      imageState.dir = dir ?? '';
+      withView((view) => applyImageSources(view, imageState.dir));
     },
 
     getTableContext(): TableContext {

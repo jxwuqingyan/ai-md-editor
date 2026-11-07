@@ -51,6 +51,7 @@ export default function App(): JSX.Element {
     save,
     saveAll,
     saveAs,
+    ensureActivePath,
     duplicate,
     reloadFromDisk,
     rename,
@@ -91,6 +92,24 @@ export default function App(): JSX.Element {
     zoom
   } = useDisplayState({ hasPath: Boolean(activeTab?.path) });
 
+  // 状态栏短暂提示（图片保存失败等）
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  // 当前文档所在目录：编辑器用它把相对图片路径解析成可显示地址
+  const docDir = useMemo(() => {
+    const path = activeTab?.path;
+    if (!path) return null;
+    const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+    return index > 0 ? path.slice(0, index) : null;
+  }, [activeTab?.path]);
+
+
   // ===== 编辑器 =====
   const { editorVersion, handleReady } = useEditorRuntime({
     editorRef,
@@ -100,6 +119,10 @@ export default function App(): JSX.Element {
     typewriterMode,
     viewMode
   });
+
+  useEffect(() => {
+    editorRef.current?.setImageBaseDir(docDir);
+  }, [docDir, editorVersion, viewMode]);
 
   const {
     applyFormat,
@@ -116,7 +139,9 @@ export default function App(): JSX.Element {
     viewModeRef,
     readOnlyRef,
     history,
-    setActiveContent
+    setActiveContent,
+    ensureDocPath: ensureActivePath,
+    onError: setNotice
   });
 
   const {
@@ -459,6 +484,7 @@ export default function App(): JSX.Element {
       <footer className="statusbar">
         <span>{viewMode === 'wysiwyg' ? 'Markdown' : '源码'}</span>
         {readOnly && <span>只读</span>}
+        {notice && <span className="statusbar-notice">{notice}</span>}
         <span>UTF-8</span>
         <div className="spacer" />
         <span title="界面缩放（显示 → 缩放）">{zoomPercent}%</span>

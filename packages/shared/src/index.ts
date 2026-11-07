@@ -153,13 +153,13 @@ export interface SaveImageInput {
   data: Uint8Array;
   /** 文件扩展名（不含点，如 png/jpg） */
   extension: string;
-  /** 目标 Markdown 文件所在目录（用于确定 assets 相对路径基准） */
-  docDir: string;
+  /** 目标 Markdown 文件的绝对路径（图片存到它的同级 img/ 目录） */
+  docPath: string;
 }
 
 /** 保存图片的结果 */
 export interface SaveImageResult {
-  /** 保存成功后的相对路径（如 assets/20261026-123456.png），失败为 null */
+  /** 保存成功后的相对路径（如 img/20261026-123456.png），失败为 null */
   relativePath: string | null;
   /** 错误信息（成功为 null） */
   error: string | null;

@@ -42,13 +42,13 @@ const api = {
   writeFile: (filePath: string, content: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.WriteFile, filePath, content),
 
-  /** 保存粘贴的图片到文档同级 assets/ 目录，返回相对路径 */
+  /** 保存粘贴的图片到文档同级 img/ 目录，返回相对路径 */
   saveImage: (input: SaveImageInput): Promise<SaveImageResult> =>
     ipcRenderer.invoke(IpcChannel.SaveImage, input),
 
-  /** 选择本地图片并保存到 assets/ 目录，返回相对路径 */
-  chooseImage: (docDir: string): Promise<SaveImageResult> =>
-    ipcRenderer.invoke(IpcChannel.ChooseImage, docDir),
+  /** 选择本地图片并保存到文档同级 img/ 目录，返回相对路径 */
+  chooseImage: (docPath: string): Promise<SaveImageResult> =>
+    ipcRenderer.invoke(IpcChannel.ChooseImage, docPath),
 
   /** 获取最近文件列表 */
   getRecent: (): Promise<RecentFile[]> => ipcRenderer.invoke(IpcChannel.GetRecent),

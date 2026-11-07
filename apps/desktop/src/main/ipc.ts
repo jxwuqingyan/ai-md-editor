@@ -106,10 +106,21 @@ async function handleWriteFile(
   await writeFile(filePath, content, 'utf-8');
 }
 
-/** 把图片二进制写到文档同级 assets/ 目录，返回相对路径 */
-async function saveImageToAssets(data: Uint8Array, extension: string, docDir: string): Promise<string> {
-  const assetsDir = join(docDir || '.', 'assets');
-  await mkdir(assetsDir, { recursive: true });
+/** 图片目录名：固定放在 Markdown 文件同级，随文档一起拷贝即可带走图片 */
+const IMAGE_DIR = 'img';
+
+/**
+ * 把图片二进制写到 Markdown 文件同级的 img/ 目录，返回相对路径。
+ * 相对路径保证文档 + img 目录整体拷走后仍能正确引用。
+ *
+ * @param docPath Markdown 文件的绝对路径（未保存的新文档无法确定目录）
+ */
+async function saveImageToDocDir(data: Uint8Array, extension: string, docPath: string): Promise<string> {
+  if (!docPath) {
+    throw new Error('文档尚未保存，无法确定图片目录');
+  }
+  const dir = join(dirname(docPath), IMAGE_DIR);
+  await mkdir(dir, { recursive: true });
 
   // 生成唯一文件名：时间戳 + 随机后缀，避免冲突
   const timestamp = new Date()
@@ -118,12 +129,12 @@ async function saveImageToAssets(data: Uint8Array, extension: string, docDir: st
     .slice(0, 14);
   const random = Math.random().toString(36).slice(2, 8);
   const filename = `${timestamp}-${random}.${extension}`;
-  await writeFile(join(assetsDir, filename), Buffer.from(data));
-  return `assets/${filename}`;
+  await writeFile(join(dir, filename), Buffer.from(data));
+  return `${IMAGE_DIR}/${filename}`;
 }
 
 /**
- * 保存粘贴的图片到文档同级的 assets/ 目录，返回相对路径。
+ * 保存粘贴的图片到文档同级的 img/ 目录，返回相对路径。
  * 文件名用时间戳 + 随机后缀，避免冲突。
  */
 async function handleSaveImage(
@@ -131,17 +142,17 @@ async function handleSaveImage(
   input: SaveImageInput
 ): Promise<SaveImageResult> {
   try {
-    const relativePath = await saveImageToAssets(input.data, input.extension, input.docDir);
+    const relativePath = await saveImageToDocDir(input.data, input.extension, input.docPath);
     return { relativePath, error: null };
   } catch (err) {
     return { relativePath: null, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
-/** 从系统对话框选择本地图片，复制到 assets/ 目录并返回相对路径 */
+/** 从系统对话框选择本地图片，复制到文档同级 img/ 目录并返回相对路径 */
 async function handleChooseImage(
   win: BrowserWindow | null,
-  docDir: string
+  docPath: string
 ): Promise<SaveImageResult> {
   const options = {
     properties: ['openFile' as const],
@@ -155,7 +166,7 @@ async function handleChooseImage(
     const filePath = result.filePaths[0];
     const data = await readFile(filePath);
     const extension = (filePath.split('.').pop() ?? 'png').toLowerCase();
-    const relativePath = await saveImageToAssets(new Uint8Array(data), extension, docDir);
+    const relativePath = await saveImageToDocDir(new Uint8Array(data), extension, docPath);
     return { relativePath, error: null };
   } catch (err) {
     return { relativePath: null, error: err instanceof Error ? err.message : String(err) };
@@ -334,8 +345,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.SaveImage, (event, input: SaveImageInput) =>
     handleSaveImage(BrowserWindow.fromWebContents(event.sender), input)
   );
-  ipcMain.handle(IpcChannel.ChooseImage, (event, docDir: string) =>
-    handleChooseImage(BrowserWindow.fromWebContents(event.sender), docDir)
+  ipcMain.handle(IpcChannel.ChooseImage, (event, docPath: string) =>
+    handleChooseImage(BrowserWindow.fromWebContents(event.sender), docPath)
   );
   ipcMain.handle(IpcChannel.GetRecent, (): RecentFile[] => getRecent());
   ipcMain.handle(IpcChannel.AddRecent, async (_event, path: string, name: string) => {

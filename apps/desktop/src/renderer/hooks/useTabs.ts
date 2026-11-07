@@ -27,7 +27,7 @@ const DEFAULT_DOC = `# MarkdownNote
 - Electron + React + TypeScript
 - Milkdown（ProseMirror + remark）
 
-> 支持多标签页、打开 .md 文件、Cmd/Ctrl+S 保存、粘贴图片到 assets/ 目录。
+> 支持多标签页、打开 .md 文件、Cmd/Ctrl+S 保存、粘贴图片自动存到同级 img/ 目录。
 `;
 
 /** 生成唯一标签 id（时间戳 + 自增序号） */
@@ -222,6 +222,23 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     }
   }, [findActive]);
 
+  /**
+   * 确保当前标签有磁盘路径（插入图片、插入需要落盘的内容前调用）。
+   * 未保存的新文档会先弹「另存为」，用户取消则返回 null。
+   */
+  const ensureActivePath = useCallback(async (): Promise<string | null> => {
+    const tab = findActive();
+    if (!tab) return null;
+    if (tab.path) return tab.path;
+    const result = await window.api.saveFileAs(tab.content, tab.name);
+    if (result.canceled || !result.path) return null;
+    const path = result.path;
+    const name = result.name ?? tab.name;
+    setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false } : t)));
+    void window.api.addRecent(path, name);
+    return path;
+  }, [findActive]);
+
   /** 复制一份到新路径：原文档与标签保持不变，新副本作为独立标签打开 */
   const duplicate = useCallback(async () => {
     const tab = findActive();
@@ -312,6 +329,7 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     save,
     saveAll,
     saveAs,
+    ensureActivePath,
     duplicate,
     reloadFromDisk,
     rename,
