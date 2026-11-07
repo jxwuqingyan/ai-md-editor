@@ -9,7 +9,8 @@
   "files": ["out/**/*", "package.json"],
   "mac": {
     "target": ["dmg"],
-    "category": "public.app-category.productivity"
+    "category": "public.app-category.productivity",
+    "artifactName": "${productName}-${version}-${arch}.${ext}"
   },
   "win": {
     "target": ["nsis"]

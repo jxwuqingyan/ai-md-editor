@@ -23,8 +23,10 @@ jobs:
           - os: macos-15-intel
             arch: x64
             target: mac
-          # macOS arm64（Apple Silicon）
-          - os: macos-14
+          # macOS arm64（Apple Silicon）—— macos-14 已从官方支持列表移除（会报
+          # "configuration 'macos-14-arm64-us-xl' is not supported"），改用 macos-15
+          # 该 label 是 M1 arm64 机器
+          - os: macos-15
             arch: arm64
             target: mac
           # Windows x64
