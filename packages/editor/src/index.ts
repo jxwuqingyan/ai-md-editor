@@ -39,6 +39,7 @@ import {
 } from '@milkdown/kit/preset/gfm';
 import { TextSelection, NodeSelection } from '@milkdown/kit/prose/state';
 import { toggleMark } from '@milkdown/kit/prose/commands';
+import { history, undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { Slice, type Node as ProseNode, type ResolvedPos } from '@milkdown/kit/prose/model';
 import { highlight, highlightPluginConfig } from '@milkdown/plugin-highlight';
@@ -87,6 +88,12 @@ export interface EditorInstance {
   scrollToHeading(index: number): void;
   /** 应用格式化命令（工具栏与系统菜单共用） */
   format(action: FormatAction, payload?: number | string): void;
+  /** 撤销上一步编辑 */
+  undo(): void;
+  /** 重做被撤销的编辑 */
+  redo(): void;
+  /** 当前是否还有可撤销 / 可重做的历史 */
+  canUndoRedo(): { undo: boolean; redo: boolean };
   /** 设置可编辑状态（只读模式） */
   setEditable(editable: boolean): void;
   /** 获取纯文本（不含 Markdown 标记），供查找功能使用 */
@@ -177,6 +184,8 @@ export async function createEditor(
     })
     .use(commonmark)
     .use(gfm)
+    // 撤销/重做历史（ProseMirror history）：没有它 Cmd+Z 在整个编辑器里无效
+    .use(history)
     .use([...underlineSchema])
     // $remark 返回 [optionsCtx, plugin]，两者都要注册，否则上下文注入缺失
     .use([...underlineRemark])
@@ -234,13 +243,15 @@ export async function createEditor(
     }
   };
 
-  /** 在当前块的上方或下方插入一个空段落 */
+  /** 当前块的上方或下方插入一个空段落 */
   const insertParagraph = (above: boolean): void => {
     withView((view) => {
       const { state } = view;
       const $from = state.selection.$from;
       if ($from.depth < 1) return;
-      const index = $from.index(1);
+      // 必须用 index(0) 取「文档顶层」的块序号：光标在引用块/列表项内部时，
+      // 深度不一定为 1，index(1) 得到的会是父容器内的序号，导致插入位置错乱
+      const index = $from.index(0);
       const node = state.doc.child(index);
       const paragraph = state.schema.nodes['paragraph'];
       if (!paragraph) return;
@@ -260,7 +271,8 @@ export async function createEditor(
       const $from = state.selection.$from;
       if ($from.depth < 1) return;
       const doc = state.doc;
-      const index = $from.index(1);
+      // 同 insertParagraph：取文档顶层块的序号，而不是光标直接父级的序号
+      const index = $from.index(0);
       const node = doc.child(index);
       const pos = topLevelPos(doc, index);
 
@@ -312,11 +324,24 @@ export async function createEditor(
       const cell = findAncestor($from, 'table_cell') ?? findAncestor($from, 'table_header');
       const table = findAncestor($from, 'table');
       if (!cell || !table) return;
-      // 单元格在其父行中的索引即列索引
-      const cellIndex = $from.index($from.depth - 1);
+      // 单元格在所属行中的索引：必须取 table_row 那一层的子索引。
+      // 用 $from.index($from.depth - 1) 取到的是单元格内部（段落）的索引，永远是 0，
+      // 于是删列只会删第一列或完全不生效。
+      let cellIndex = -1;
+      for (let depth = $from.depth; depth > 0; depth -= 1) {
+        const name = $from.node(depth).type.name;
+        if (name === 'table_row' || name === 'table_header_row') {
+          cellIndex = $from.index(depth);
+          break;
+        }
+      }
+      if (cellIndex < 0) return;
       const targets: { pos: number; size: number }[] = [];
       table.node.forEach((row, rowOffset) => {
-        if (row.type.name !== 'table_row') return;
+        // 表头行的节点类型是 table_header_row，必须一并处理：
+        // 只删数据行的同一列会让表格列数不一致，prosemirror-tables 会自动补回
+        // 缺失的单元格，表现就是「删除列没有任何反应」
+        if (row.type.name !== 'table_row' && row.type.name !== 'table_header_row') return;
         let offset = 0;
         row.forEach((column, _childOffset, i) => {
           if (i === cellIndex) {
@@ -575,6 +600,27 @@ export async function createEditor(
       withView((view) => {
         view.setProps({ editable: () => editable });
       });
+    },
+
+    undo(): void {
+      // 直接调 history 的 undo 命令；无历史时命令返回 false，不产生副作用
+      editor.action(callCommand(undoCommand.key));
+      withView((view) => view.focus());
+    },
+
+    redo(): void {
+      editor.action(callCommand(redoCommand.key));
+      withView((view) => view.focus());
+    },
+
+    canUndoRedo(): { undo: boolean; redo: boolean } {
+      let result = { undo: false, redo: false };
+      withView((view) => {
+        // undoDepth / redoDepth 由 history 插件的 state 暴露
+        const state = view.state as unknown as { undoDepth?: number; redoDepth?: number };
+        result = { undo: (state.undoDepth ?? 0) > 0, redo: (state.redoDepth ?? 0) > 0 };
+      });
+      return result;
     },
 
     getPlainText(): string {

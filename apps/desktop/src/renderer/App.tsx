@@ -74,6 +74,7 @@ export default function App(): JSX.Element {
   const [wordCountVisible, setWordCountVisible] = useState(false);
   const [outlineWindowVisible, setOutlineWindowVisible] = useState(false);
   const [alwaysOnTop, setAlwaysOnTop] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   // ===== 查找 / 替换 =====
   const [findOpen, setFindOpen] = useState(false);
@@ -151,19 +152,61 @@ export default function App(): JSX.Element {
       sidebarPanel,
       wordCountVisible,
       outlineWindowVisible,
-      alwaysOnTop
+      alwaysOnTop,
+      fullscreen,
+      hasPath: Boolean(activeTab?.path)
     };
     window.api.updateMenuState(state);
   }, [
     tabbarVisible, viewMode, readOnly, focusMode, typewriterMode, toolbarVisible,
-    sidebarOpen, sidebarPanel, wordCountVisible, outlineWindowVisible, alwaysOnTop
+    sidebarOpen, sidebarPanel, wordCountVisible, outlineWindowVisible, alwaysOnTop, fullscreen,
+    activeTab?.path
   ]);
+
+  // 初始化并跟随窗口全屏状态（用户也可能用系统绿灯按钮进入全屏）
+  useEffect(() => {
+    void window.api.isFullScreen().then(setFullscreen);
+  }, []);
+
+  useEffect(() => {
+    const onResize = (): void => {
+      void window.api.isFullScreen().then(setFullscreen);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   // 内容变化回调：更新活动标签的 content + dirty
   const handleChange = useCallback((markdown: string) => {
     const id = activeIdRef.current;
     setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, content: markdown, dirty: true } : t)));
   }, []);
+
+  /**
+   * 源码模式的撤销栈。
+   * WYSIWYG 的历史由 ProseMirror 维护；纯 textarea 没有可用的撤销历史
+   * （浏览器只在真实键入时记录，程序性改值不进栈），因此这里自己记录快照。
+   */
+  const sourceHistoryRef = useRef<{ past: string[]; future: string[] }>({ past: [], future: [] });
+
+  const resetSourceHistory = useCallback(() => {
+    sourceHistoryRef.current = { past: [], future: [] };
+  }, []);
+
+  /** 源码编辑：先把旧内容压栈，再更新状态 */
+  const handleSourceChange = useCallback(
+    (value: string) => {
+      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      const history = sourceHistoryRef.current;
+      if (tab && tab.content !== value) {
+        history.past.push(tab.content);
+        if (history.past.length > 200) history.past.shift();
+        history.future = [];
+      }
+      handleChange(value);
+    },
+    [handleChange]
+  );
 
   // 编辑器就绪：保存实例、补同步异步初始化期间打开的文档、恢复只读状态
   const handleReady = useCallback((instance: EditorInstance) => {
@@ -180,8 +223,10 @@ export default function App(): JSX.Element {
   const toggleViewMode = useCallback(() => {
     const next = viewModeRef.current === 'wysiwyg' ? 'source' : 'wysiwyg';
     if (next === 'source') editorRef.current = null;
+    // 切换视图后旧的文本快照不再对应，清空避免撤回到别的模式的内容
+    resetSourceHistory();
     setViewMode(next);
-  }, []);
+  }, [resetSourceHistory]);
 
   /** 只读模式同步到编辑器实例 */
   useEffect(() => {
@@ -221,17 +266,19 @@ export default function App(): JSX.Element {
     if (id === activeIdRef.current) return;
     const target = tabsRef.current.find((t) => t.id === id);
     if (!target) return;
+    resetSourceHistory();
     setActiveId(id);
     editorRef.current?.setMarkdown(target.content);
-  }, []);
+  }, [resetSourceHistory]);
 
   /** 新建标签 */
   const handleNewTab = useCallback(() => {
     const tab = createTab('未命名.md', '');
+    resetSourceHistory();
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
     editorRef.current?.setMarkdown('');
-  }, []);
+  }, [resetSourceHistory]);
 
   /** 关闭标签：先算出下一个活动标签，再一次性更新状态（避免在 setState 回调里做副作用） */
   const handleCloseTab = useCallback((id: string) => {
@@ -246,26 +293,29 @@ export default function App(): JSX.Element {
     }
     // 关掉的是当前标签：没有剩余标签时补一个空白页
     const next = rest.length === 0 ? createTab('未命名.md', '') : rest[Math.min(idx, rest.length - 1)];
+    resetSourceHistory();
     setTabs(rest.length === 0 ? [next] : rest);
     setActiveId(next.id);
     editorRef.current?.setMarkdown(next.content);
-  }, []);
+  }, [resetSourceHistory]);
 
   /** 打开文件内容（新建/复用标签），供对话框、拖拽、open-file 事件复用 */
   const openFileContent = useCallback((path: string, name: string, content: string) => {
     const existing = tabsRef.current.find((t) => t.path === path);
     if (existing) {
+      resetSourceHistory();
       setActiveId(existing.id);
       editorRef.current?.setMarkdown(existing.content);
       return;
     }
     const tab = createTab(name, content, path);
+    resetSourceHistory();
     setTabs((prev) => [...prev, tab]);
     setActiveId(tab.id);
     editorRef.current?.setMarkdown(content);
     const dir = path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')));
     if (dir) setTreeRoot(dir);
-  }, []);
+  }, [resetSourceHistory]);
 
   /** 选择文件夹作为文件树根目录 */
   const handleChooseFolder = useCallback(async () => {
@@ -513,6 +563,49 @@ export default function App(): JSX.Element {
     applySourceResult(applySourceFormat(action, payload, ctx));
   }, [applySourceResult]);
 
+  /**
+   * 撤销 / 重做。
+   *
+   * WYSIWYG 必须走 ProseMirror 的历史命令：Electron 的 role: 'undo' 调的是
+   * webContents 的 DOM 撤销，而 ProseMirror 的编辑历史不经过 DOM，所以菜单里
+   * 原来的 role 版 Cmd+Z 一直无效。源码模式与查找框等原生控件则用 DOM 撤销。
+   */
+  const handleUndoRedo = useCallback((kind: 'undo' | 'redo') => {
+    if (readOnlyRef.current) return;
+
+    // 源码模式：使用自建快照栈
+    if (viewModeRef.current === 'source') {
+      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
+      if (!tab) return;
+      const history = sourceHistoryRef.current;
+      const target = kind === 'undo' ? history.past.pop() : history.future.pop();
+      if (target === undefined) return;
+      if (kind === 'undo') history.future.push(tab.content);
+      else history.past.push(tab.content);
+      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, content: target, dirty: true } : t)));
+      requestAnimationFrame(() => {
+        const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
+        if (ta) {
+          ta.focus();
+          ta.setSelectionRange(target.length, target.length);
+        }
+      });
+      return;
+    }
+
+    // 查找框等原生输入框：交给浏览器自己的撤销
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+      document.execCommand(kind);
+      return;
+    }
+
+    if (editorRef.current) {
+      if (kind === 'undo') editorRef.current.undo();
+      else editorRef.current.redo();
+    }
+  }, []);
+
   /** 插入链接 / 图片占位 */
   const handleInsertLink = useCallback(() => applyFormat('snippet', '[链接文字](url)'), [applyFormat]);
   const handleInsertImage = useCallback(() => applyFormat('snippet', '![图片](url)'), [applyFormat]);
@@ -674,6 +767,8 @@ export default function App(): JSX.Element {
     print: () => void window.api.print(),
     exportAs: (format) => void handleExport(format),
     copyAs: (format) => void handleCopyAs(format),
+    undo: () => handleUndoRedo('undo'),
+    redo: () => handleUndoRedo('redo'),
     pastePlain: () => void handlePastePlain(),
     format: applyFormat,
     insertLink: handleInsertLink,
@@ -688,7 +783,16 @@ export default function App(): JSX.Element {
     toggleTypewriter: () => setTypewriterMode((v) => !v),
     toggleToolbar: () => setToolbarVisible((v) => !v),
     toggleSidebar: () => setSidebarOpen((v) => !v),
-    showPanel: (panel) => { setSidebarPanel(panel); setSidebarOpen(true); },
+    showPanel: (panel) => {
+      setSidebarPanel(panel);
+      setSidebarOpen(true);
+      // 「在文件树中显示」：面板已打开时 activePath 不会变，需要主动滚到高亮项
+      if (panel === 'files') {
+        requestAnimationFrame(() => {
+          document.querySelector('.tree-file-active')?.scrollIntoView({ block: 'nearest' });
+        });
+      }
+    },
     toggleWordCount: () => setWordCountVisible((v) => !v),
     toggleOutlineWindow: () => setOutlineWindowVisible((v) => !v),
     zoom: (action) => void window.api.zoom(action),
@@ -697,7 +801,11 @@ export default function App(): JSX.Element {
       alwaysOnTopRef.current = next;
       setAlwaysOnTop(next);
       void window.api.setAlwaysOnTop(next);
-    }
+    },
+    toggleFullScreen: () => {
+      void window.api.toggleFullScreen().then(setFullscreen);
+    },
+    minimizeWindow: () => void window.api.minimizeWindow()
   });
 
   // 监听原生应用菜单动作（含可选参数）
@@ -812,7 +920,7 @@ export default function App(): JSX.Element {
               <textarea
                 className="source-editor"
                 value={activeTab?.content ?? ''}
-                onChange={(event) => handleChange(event.target.value)}
+                onChange={(event) => handleSourceChange(event.target.value)}
                 placeholder="在此输入 Markdown 源码..."
                 spellCheck={false}
                 readOnly={readOnly}

@@ -350,6 +350,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.AlwaysOnTop, (event, enabled: boolean) => {
     BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(enabled);
   });
+  ipcMain.handle(IpcChannel.ToggleFullScreen, (event): boolean => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return false;
+    const next = !win.isFullScreen();
+    win.setFullScreen(next);
+    return next;
+  });
+  ipcMain.handle(IpcChannel.IsFullScreen, (event): boolean =>
+    BrowserWindow.fromWebContents(event.sender)?.isFullScreen() ?? false
+  );
+  ipcMain.handle(IpcChannel.MinimizeWindow, (event) => {
+    BrowserWindow.fromWebContents(event.sender)?.minimize();
+  });
   ipcMain.handle(IpcChannel.NewWindow, () => {
     createWindow();
   });

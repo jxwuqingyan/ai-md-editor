@@ -44,7 +44,13 @@ export const IpcChannel = {
   /** 窗口置顶 */
   AlwaysOnTop: 'app:always-on-top',
   /** 新建独立窗口 */
-  NewWindow: 'app:new-window'
+  NewWindow: 'app:new-window',
+  /** 切换全屏（返回切换后的状态） */
+  ToggleFullScreen: 'app:toggle-fullscreen',
+  /** 查询窗口是否全屏 */
+  IsFullScreen: 'app:is-fullscreen',
+  /** 最小化当前窗口 */
+  MinimizeWindow: 'app:minimize-window'
 } as const;
 
 /** 导出类型 */
@@ -234,6 +240,10 @@ export interface MenuViewState {
   outlineWindowVisible: boolean;
   /** 窗口置顶 */
   alwaysOnTop: boolean;
+  /** 窗口处于全屏（菜单显示「退出全屏」并打勾） */
+  fullscreen: boolean;
+  /** 当前文档已关联磁盘路径（决定重命名/重载等菜单项是否可用） */
+  hasPath: boolean;
 }
 
 /** 默认菜单状态（主进程启动时使用） */
@@ -248,7 +258,9 @@ export const DEFAULT_MENU_VIEW_STATE: MenuViewState = {
   sidebarPanel: 'files',
   wordCountVisible: false,
   outlineWindowVisible: false,
-  alwaysOnTop: false
+  alwaysOnTop: false,
+  fullscreen: false,
+  hasPath: false
 };
 
 /** 原生应用菜单可触发的动作（集中定义，避免跨进程魔法字符串） */
@@ -275,6 +287,8 @@ export const MenuActions = {
   Print: 'file:print',
 
   // ===== 编辑 =====
+  Undo: 'edit:undo',
+  Redo: 'edit:redo',
   CopyMarkdown: 'edit:copy-markdown',
   CopyPlainText: 'edit:copy-plain',
   CopyHtml: 'edit:copy-html',
@@ -353,7 +367,9 @@ export const MenuActions = {
   ZoomIn: 'view:zoom-in',
   ZoomOut: 'view:zoom-out',
   ZoomReset: 'view:zoom-reset',
-  ToggleAlwaysOnTop: 'view:toggle-always-on-top'
+  ToggleAlwaysOnTop: 'view:toggle-always-on-top',
+  ToggleFullScreen: 'view:toggle-fullscreen',
+  MinimizeWindow: 'view:minimize-window'
 } as const;
 
 /** 菜单动作联合类型 */

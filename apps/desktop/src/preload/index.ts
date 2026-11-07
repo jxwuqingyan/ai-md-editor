@@ -94,6 +94,18 @@ const api = {
   setAlwaysOnTop: (enabled: boolean): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.AlwaysOnTop, enabled),
 
+  /** 切换全屏，返回切换后的状态 */
+  toggleFullScreen: (): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannel.ToggleFullScreen),
+
+  /** 查询当前是否全屏 */
+  isFullScreen: (): Promise<boolean> =>
+    ipcRenderer.invoke(IpcChannel.IsFullScreen),
+
+  /** 最小化当前窗口 */
+  minimizeWindow: (): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.MinimizeWindow),
+
   /** 新建独立窗口 */
   newWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannel.NewWindow),
 

@@ -46,6 +46,9 @@ export interface MenuHandlerDeps {
   exportAs: (format: 'html' | 'pdf' | 'word') => void;
   /** 复制为指定格式 */
   copyAs: (format: 'plain' | 'markdown' | 'html') => void;
+  /** 撤销 / 重做 */
+  undo: () => void;
+  redo: () => void;
   /** 粘贴为纯文本 */
   pastePlain: () => void;
   /** 统一格式化入口 */
@@ -84,6 +87,10 @@ export interface MenuHandlerDeps {
   zoom: (action: 'in' | 'out' | 'reset') => void;
   /** 切换窗口置顶 */
   toggleAlwaysOnTop: () => void;
+  /** 切换窗口全屏 */
+  toggleFullScreen: () => void;
+  /** 最小化窗口 */
+  minimizeWindow: () => void;
 }
 
 /** 构造完整的菜单动作分发表 */
@@ -111,6 +118,8 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.Print]: deps.print,
 
     // ===== 编辑 =====
+    [MenuActions.Undo]: deps.undo,
+    [MenuActions.Redo]: deps.redo,
     [MenuActions.CopyMarkdown]: () => deps.copyAs('markdown'),
     [MenuActions.CopyPlainText]: () => deps.copyAs('plain'),
     [MenuActions.CopyHtml]: () => deps.copyAs('html'),
@@ -189,6 +198,8 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.ZoomIn]: () => deps.zoom('in'),
     [MenuActions.ZoomOut]: () => deps.zoom('out'),
     [MenuActions.ZoomReset]: () => deps.zoom('reset'),
-    [MenuActions.ToggleAlwaysOnTop]: deps.toggleAlwaysOnTop
+    [MenuActions.ToggleAlwaysOnTop]: deps.toggleAlwaysOnTop,
+    [MenuActions.ToggleFullScreen]: deps.toggleFullScreen,
+    [MenuActions.MinimizeWindow]: deps.minimizeWindow
   };
 }

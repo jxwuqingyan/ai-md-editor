@@ -84,7 +84,14 @@ function buildTemplate(): MenuItemConstructorOptions[] {
       label: '文件',
       submenu: [
         item('新建', MenuActions.NewTab, { accelerator: 'CommandOrControl+N' }),
-        item('新建标签页', MenuActions.NewTab, { accelerator: 'CommandOrControl+T' }),
+        // Ctrl/Cmd+T 保留为「新建标签页」快捷键，但不在菜单里重复列一项
+        {
+          label: '新建标签页',
+          accelerator: 'CommandOrControl+T',
+          visible: false,
+          acceleratorWorksWhenHidden: true,
+          click: () => sendMenuAction(MenuActions.NewTab)
+        },
         {
           label: '新建窗口',
           accelerator: 'Shift+CommandOrControl+N',
@@ -95,11 +102,11 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         { label: '打开最近文件', submenu: recentSubmenu() },
         item('快速打开…', MenuActions.QuickOpen, { accelerator: 'Shift+CommandOrControl+O' }),
         sep,
-        item('在文件管理器中显示', MenuActions.RevealInFolder),
-        item('在文件树中显示', MenuActions.ShowFiles),
-        item('重新命名…', MenuActions.RenameFile),
+        item('在文件管理器中显示', MenuActions.RevealInFolder, { enabled: s.hasPath }),
+        item('在文件树中显示', MenuActions.ShowFiles, { enabled: s.hasPath }),
+        item('重新命名…', MenuActions.RenameFile, { enabled: s.hasPath }),
         item('复制一份到…', MenuActions.DuplicateFile),
-        item('从磁盘重新加载', MenuActions.ReloadFromDisk),
+        item('从磁盘重新加载', MenuActions.ReloadFromDisk, { enabled: s.hasPath }),
         sep,
         item('关闭', MenuActions.CloseTab, { accelerator: 'CommandOrControl+W' }),
         item('保存', MenuActions.Save, { accelerator: 'CommandOrControl+S' }),
@@ -108,7 +115,6 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         }),
         item('另存为…', MenuActions.SaveAs, { accelerator: 'Shift+CommandOrControl+S' }),
         sep,
-        item('导入 Markdown / 文本文件…', MenuActions.ImportFile),
         {
           label: '导出',
           submenu: [
@@ -127,8 +133,18 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     {
       label: '编辑',
       submenu: [
-        { role: 'undo', label: '撤消' },
-        { role: 'redo', label: '重做' },
+        // 不用 role: 'undo'：role 走的是 webContents 的 DOM 撤销，
+        // 对 ProseMirror 编辑器无效，必须由渲染层调用编辑器自己的历史命令
+        item('撤消', MenuActions.Undo, { accelerator: 'CommandOrControl+Z' }),
+        item('重做', MenuActions.Redo, { accelerator: 'Shift+CommandOrControl+Z' }),
+        // Windows / Linux 习惯用 Ctrl+Y 重做，用隐藏项注册第二组快捷键
+        {
+          label: '重做',
+          accelerator: 'CommandOrControl+Y',
+          visible: false,
+          acceleratorWorksWhenHidden: true,
+          click: () => sendMenuAction(MenuActions.Redo)
+        },
         sep,
         { role: 'cut', label: '剪切' },
         { role: 'copy', label: '拷贝' },
@@ -144,13 +160,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
           accelerator: 'Shift+CommandOrControl+V'
         }),
         sep,
-        {
-          label: '选择',
-          submenu: [
-            { role: 'selectAll', label: '全选' },
-            item('选择当前行', MenuActions.SelectLine)
-          ]
-        },
+        item('选择当前行', MenuActions.SelectLine),
         item('上移该行', MenuActions.MoveLineUp, { accelerator: key('Ctrl+Up', 'Alt+Up') }),
         item('下移该行', MenuActions.MoveLineDown, { accelerator: key('Ctrl+Down', 'Alt+Down') }),
         item('删除当前行', MenuActions.DeleteLine, {
@@ -200,21 +210,20 @@ function buildTemplate(): MenuItemConstructorOptions[] {
             sep,
             item('在下方插入行', MenuActions.TableAddRow),
             item('在右侧插入列', MenuActions.TableAddCol),
-            item('删除当前行', MenuActions.TableDeleteRow),
-            item('删除当前列', MenuActions.TableDeleteCol)
+            item('删除当前表格行', MenuActions.TableDeleteRow),
+            item('删除当前表格列', MenuActions.TableDeleteCol)
           ]
         },
         item('公式块', MenuActions.InsertMathBlock, {
           accelerator: key('Ctrl+Command+B', 'Ctrl+Alt+B')
         }),
-        item('代码块', MenuActions.FormatCodeBlock, {
-          accelerator: key('Ctrl+Command+C', 'Ctrl+Alt+C')
-        }),
         {
           label: '代码工具',
           submenu: [
             item('行内代码', MenuActions.FormatCode),
-            item('代码块', MenuActions.FormatCodeBlock),
+            item('代码块', MenuActions.FormatCodeBlock, {
+              accelerator: key('Ctrl+Command+C', 'Ctrl+Alt+C')
+            }),
             item('插入注释', MenuActions.InsertComment)
           ]
         },
@@ -299,13 +308,6 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         sep,
         item('超链接', MenuActions.InsertLink, { accelerator: 'CommandOrControl+K' }),
         {
-          label: '链接操作',
-          submenu: [
-            item('插入 / 编辑链接', MenuActions.InsertLink),
-            item('移除链接样式', MenuActions.ClearFormat)
-          ]
-        },
-        {
           label: '图像',
           submenu: [
             item('插入图片占位', MenuActions.InsertImage),
@@ -362,9 +364,15 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('放大', MenuActions.ZoomIn, { accelerator: 'Shift+CommandOrControl+=' }),
         item('缩小', MenuActions.ZoomOut, { accelerator: 'Shift+CommandOrControl+-' }),
         sep,
+        // 以下三项统一用自定义菜单项，不用系统 role：
+        // role 版（togglefullscreen / minimize）由 macOS 注入图标与额外缩进，
+        // 与上面的菜单文字不对齐，且会出现重复的「全屏」
         item('保持窗口在最前端', MenuActions.ToggleAlwaysOnTop, { checked: s.alwaysOnTop }),
-        { role: 'togglefullscreen', label: '全屏' },
-        { role: 'minimize', label: '最小化' }
+        item(s.fullscreen ? '退出全屏' : '进入全屏', MenuActions.ToggleFullScreen, {
+          accelerator: key('Ctrl+Command+F', 'F11'),
+          checked: s.fullscreen
+        }),
+        item('最小化', MenuActions.MinimizeWindow, { accelerator: 'CommandOrControl+M' })
       ]
     }
   ];

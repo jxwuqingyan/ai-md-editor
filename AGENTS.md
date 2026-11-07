@@ -134,6 +134,9 @@ ai-md-editor/
 | 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
 | 13 | 格式化命令 WYSIWYG 走 ProseMirror，源码模式走 `sourceActions.ts`，两者共用同一 MenuAction 分发入口 |
 | 14 | 非 CommonMark 语法（下划线、YAML Front Matter、`[TOC]`、`> [!NOTE]`）通过自定义 remark 插件 / Milkdown 节点 / 装饰器实现，不在文本层做字符串替换 |
+| 15 | 撤销/重做：WYSIWYG 走 ProseMirror history 命令，源码模式用自建快照栈。**不用** Electron 的 `role: 'undo'`——它作用于 DOM，对 ProseMirror 完全无效 |
+| 16 | 「显示」菜单的窗口项（置顶/全屏/最小化）一律用自定义菜单项，**不用**系统 `role`（`togglefullscreen` / `minimize`）：role 会被 macOS 再注入一份系统项导致「全屏」重复，且带图标使文字与其他项不对齐 |
+| 17 | 菜单项要与真实能力对齐：做不到的删除，重复的合并，无磁盘路径时不可用的项按 `MenuViewState.hasPath` 置灰 |
 
 ### 14.1 Typora 兼容语法的实现位置（改动前务必先读）
 
@@ -147,6 +150,17 @@ ai-md-editor/
 | 片段插入 | `packages/editor/src/index.ts` `insertSnippet` | 行内片段替换选区；块级片段插到当前顶层块之后（空段落直接替换），否则定义类节点会拆坏段落 |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
+
+### 14.2 菜单动作实现要点（踩坑记录，改动前先读）
+
+| 问题 | 原因 | 正确做法 |
+|------|------|----------|
+| `Cmd+Z` 无效 | 从未 `use(history)` 注册 Milkdown 历史插件 | `packages/editor/src/index.ts` 里 `.use(history)`，菜单项调 `undoCommand` / `redoCommand` |
+| 「全屏」出现两次 | `role: 'togglefullscreen'` 与 macOS 注入的系统项并存 | 改为自定义 item，调 `win.setFullScreen(!win.isFullScreen())` |
+| 底部三项不对齐 | `role: 'minimize'` 由系统加图标与额外缩进 | 三项（置顶/全屏/最小化）全部自定义，样式与上方菜单一致 |
+| 「上移该行」在引用块内失效 | `$from.index(1)` 取的是父容器内序号 | 取文档顶层块用 `$from.index(0)` |
+| 删除表格列无反应 | 只处理 `table_row`，漏掉 `table_header_row`，列数不一致被 prosemirror-tables 自动补齐 | 两种行类型都要遍历 |
+| 删除表格行在表头无反应 | GFM 表格必须保留表头行 | 属预期行为，见 `TODO.md` |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 
