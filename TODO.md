@@ -1,6 +1,6 @@
 # 待办与未验证项
 
-> 记录本轮（0.10.0 菜单审计）遗留的工作，下次从这里继续。
+> 记录本轮（0.11.0 菜单审计）遗留的工作，下次从这里继续。
 > 最后更新：2026-11-07
 
 ## 一、需要真实环境手工验证（沙箱里跑不了）
@@ -42,9 +42,9 @@
 - 导出 HTML / PDF / Word 由 marked 渲染，Mermaid 图表与 KaTeX 公式按源码文本输出。
 - 关闭标签不提示未保存改动（依赖 1.5s 自动保存兜底）。
 
-## 五、下次发布时要做
+## 五、0.11.0 发布记录
 
-- [ ] 版本号仍是 **0.10.0**，本轮改动记录在 `change_log.md` 的「未发布」小节。
-      发布前把它改成正式版本号（建议 0.11.0），同步四处 `package.json` + `package-lock.json`。
-- [ ] 推 main + 打 tag 触发 GitHub Actions 出三平台包（macOS arm64 / macOS x64 / Windows）。
+- [x] 版本号升到 **0.11.0**（根 `package.json`、`apps/desktop/package.json`、`package-lock.json` 三处），`change_log.md` 的「未发布」小节已转正为 0.11.0。
+- [x] 推 main + 打 tag `v0.11.0` 触发 GitHub Actions 出三平台包（macOS arm64 / macOS x64 / Windows）。
       注意 runner 用 `macos-15`（arm64）与 `macos-15-intel`（x64），dmg 已带 `${arch}` 后缀。
+- [ ] 装 arm64 dmg 后，按第一节逐条手工验证，把「未验证」改成「已验证」。
