@@ -7,9 +7,16 @@ import type {
   RecentFile,
   ReadDirResult,
   ExportInput,
-  ExportResult
+  ExportResult,
+  RenameFileInput,
+  RenameFileResult,
+  ClipboardWriteInput,
+  ZoomAction,
+  MenuAction,
+  MenuViewState,
+  MenuActionMessage
 } from '@ai-md-editor/shared';
-import { IpcChannel } from '@ai-md-editor/shared';
+import { IpcChannel, MenuActionChannel, MenuStateChannel } from '@ai-md-editor/shared';
 
 /**
  * 通过 contextBridge 暴露给渲染进程的白名单 API。
@@ -39,6 +46,10 @@ const api = {
   saveImage: (input: SaveImageInput): Promise<SaveImageResult> =>
     ipcRenderer.invoke(IpcChannel.SaveImage, input),
 
+  /** 选择本地图片并保存到 assets/ 目录，返回相对路径 */
+  chooseImage: (docDir: string): Promise<SaveImageResult> =>
+    ipcRenderer.invoke(IpcChannel.ChooseImage, docDir),
+
   /** 获取最近文件列表 */
   getRecent: (): Promise<RecentFile[]> => ipcRenderer.invoke(IpcChannel.GetRecent),
 
@@ -58,12 +69,57 @@ const api = {
   exportFile: (input: ExportInput): Promise<ExportResult> =>
     ipcRenderer.invoke(IpcChannel.Export, input),
 
+  /** 重命名当前文档（同目录改名） */
+  renameFile: (input: RenameFileInput): Promise<RenameFileResult> =>
+    ipcRenderer.invoke(IpcChannel.RenameFile, input),
+
+  /** 在系统文件管理器中显示文档 */
+  revealInFolder: (filePath: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.RevealInFolder, filePath),
+
+  /** 打印当前文档 */
+  print: (): Promise<void> => ipcRenderer.invoke(IpcChannel.Print),
+
+  /** 按指定格式写剪贴板（纯文本 / Markdown / HTML 代码） */
+  writeClipboard: (input: ClipboardWriteInput): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.ClipboardWrite, input),
+
+  /** 读取剪贴板纯文本 */
+  readClipboardText: (): Promise<string> => ipcRenderer.invoke(IpcChannel.ClipboardReadText),
+
+  /** 界面缩放 */
+  zoom: (action: ZoomAction): Promise<void> => ipcRenderer.invoke(IpcChannel.Zoom, action),
+
+  /** 窗口置顶 */
+  setAlwaysOnTop: (enabled: boolean): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.AlwaysOnTop, enabled),
+
+  /** 新建独立窗口 */
+  newWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannel.NewWindow),
+
+  /** 同步界面状态到主进程，刷新原生菜单勾选项 */
+  updateMenuState: (state: MenuViewState): void => ipcRenderer.send(MenuStateChannel, state),
+
   /** 监听主进程的「打开文件」事件（拖拽到 Dock/命令行打开） */
   onOpenFile: (callback: (filePath: string) => void): (() => void) => {
     const listener = (_event: unknown, filePath: string): void => callback(filePath);
     ipcRenderer.on('open-file', listener);
     // 返回取消监听的函数
     return () => ipcRenderer.removeListener('open-file', listener);
+  },
+
+  /** 监听原生应用菜单动作，动作 ID 与参数均由 shared 包统一定义 */
+  onMenuAction: (callback: (action: MenuAction, payload?: string) => void): (() => void) => {
+    const listener = (_event: unknown, message: MenuActionMessage | MenuAction): void => {
+      // 兼容旧格式的纯字符串消息
+      if (typeof message === 'string') {
+        callback(message);
+        return;
+      }
+      callback(message.action, message.payload);
+    };
+    ipcRenderer.on(MenuActionChannel, listener);
+    return () => ipcRenderer.removeListener(MenuActionChannel, listener);
   }
 };
 

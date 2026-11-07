@@ -17,6 +17,7 @@
     "@milkdown/react": "^7.22.3",
     "katex": "^0.19.1",
     "mermaid": "^10.9.0",
+    "remark-frontmatter": "^5.0.0",
     "shiki": "^4.5.0"
   }
 }

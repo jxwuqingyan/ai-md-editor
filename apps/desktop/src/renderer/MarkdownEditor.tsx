@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createEditor, type EditorInstance } from '@ai-md-editor/editor';
 
 /** MarkdownEditor 组件的属性 */
@@ -30,6 +30,8 @@ export default function MarkdownEditor({
   const containerRef = useRef<HTMLDivElement>(null);
   // 编辑器实例
   const instanceRef = useRef<EditorInstance | null>(null);
+  // 初始化失败原因（避免出错时只留一片空白）
+  const [error, setError] = useState<string | null>(null);
   // 保存最新的 onChange，避免闭包过期
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -46,15 +48,22 @@ export default function MarkdownEditor({
       onChange: (markdown) => {
         onChangeRef.current?.(markdown);
       }
-    }).then((instance) => {
-      if (disposed) {
-        // 组件已卸载，立即销毁
-        instance.destroy();
-        return;
-      }
-      instanceRef.current = instance;
-      onReady?.(instance);
-    });
+    })
+      .then((instance) => {
+        if (disposed) {
+          // 组件已卸载，立即销毁
+          instance.destroy();
+          return;
+        }
+        instanceRef.current = instance;
+        onReady?.(instance);
+      })
+      .catch((err: unknown) => {
+        if (disposed) return;
+        const message = err instanceof Error ? err.message : String(err);
+        console.error('编辑器初始化失败:', err);
+        setError(message);
+      });
 
     // 清理：卸载时销毁编辑器
     return () => {
@@ -65,5 +74,14 @@ export default function MarkdownEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <div ref={containerRef} className="milkdown-container" />;
+  return (
+    <>
+      <div ref={containerRef} className="milkdown-container" />
+      {error && (
+        <div className="editor-error" role="alert">
+          编辑器初始化失败：{error}
+        </div>
+      )}
+    </>
+  );
 }

@@ -15,6 +15,8 @@ export const IpcChannel = {
   WriteFile: 'file:write',
   /** 保存粘贴的图片到 assets 目录（返回相对路径） */
   SaveImage: 'image:save',
+  /** 选择本地图片并保存到 assets 目录（返回相对路径） */
+  ChooseImage: 'image:choose',
   /** 读取最近文件列表 */
   GetRecent: 'recent:get',
   /** 添加一条最近文件记录 */
@@ -26,7 +28,23 @@ export const IpcChannel = {
   /** 选择文件夹（文件树打开目录用） */
   ChooseFolder: 'fs:choose-folder',
   /** 导出（html/pdf/word） */
-  Export: 'export:file'
+  Export: 'export:file',
+  /** 重命名当前文档（同目录内改名，保留内容） */
+  RenameFile: 'file:rename',
+  /** 在系统文件管理器中显示当前文档 */
+  RevealInFolder: 'file:reveal',
+  /** 打印当前文档 */
+  Print: 'app:print',
+  /** 写剪贴板（纯文本 / Markdown / HTML 代码） */
+  ClipboardWrite: 'clipboard:write',
+  /** 读剪贴板纯文本（粘贴为纯文本） */
+  ClipboardReadText: 'clipboard:read-text',
+  /** 界面缩放 */
+  Zoom: 'app:zoom',
+  /** 窗口置顶 */
+  AlwaysOnTop: 'app:always-on-top',
+  /** 新建独立窗口 */
+  NewWindow: 'app:new-window'
 } as const;
 
 /** 导出类型 */
@@ -140,3 +158,203 @@ export interface SaveImageResult {
   /** 错误信息（成功为 null） */
   error: string | null;
 }
+
+/** 重命名请求 */
+export interface RenameFileInput {
+  /** 原绝对路径 */
+  path: string;
+  /** 新文件名（不含路径） */
+  newName: string;
+}
+
+/** 重命名结果 */
+export interface RenameFileResult {
+  /** 是否成功 */
+  ok: boolean;
+  /** 新绝对路径（失败为 null） */
+  path: string | null;
+  /** 新文件名（失败为 null） */
+  name: string | null;
+  /** 错误信息（成功为 null） */
+  error: string | null;
+}
+
+/** 复制到剪贴板的格式 */
+export type ClipboardFormat = 'plain' | 'markdown' | 'html';
+
+/** 写剪贴板请求 */
+export interface ClipboardWriteInput {
+  /** 目标格式 */
+  format: ClipboardFormat;
+  /** 原始 Markdown 文本 */
+  markdown: string;
+}
+
+/** 缩放动作 */
+export type ZoomAction = 'in' | 'out' | 'reset';
+
+/** 主进程 → 渲染进程的菜单动作事件通道 */
+export const MenuActionChannel = 'menu:action';
+
+/** 渲染进程 → 主进程的菜单状态同步通道 */
+export const MenuStateChannel = 'menu:state';
+
+/** 菜单动作携带的可选参数（如最近文件路径、插入的 Markdown 片段） */
+export interface MenuActionMessage {
+  /** 动作 ID */
+  action: MenuAction;
+  /** 可选参数 */
+  payload?: string;
+}
+
+/**
+ * 渲染层同步给主进程的界面状态。
+ * 用于让原生菜单的勾选项（源码模式、只读、专注模式等）与实际界面保持一致。
+ */
+export interface MenuViewState {
+  /** 标签栏可见 */
+  tabbarVisible: boolean;
+  /** 源码模式（否则为所见即所得） */
+  sourceMode: boolean;
+  /** 只读模式 */
+  readOnly: boolean;
+  /** 专注模式 */
+  focusMode: boolean;
+  /** 打字机模式 */
+  typewriterMode: boolean;
+  /** 底部工具栏可见 */
+  toolbarVisible: boolean;
+  /** 侧栏可见 */
+  sidebarVisible: boolean;
+  /** 侧栏当前面板 */
+  sidebarPanel: 'files' | 'outline';
+  /** 字数统计窗口可见 */
+  wordCountVisible: boolean;
+  /** 独立大纲窗口可见 */
+  outlineWindowVisible: boolean;
+  /** 窗口置顶 */
+  alwaysOnTop: boolean;
+}
+
+/** 默认菜单状态（主进程启动时使用） */
+export const DEFAULT_MENU_VIEW_STATE: MenuViewState = {
+  tabbarVisible: true,
+  sourceMode: false,
+  readOnly: false,
+  focusMode: false,
+  typewriterMode: false,
+  toolbarVisible: true,
+  sidebarVisible: true,
+  sidebarPanel: 'files',
+  wordCountVisible: false,
+  outlineWindowVisible: false,
+  alwaysOnTop: false
+};
+
+/** 原生应用菜单可触发的动作（集中定义，避免跨进程魔法字符串） */
+export const MenuActions = {
+  // ===== 文件 =====
+  NewTab: 'file:new-tab',
+  NewWindow: 'file:new-window',
+  OpenFile: 'file:open',
+  OpenRecent: 'file:open-recent',
+  OpenRecentPath: 'file:open-recent-path',
+  QuickOpen: 'file:quick-open',
+  ImportFile: 'file:import',
+  CloseTab: 'file:close-tab',
+  Save: 'file:save',
+  SaveAll: 'file:save-all',
+  SaveAs: 'file:save-as',
+  RenameFile: 'file:rename-file',
+  DuplicateFile: 'file:duplicate-file',
+  ReloadFromDisk: 'file:reload',
+  RevealInFolder: 'file:reveal',
+  ExportHtml: 'file:export-html',
+  ExportPdf: 'file:export-pdf',
+  ExportWord: 'file:export-word',
+  Print: 'file:print',
+
+  // ===== 编辑 =====
+  CopyMarkdown: 'edit:copy-markdown',
+  CopyPlainText: 'edit:copy-plain',
+  CopyHtml: 'edit:copy-html',
+  PastePlainText: 'edit:paste-plain',
+  SelectLine: 'edit:select-line',
+  MoveLineUp: 'edit:move-line-up',
+  MoveLineDown: 'edit:move-line-down',
+  DeleteLine: 'edit:delete-line',
+  Find: 'edit:find',
+  FindNext: 'edit:find-next',
+  FindPrev: 'edit:find-prev',
+  Replace: 'edit:replace',
+  InsertHardBreak: 'edit:insert-hard-break',
+  InsertMathInline: 'edit:insert-math-inline',
+  InsertMathBlock: 'edit:insert-math-block',
+
+  // ===== 段落 =====
+  FormatParagraph: 'format:paragraph',
+  FormatHeading1: 'format:heading-1',
+  FormatHeading2: 'format:heading-2',
+  FormatHeading3: 'format:heading-3',
+  FormatHeading4: 'format:heading-4',
+  FormatHeading5: 'format:heading-5',
+  FormatHeading6: 'format:heading-6',
+  UpgradeHeading: 'format:upgrade-heading',
+  DowngradeHeading: 'format:downgrade-heading',
+  InsertTable: 'format:insert-table',
+  TableAddRow: 'format:table-add-row',
+  TableAddCol: 'format:table-add-col',
+  TableDeleteRow: 'format:table-delete-row',
+  TableDeleteCol: 'format:table-delete-col',
+  FormatCodeBlock: 'format:code-block',
+  FormatQuote: 'format:quote',
+  FormatBulletList: 'format:bullet-list',
+  FormatOrderedList: 'format:ordered-list',
+  FormatTaskList: 'format:task-list',
+  TaskDone: 'format:task-done',
+  TaskUndone: 'format:task-undone',
+  TaskClear: 'format:task-clear',
+  IndentList: 'format:indent-list',
+  OutdentList: 'format:outdent-list',
+  InsertParagraphAbove: 'format:insert-paragraph-above',
+  InsertParagraphBelow: 'format:insert-paragraph-below',
+  InsertLinkReference: 'format:insert-link-reference',
+  InsertFootnote: 'format:insert-footnote',
+  InsertCallout: 'format:insert-callout',
+  InsertToc: 'format:insert-toc',
+  InsertFrontMatter: 'format:insert-front-matter',
+  FormatHorizontalRule: 'format:horizontal-rule',
+
+  // ===== 格式 =====
+  FormatBold: 'format:bold',
+  FormatItalic: 'format:italic',
+  FormatUnderline: 'format:underline',
+  FormatCode: 'format:code',
+  FormatStrikethrough: 'format:strikethrough',
+  InsertComment: 'format:insert-comment',
+  InsertLink: 'format:insert-link',
+  InsertImage: 'format:insert-image',
+  ChooseImage: 'format:choose-image',
+  ClearFormat: 'format:clear',
+
+  // ===== 显示 =====
+  ToggleTabbar: 'view:toggle-tabbar',
+  ToggleMode: 'view:toggle-mode',
+  ToggleReadOnly: 'view:toggle-read-only',
+  ToggleFocusMode: 'view:toggle-focus',
+  ToggleTypewriter: 'view:toggle-typewriter',
+  ToggleToolbar: 'view:toggle-toolbar',
+  ToggleSidebar: 'view:toggle-sidebar',
+  ShowFiles: 'view:show-files',
+  ShowOutline: 'view:show-outline',
+  ToggleWordCount: 'view:toggle-word-count',
+  ToggleOutlineWindow: 'view:toggle-outline-window',
+  ToggleSearch: 'view:toggle-search',
+  ZoomIn: 'view:zoom-in',
+  ZoomOut: 'view:zoom-out',
+  ZoomReset: 'view:zoom-reset',
+  ToggleAlwaysOnTop: 'view:toggle-always-on-top'
+} as const;
+
+/** 菜单动作联合类型 */
+export type MenuAction = (typeof MenuActions)[keyof typeof MenuActions];

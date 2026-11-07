@@ -9,10 +9,33 @@ import { writeFile } from 'node:fs/promises';
 import { marked } from 'marked';
 import type { ExportFormat } from '@ai-md-editor/shared';
 
+/** 去掉文件头 YAML front matter（导出正文不该出现两条分隔线 + 元信息文本） */
+function stripFrontmatter(markdown: string): string {
+  return markdown.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---[ \t]*(\r?\n|$)/, '');
+}
+
+/** 给标题补锚点，并把 `[TOC]` 占位符展开成真实目录 */
+function renderToc(html: string): string {
+  const headings: { level: number; text: string; id: string }[] = [];
+  const withIds = html.replace(/<h([1-6])>([\s\S]*?)<\/h\1>/g, (_match, level: string, inner: string) => {
+    const id = `toc-${headings.length + 1}`;
+    headings.push({ level: Number(level), text: inner.replace(/<[^>]+>/g, '').trim(), id });
+    return `<h${level} id="${id}">${inner}</h${level}>`;
+  });
+  if (!/\[TOC\]/.test(withIds)) return withIds;
+  const nav = headings.length === 0
+    ? ''
+    : `<nav class="toc">${headings
+        .map((h) => `<div class="toc-item toc-level-${h.level}"><a href="#${h.id}">${h.text}</a></div>`)
+        .join('')}</nav>`;
+  return withIds.replace(/<p>\s*\[TOC\]\s*<\/p>/g, nav);
+}
+
 /** 导出文档的完整 HTML（内联样式，中文字体友好） */
-function buildHtml(markdown: string, title: string): string {
+export function buildHtml(markdown: string, title: string): string {
   // marked 渲染正文；gfm:true 支持表格/任务列表等
-  const body = marked.parse(markdown, { gfm: true, breaks: false }) as string;
+  const parsed = marked.parse(stripFrontmatter(markdown), { gfm: true, breaks: false }) as string;
+  const body = renderToc(parsed);
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -59,6 +82,18 @@ function buildHtml(markdown: string, title: string): string {
   a { color: #2563eb; text-decoration: none; }
   a:hover { text-decoration: underline; }
   hr { border: none; border-top: 1px solid #ddd; margin: 1.5em 0; }
+  .toc {
+    margin: 1em 0 1.5em;
+    padding: 0.6em 0 0.6em 0.9em;
+    border-left: 2px solid #e5e5e5;
+    font-size: 0.95em;
+  }
+  .toc-item { padding: 3px 0; }
+  .toc-level-1 { font-weight: 600; }
+  .toc-level-2 { padding-left: 0.9em; }
+  .toc-level-3 { padding-left: 1.8em; }
+  .toc-level-4, .toc-level-5, .toc-level-6 { padding-left: 2.7em; }
+  .toc a { color: #444; }
 </style>
 </head>
 <body>

@@ -1,6 +1,6 @@
 {
   "name": "@ai-md-editor/desktop",
-  "version": "0.7.0",
+  "version": "0.10.0",
   "private": true,
   "description": "MarkdownNote - 对标 Typora 的跨平台 Markdown 编辑器",
   "author": "wuqingyan <1131169640@qq.com>",

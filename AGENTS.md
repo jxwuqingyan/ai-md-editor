@@ -47,13 +47,20 @@
 ai-md-editor/
 ├── apps/
 │   └── desktop/              # Electron 桌面端
-│       ├── src/main/         # 主进程（窗口、IPC、文件 I/O、最近文件）
+│       ├── src/main/         # 主进程（窗口 window.ts、IPC、文件 I/O、最近文件、原生菜单 menu.ts）
 │       ├── src/preload/      # preload 桥接（contextBridge 白名单 API）
 │       ├── src/renderer/     # 渲染进程（React + Milkdown）
+│       │   ├── menuHandlers.ts   # 原生菜单动作分发表（纯函数）
+│       │   ├── sourceActions.ts  # 源码模式格式化（纯函数）
+│       │   └── Dialogs.tsx       # 查找/快速打开/重命名/字数统计/大纲浮层
 │       ├── build/            # 应用图标（icon.svg/png/icns）
-│       └── electron-builder.config.ts  # 打包配置
+│       └── electron-builder.json  # 打包配置（官方识别文件名）
 ├── packages/
-│   ├── editor/               # Milkdown 编辑器封装（createEditor）
+│   ├── editor/               # Milkdown 编辑器封装（createEditor + 下划线 mark + ProseMirror 命令）
+│   │   ├── underline.ts      # <u> 下划线 mark
+│   │   ├── frontmatter.ts    # YAML Front Matter 节点
+│   │   ├── stringify.ts      # remark-stringify handler 汇总
+│   │   └── decorations.ts    # 警告框 / [TOC] 目录渲染装饰
 │   ├── markdown-core/        # 解析/序列化/大纲（纯函数）
 │   ├── theme/                # 主题系统（design tokens）
 │   └── shared/               # 跨进程共享类型（IPC 契约）
@@ -122,6 +129,22 @@ ai-md-editor/
 | 7 | 包管理器：npm workspaces（已从 pnpm 迁移） |
 | 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
 | 9 | 分发：CI 打包 macOS（x64 + arm64）dmg + Windows x64 安装包 |
+| 10 | 顶部导航：macOS 原生应用菜单 + 标签栏右侧动作区，窗口内不保留独立功能顶栏 |
+| 11 | 原生菜单只保留「文件/编辑/段落/格式/显示」五组；主题走右上角按钮，不设主题/窗口/帮助菜单 |
+| 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
+| 13 | 格式化命令 WYSIWYG 走 ProseMirror，源码模式走 `sourceActions.ts`，两者共用同一 MenuAction 分发入口 |
+| 14 | 非 CommonMark 语法（下划线、YAML Front Matter、`[TOC]`、`> [!NOTE]`）通过自定义 remark 插件 / Milkdown 节点 / 装饰器实现，不在文本层做字符串替换 |
+
+### 14.1 Typora 兼容语法的实现位置（改动前务必先读）
+
+| 语法 | 实现文件 | 要点 |
+|------|----------|------|
+| `<u>…</u>` 下划线 | `packages/editor/src/underline.ts` | remark 折叠 html 节点 + mark schema + stringify handler |
+| YAML Front Matter | `packages/editor/src/frontmatter.ts` | `$remark(..., 'yaml')` 必须传第三个参数 `initialOptions`，否则 remark-frontmatter 抛 `Missing type in matter {}` |
+| 序列化 handler 汇总 | `packages/editor/src/stringify.ts` | `underline` / `yaml` / `text` 三个 handler 统一注册；`text` 仅放行 `[TOC]` 与 `[!NOTE]` 的方括号 |
+| 警告框 / 目录渲染 | `packages/editor/src/decorations.ts` | 纯 ProseMirror 装饰，不改 Markdown 文本；目录块在文档变化时重建 |
+| 大纲解析 | `packages/markdown-core/src/index.ts` | 必须启用 remark-frontmatter，否则文件头 `---` 会被当 Setext 标题 |
+| 片段插入 | `packages/editor/src/index.ts` `insertSnippet` | 行内片段替换选区；块级片段插到当前顶层块之后（空段落直接替换），否则定义类节点会拆坏段落 |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
 
