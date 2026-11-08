@@ -358,20 +358,45 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     await reloadPath(tab.path);
   }, [findActive, reloadPath]);
 
-  /** 重命名当前文档（返回是否成功，供对话框决定是否关闭） */
+  /** 重命名当前文档（返回结果，供对话框/提示决定后续动作） */
   const rename = useCallback(
-    async (newName: string): Promise<void> => {
+    async (newName: string): Promise<{ ok: boolean; error?: string }> => {
       const tab = findActive();
-      if (!tab?.path) return;
-      const result = await window.api.renameFile({ path: tab.path, newName });
-      if (result.ok && result.path) {
-        const path = result.path;
-        const name = result.name ?? newName;
-        setTabs((prev) =>
-          prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false } : t))
-        );
-        void window.api.addRecent(path, name);
+      if (!tab) return { ok: false, error: '没有活动文档' };
+      const name = newName.trim();
+      if (!name) return { ok: false, error: '文件名不能为空' };
+
+      // 未落盘的标签没有磁盘目标，改名只作用在标签上（另存为时用它做默认文件名）
+      if (!tab.path) {
+        setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, name } : t)));
+        return { ok: true };
       }
+
+      const result = await window.api.renameFile({ path: tab.path, newName: name });
+      if (!result.ok || !result.path) {
+        return { ok: false, error: result.error ?? '未知错误' };
+      }
+      const path = result.path;
+      const finalName = result.name ?? name;
+
+      // 改名只动目录项，未保存的改动要补写到新路径，
+      // 否则这里清掉 dirty 之后内存里的内容再也不会落盘
+      let encoding = tab.encoding;
+      let dirty = tab.dirty;
+      if (dirty) {
+        try {
+          encoding = await window.api.writeFile(path, tab.content, tab.encoding);
+          dirty = false;
+        } catch {
+          // 补写失败就保留 dirty，交给自动保存继续重试
+        }
+      }
+
+      setTabs((prev) =>
+        prev.map((t) => (t.id === tab.id ? { ...t, path, name: finalName, dirty, encoding } : t))
+      );
+      void window.api.addRecent(path, finalName);
+      return { ok: true };
     },
     [findActive]
   );

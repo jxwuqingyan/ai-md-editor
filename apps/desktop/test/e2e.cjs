@@ -940,6 +940,118 @@ async function runTests() {
   const renamedOnDisk = existsSync(join(root, '纪要-改名.md')) && !existsSync(join(root, '纪要-测试.md'));
   check('重命名同步磁盘文件名', renamedTab === '纪要-改名.md' && renamedOnDisk, `tab=${renamedTab} disk=${renamedOnDisk}`);
 
+  // 改名后侧栏文件树必须跟着更新，否则树里还挂着旧文件名（看起来像没改名）
+  const treeAfterRename = await waitFor(
+    () =>
+      exec(
+        `JSON.stringify([...document.querySelectorAll('.tree-name')].map((el) => el.textContent))`
+      ).then((json) => {
+        const names = JSON.parse(String(json));
+        return names.includes('纪要-改名.md') && !names.includes('纪要-测试.md') ? names : null;
+      }),
+    { label: '文件树同步新文件名', timeout: 8000 }
+  ).catch(() => null);
+  check('重命名后文件树同步', Array.isArray(treeAfterRename), JSON.stringify(treeAfterRename));
+
+  // 同名文件已存在时不能覆盖，要提示失败并保留原文件
+  writeFileSync(join(root, '已存在.md'), '# 已存在\n', 'utf-8');
+  await exec(`document.querySelector('.filetree-more-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), { label: '⋮ 菜单再次弹出' });
+  await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '刷新').click()`);
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.tree-name')].some((el) => el.textContent === '已存在.md')`),
+    { label: '刷新后出现已存在.md', timeout: 8000 }
+  );
+  await exec(`document.querySelector('.tab-active').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.rename-dialog .rename-input'))`), { label: '重命名对话框弹出' });
+  await exec(`(() => {
+    const input = document.querySelector('.rename-dialog .rename-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '已存在.md');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    return true;
+  })()`);
+  const collisionNotice = await waitFor(
+    () => exec(`document.querySelector('.statusbar-notice')?.textContent ?? ''`).then((t) => (/重命名失败/.test(t) ? t : null)),
+    { label: '重名提示', timeout: 8000 }
+  ).catch(() => null);
+  const collisionSafe =
+    existsSync(join(root, '纪要-改名.md')) &&
+    existsSync(join(root, '已存在.md')) &&
+    readFileSync(join(root, '已存在.md'), 'utf-8').includes('已存在');
+  const dialogKept = await exec(`Boolean(document.querySelector('.rename-dialog .rename-input'))`);
+  check(
+    '重名不被覆盖且给出提示',
+    Boolean(collisionNotice) && collisionSafe && dialogKept === true,
+    `notice=${collisionNotice} safe=${collisionSafe} dialog=${dialogKept}`
+  );
+  await exec(`document.querySelector('.rename-dialog .rename-actions .dialog-btn')?.click()`);
+  await waitFor(() => exec(`!document.querySelector('.rename-dialog')`), { label: '取消关闭对话框', timeout: 8000 });
+
+  // 输入法拼字过程中按 Enter 只是「上屏候选词」，不能当成确认提交（否则中文名会改出半截拼音）
+  await exec(`document.querySelector('.tab-active').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.rename-dialog .rename-input'))`), {
+    label: '重命名对话框弹出（IME 用例）',
+    timeout: 8000
+  });
+  await exec(`(() => {
+    const input = document.querySelector('.rename-dialog .rename-input');
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, 'jiyao');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 229, bubbles: true }));
+    return true;
+  })()`);
+  const imeStillOpen = await exec(`Boolean(document.querySelector('.rename-dialog .rename-input'))`);
+  const imeNoRename = existsSync(join(root, '纪要-改名.md')) && !existsSync(join(root, 'jiyao.md'));
+  check('拼字中的回车不提交改名', imeStillOpen === true && imeNoRename, `open=${imeStillOpen} untouched=${imeNoRename}`);
+  await exec(`(() => {
+    const input = document.querySelector('.rename-dialog .rename-input');
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '纪要-输入法');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    return true;
+  })()`);
+  const imeRenamed = await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`).then((t) => (t === '纪要-输入法.md' ? t : null)),
+    { label: '上屏后回车正常改名', timeout: 8000 }
+  ).catch(() => null);
+  check('上屏后回车正常改名', imeRenamed === '纪要-输入法.md', String(imeRenamed));
+
+  // 未落盘的「未命名」标签：双击改名直接改标签名，不再弹「另存为」打断用户
+  await exec(`document.querySelector('.tab-new').click()`);
+  await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '未命名.md'`),
+    { label: '新建空白标签', timeout: 8000 }
+  );
+  await exec(`document.querySelector('.tab-active').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.rename-dialog .rename-input'))`), {
+    label: '未命名标签弹出重命名',
+    timeout: 8000
+  });
+  const untitledPrefill = await exec(`document.querySelector('.rename-dialog .rename-input').value`);
+  await exec(`(() => {
+    const input = document.querySelector('.rename-dialog .rename-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '草稿笔记');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    return true;
+  })()`);
+  const untitledRenamed = await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`).then((t) => (t === '草稿笔记' ? t : null)),
+    { label: '未命名标签改名生效', timeout: 8000 }
+  ).catch(() => null);
+  check(
+    '未保存标签可直接改标签名',
+    untitledRenamed === '草稿笔记' && untitledPrefill === '未命名.md',
+    `name=${untitledRenamed} prefill=${untitledPrefill}`
+  );
+
   // 侧栏搜索：区分大小写 / 全单词 / 正则表达式三个开关都生效
   writeFileSync(
     join(root, 'searchable.md'),

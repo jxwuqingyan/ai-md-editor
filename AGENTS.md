@@ -185,7 +185,9 @@ ai-md-editor/
 | 35 | 侧栏是纵向 flex：树区/大纲区自身滚动（`flex:1; min-height:0; overflow-y:auto`），`.sidebar` 本身 `overflow:hidden`；「打开文件夹」固定在底部，不要移回顶部 |
 | 36 | 主题按钮是**单击直接切换**浅色/深色（不做下拉选择），写回 `settings.themeId` 并同步 `data-theme` |
 | 37 | 侧栏搜索在主进程执行（`main/searcher.ts`）：渲染层只发 `search:folder` IPC；扫描跳过 node_modules/.git/隐藏目录/img，单文件 2MB、结果 50 文件/每文件 20 行上限；行匹配器是纯函数（`buildLineMatcher`，可单测），全单词用第 1 个捕获组修正列与长度 |
-| 38 | 文件树 ⋮ 菜单依赖 `rootDir`（未打开目录不显示）；「刷新」走 `refreshToken` 计数信号驱动 FileTree 重读根目录，不整树重置 |
+| 38 | 文件树 ⋮ 菜单依赖 `rootDir`（未打开目录不显示）；「刷新」走 `refreshToken` 计数信号驱动 FileTree 重读**所有已展开目录**（不只根目录），否则深层的新建/改名会留在树里显示旧名字 |
+| 40 | 所有输入框的 Enter 都要先判输入法组合态（`renderer/ime.ts` 的 `isImeKey` + `compositionstart/end` 记录）：中文输入法用 Enter 上屏时 `keydown` 也带 `Enter`，不判会让改名/搜索用到还没上屏的拼音 |
+| 41 | 重命名语义：有路径走 `renameFile`（同目录改名、未写文本扩展名沿用原扩展名、**目标已存在直接报错不覆盖**、大小写改名放行）；无路径的未命名标签只改标签名，不再中途弹「另存为」。改名成功必须补写未保存改动到新路径并刷新文件树；失败要在状态栏给出原因并保留对话框 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 

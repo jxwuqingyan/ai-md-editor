@@ -294,28 +294,23 @@ export default function App(): JSX.Element {
   }, [openPath]);
 
   /**
-   * 打开命名对话框：有路径就重命名，没有路径（未命名标签）走另存为，
-   * 因为改名对尚未落盘的文档没有落点。
+   * 打开命名对话框。
+   * 有路径的文件走磁盘改名；未落盘的标签没有磁盘目标，只改标签名（保存时用它作默认文件名）。
    */
   const openRenameDialog = useCallback(() => {
     const tab = tabsRef.current.find((item) => item.id === activeIdRef.current);
     if (!tab) return;
-    if (tab.path) {
-      setRenameMode('rename');
-      return;
-    }
-    showNotice('当前文档尚未保存，已打开「另存为」');
-    void saveAs();
-  }, [saveAs, showNotice]);
+    setRenameMode('rename');
+  }, [tabsRef]);
 
   /** 命名对话框提交：新建文件时按输入名创建，否则重命名当前文件 */
   const handleRename = useCallback(
     async (name: string) => {
       const mode = renameMode;
-      setRenameMode(null);
       if (mode === 'create') {
         if (!treeRoot) {
           showNotice('请先打开一个文件夹');
+          setRenameMode(null);
           return;
         }
         const result = await window.api.createFile(treeRoot, name);
@@ -323,12 +318,21 @@ export default function App(): JSX.Element {
           showNotice(`新建文件失败：${result.error ?? '未知错误'}`);
           return;
         }
+        setRenameMode(null);
         setTreeRefreshToken((v) => v + 1);
         const segments = result.path.split(/[\\/]/);
         await openPath(result.path, segments[segments.length - 1]);
         return;
       }
-      await rename(name);
+      const result = await rename(name);
+      if (!result.ok) {
+        // 失败时保留对话框，用户可以直接改名字重试
+        showNotice(`重命名失败：${result.error ?? '未知错误'}`);
+        return;
+      }
+      setRenameMode(null);
+      // 文件树缓存的是改名前的列表，不重读会一直显示旧文件名（看起来像没改名）
+      setTreeRefreshToken((v) => v + 1);
     },
     [renameMode, treeRoot, openPath, rename, showNotice]
   );

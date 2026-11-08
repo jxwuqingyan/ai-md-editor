@@ -65,6 +65,9 @@ export default function FileTree({
   // ⋮ 菜单开关
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // 已展开目录的镜像：刷新时按它逐个重读，effect 不必依赖整个 Map
+  const dirsRef = useRef(dirs);
+  dirsRef.current = dirs;
   // 上一次的刷新信号（跳过首次挂载）
   const lastRefreshToken = useRef(refreshToken);
 
@@ -105,11 +108,16 @@ export default function FileTree({
     }
   }, [rootDir, expandDir]);
 
-  // 「刷新」信号变化时重新读取根目录（保留展开状态，只更新列表）
+  // 「刷新」信号变化时重新读取已展开的每个目录（保留展开状态，只更新列表）。
+  // 新建/改名可能发生在任意层级的子目录里，只重读根目录会让深处留着旧文件名。
   useEffect(() => {
     if (lastRefreshToken.current === refreshToken) return;
     lastRefreshToken.current = refreshToken;
-    if (rootDir) void expandDir(rootDir);
+    if (!rootDir) return;
+    const targets = [rootDir, ...dirsRef.current.keys()].filter(
+      (path, index, all) => path === rootDir || all.indexOf(path) === index
+    );
+    void Promise.all(targets.map((path) => expandDir(path)));
   }, [refreshToken, rootDir, expandDir]);
 
   // ⋮ 菜单点击外部或 Esc 关闭

@@ -389,20 +389,38 @@ async function handleExport(
   }
 }
 
+/** 文本类扩展名：用户输入这些后缀时视为「已写扩展名」，其余（含「报告.v2」）继续补原后缀 */
+const TEXT_EXTS = new Set(['.md', '.markdown', '.mdown', '.mkd', '.txt']);
+
 /** 重命名当前文档（同目录内改名，不改动内容） */
 async function handleRenameFile(input: RenameFileInput): Promise<RenameFileResult> {
   const newName = input.newName.trim();
-  if (!newName || /[/\\]/.test(newName)) {
-    return { ok: false, path: null, name: null, error: '文件名不合法' };
+  if (!newName) {
+    return { ok: false, path: null, name: null, error: '文件名不能为空' };
+  }
+  // 路径分隔符、Windows 保留字符、结尾的点和空格都不能进文件名
+  if (/[/\\]/.test(newName) || /[<>:"|?*\u0000-\u001f]/.test(newName) || /[. ]$/.test(newName)) {
+    return { ok: false, path: null, name: null, error: '文件名包含不允许的字符' };
   }
   // 用户没写扩展名时沿用原文件扩展名（重命名「纪要」→「纪要.md」，而不是丢掉 .md）
   const originalExt = extname(input.path);
+  const typedExt = extname(newName).toLowerCase();
   const finalName =
-    extname(newName) === '' && originalExt !== '' ? `${newName}${originalExt}` : newName;
+    originalExt !== '' && !TEXT_EXTS.has(typedExt) ? `${newName}${originalExt}` : newName;
   try {
     const target = join(dirname(input.path), finalName);
     if (target === input.path) {
       return { ok: true, path: input.path, name: finalName, error: null };
+    }
+    // fs.rename 在多数平台是覆盖语义，必须先确认目标不存在，否则会悄悄顶掉同名文件。
+    // 大小写改名（a.md → A.md）在大小写不敏感的文件系统上 stat 会命中自己，需要放行。
+    if (target.toLowerCase() !== input.path.toLowerCase()) {
+      try {
+        await stat(target);
+        return { ok: false, path: null, name: null, error: `同名文件已存在：${finalName}` };
+      } catch {
+        // 不存在，可以改名
+      }
     }
     await rename(input.path, target);
     return { ok: true, path: target, name: finalName, error: null };

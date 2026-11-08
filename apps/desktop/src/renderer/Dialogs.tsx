@@ -4,6 +4,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import type { OutlineItem } from '@ai-md-editor/markdown-core';
+import { isImeKey } from './ime';
 
 /** 查找栏属性 */
 export interface FindBarProps {
@@ -44,6 +45,8 @@ export function FindBar(props: FindBarProps): JSX.Element {
             placeholder="查找"
             onChange={(event) => props.onQuery(event.target.value)}
             onKeyDown={(event) => {
+              // 输入法上屏用的 Enter 不能当成「下一个」，否则中文查询会提前跳转
+              if (isImeKey(event)) return;
               if (event.key === 'Enter') {
                 event.preventDefault();
                 if (event.shiftKey) props.onPrev();
@@ -68,6 +71,7 @@ export function FindBar(props: FindBarProps): JSX.Element {
               placeholder="替换为"
               onChange={(event) => props.onReplaceText(event.target.value)}
               onKeyDown={(event) => {
+                if (isImeKey(event)) return;
                 if (event.key === 'Enter') props.onReplace();
                 else if (event.key === 'Escape') props.onClose();
               }}
@@ -118,7 +122,7 @@ export function QuickOpen({ recent, treeFiles, onPick, onClose }: QuickOpenProps
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Escape') onClose();
-            else if (event.key === 'Enter' && entries[0]) onPick(entries[0].path);
+            else if (event.key === 'Enter' && !isImeKey(event) && entries[0]) onPick(entries[0].path);
           }}
         />
         <div className="quick-open-list">
@@ -151,7 +155,15 @@ export interface RenameDialogProps {
 export function RenameDialog({ initialName, title = '重新命名', onSubmit, onClose }: RenameDialogProps): JSX.Element {
   const [name, setName] = useState(initialName);
   const inputRef = useRef<HTMLInputElement>(null);
+  // 输入法组合状态单独记一份：部分输入法用 Enter 上屏时 nativeEvent.isComposing 已经回落，
+  // 只看它会把还没上屏的拼音当成确认提交（中文名改出来半截）。
+  const composingRef = useRef(false);
   useEffect(() => inputRef.current?.select(), []);
+
+  const submit = (): void => {
+    const trimmed = name.trim();
+    if (trimmed) onSubmit(trimmed);
+  };
 
   return (
     <div className="overlay-shade" onMouseDown={onClose}>
@@ -162,14 +174,25 @@ export function RenameDialog({ initialName, title = '重新命名', onSubmit, on
           className="rename-input"
           value={name}
           onChange={(event) => setName(event.target.value)}
+          onCompositionStart={() => {
+            composingRef.current = true;
+          }}
+          onCompositionEnd={() => {
+            composingRef.current = false;
+          }}
           onKeyDown={(event) => {
-            if (event.key === 'Escape') onClose();
-            else if (event.key === 'Enter' && name.trim()) onSubmit(name.trim());
+            if (event.key === 'Escape') {
+              onClose();
+              return;
+            }
+            if (event.key !== 'Enter') return;
+            if (composingRef.current || isImeKey(event)) return;
+            submit();
           }}
         />
         <div className="rename-actions">
           <button className="dialog-btn" onClick={onClose}>取消</button>
-          <button className="dialog-btn dialog-btn-primary" onClick={() => name.trim() && onSubmit(name.trim())}>
+          <button className="dialog-btn dialog-btn-primary" onClick={submit}>
             确定
           </button>
         </div>
