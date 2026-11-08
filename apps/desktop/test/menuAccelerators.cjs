@@ -78,8 +78,32 @@ if (macOnly !== winOnly) {
   failures.push(`两平台快捷键数量不一致：mac=${macOnly} win=${winOnly}`);
 }
 
+// 5) TODO 里逐条列出的关键快捷键，两套集合都必须存在。
+//    「撤消/重做」用 CommandOrControl 通用写法；Windows 专属的 Alt/F11/Ctrl+Alt 系列
+//    与 macOS 专属的 Ctrl+Command 系列由 key(mac, win) 成对提供。
+const REQUIRED = {
+  win: [
+    'CommandOrControl+Z', 'Shift+CommandOrControl+Z', 'CommandOrControl+Y',
+    'Alt+Up', 'Alt+Down', 'F11', 'Alt+Shift+K',
+    'Ctrl+Alt+S', 'Ctrl+Alt+B', 'Ctrl+Alt+C', 'Ctrl+Alt+1'
+  ],
+  mac: [
+    'CommandOrControl+Z', 'Shift+CommandOrControl+Z', 'CommandOrControl+Y',
+    'Ctrl+Up', 'Ctrl+Down', 'Ctrl+Command+F', 'Ctrl+Shift+K',
+    'Ctrl+Command+S', 'Ctrl+Command+B', 'Ctrl+Command+C', 'Ctrl+Command+1'
+  ]
+};
+let requiredCount = 0;
+for (const platform of ['mac', 'win']) {
+  const registered = new Set(bindings[platform].map((b) => b.accelerator));
+  for (const accelerator of REQUIRED[platform]) {
+    requiredCount += 1;
+    if (!registered.has(accelerator)) failures.push(`[${platform}] 缺少关键快捷键：${accelerator}`);
+  }
+}
+
 const total = new Set(bindings.mac.map((b) => b.accelerator)).size;
-console.log(`检查 ${total} 个快捷键（mac ${macOnly} 项 / win ${winOnly} 项）`);
+console.log(`检查 ${total} 个快捷键（mac ${macOnly} 项 / win ${winOnly} 项），关键键位 ${requiredCount} 项`);
 if (failures.length > 0) {
   for (const failure of failures) console.error(`✗ ${failure}`);
   process.exit(1);

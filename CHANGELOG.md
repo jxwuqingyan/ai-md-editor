@@ -2,6 +2,54 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.12.1 - 2026-11-08
+
+### 收尾 TODO 剩余项：光标上下文、菜单语义与 Windows 快捷键自动化
+
+#### 1. 源码模式表格上下文覆盖程序化光标定位
+
+此前只监听 `keyup` / `click` / `input` / `select`，程序化调用 `setSelectionRange`
+（查找替换、脚本定位光标等场景）不派发任何事件，表格菜单会停留在旧状态。现在：
+
+- `useSourceTableContext.ts` 增加 `document` 的 `selectionchange` 监听，并用 200ms 低频轮询兜底；
+- hook 内先按「是否在表格 / 是否在表头」去重再上报，轮询不会引发原生菜单重建；
+- E2E 新增两条断言，专门用「静默」光标定位（不派发 `select`）验证表头 ↔ 数据行的菜单文案切换。
+
+#### 2. 表头删除语义：决策保留并说明清楚
+
+GFM 表格必须保留表头，当前行为是「删掉旧表头，首个数据行升级为表头」。评估后**保留该语义**（不改为置灰）：
+菜单文案已标注「删除当前表格行（表头）」，并给 macOS 菜单加悬停说明「删除表头行后，首个数据行会成为新表头；
+表格只有表头时会删除整张表」；WYSIWYG 与源码模式行为一致，E2E 覆盖删除后表格合法、只有表头时删整表、
+数据行删除不受影响，并新增一条语义提示断言。`item()` 构造菜单项时新增可选 `toolTip`。
+
+#### 3. Windows 快捷键验证改为三层自动化
+
+- `test/menuAccelerators.cjs`：在原有 62 个快捷键的写法与唯一性检查之外，新增 22 个平台关键键位断言
+  （撤消/重做、`Alt+↑↓`、`F11`、`Alt+Shift+K`、`Ctrl+Alt+*` 及对应的 macOS `Ctrl+Command+*`）。
+- 新增 `test/menuRuntime.cjs`：加载构建产物构造真实原生菜单，断言当前平台关键快捷键（含隐藏项）已注册，
+  并逐项点击由 `item()` 构造的菜单项，验证「一点击 = 一条 `menu:action`、动作与源码声明一致」
+  （拦截 `webContents.send` 且不转发，测试不会真的改动文档）。
+- `test/run-e2e.cjs` 改为通用启动器（默认 `e2e.cjs`，可传脚本名复用），`npm test` 串起静态检查、菜单运行时校验与 E2E。
+- CI 新增独立 `test` job：macOS 跑完整 `npm test`，`windows-latest` 跑静态检查 + 菜单运行时校验；
+  与打包 job 互不依赖，不会阻塞 Release 上传。Windows runner 命令里的 `@ai-md-editor/desktop` 必须加引号
+  （PowerShell 会把 `@` 当成 splatting）。
+- 已实测：`webContents.sendInputEvent` 注入的按键不会触发原生菜单 accelerator（`Cmd+Z` 无反应），
+  因此 OS 级按键分发不能用注入事件断言；应用侧可控的键位注册与动作绑定已全部自动化，实机只剩键盘手感抽查。
+
+#### 4. 文档与版本
+
+- README / AGENTS / TODO / `docs/技术方案文档.md` 同步：订正技术方案顶部「配置持久化仍为内存态」的过时描述，
+  补充三层测试与 CI 说明；AGENTS 补充版本号踩坑（`retry@0.12.0` 与项目版本号相同，禁止全局替换 lock）。
+- 版本号升到 **0.12.1**：根 `package.json`、`apps/desktop/package.json`、`package-lock.json` 的
+  顶层 `version` 与两个 workspace 条目。TODO 中所有遗留空项已清空。
+
+### 验证
+
+- `tsc --noEmit`、`npm run build` 通过。
+- `npm test`：快捷键静态检查 62 项 + 22 个平台关键键位通过；菜单运行时校验 3/3 通过（验证 99 个菜单项）；
+  E2E 44/44 通过（无 GUI 焦点时全屏/最小化自动跳过，有焦点时正常执行）。
+- CI 新增 `test` job（macOS 全量 / Windows 菜单与键位），与三平台打包 job 并行执行。
+
 ## 0.12.0 - 2026-11-08
 
 ### 收尾 TODO 遗留项：表格上下文、缩放比例、撤销体验与代码结构

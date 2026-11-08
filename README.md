@@ -82,21 +82,27 @@ npx electron-builder --mac --arm64      # macOS Apple Silicon (arm64) dmg
 ## 测试
 
 ```bash
-# 菜单快捷键静态检查 + Electron 端到端测试
+# 快捷键静态检查 + 菜单运行时校验 + Electron 端到端测试
 npm test
 
 # 只跑其中一项
 npm run test:menu --workspace @ai-md-editor/desktop
+npm run test:menu-runtime --workspace @ai-md-editor/desktop
 npm run test:e2e --workspace @ai-md-editor/desktop
 ```
 
-- `test/menuAccelerators.cjs`：校验 macOS / Windows 两套快捷键的写法与唯一性（纯 Node，无需 GUI）
+- `test/menuAccelerators.cjs`：校验 macOS / Windows 两套快捷键的写法与唯一性，以及平台关键键位是否齐全（纯 Node，无需 GUI）
+- `test/menuRuntime.cjs`：加载构建产物构造真实原生菜单，断言当前平台的关键快捷键（含隐藏项）已注册，
+  并逐项点击菜单验证「一点击 = 一条 `menu:action`、动作与源码声明一致」
 - `test/e2e.cjs`：启动真实主进程（`out/main/index.js`）+ preload + 渲染层，经原生菜单通道派发动作，
-  覆盖表格上下文置灰、表头行删除、缩放、三种复制格式、打印、全屏/最小化、深层目录文件树定位、
-  源码撤销合并、图片相对路径与拖拽复制、偏好持久化与窗口尺寸记忆。需先 `npm run build`（测试直接加载构建产物）。
-- `test/run-e2e.cjs`：E2E 启动器，自动剔除宿主终端注入的 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS`
-  并附加无 GUI 会话所需的开关，`npm test` 在普通终端与受限沙箱里都能直接运行。
-- E2E 使用独立的临时 `userData` 目录（不读写真实应用配置），每次运行前清空，
+  覆盖表格上下文置灰（含程序化定位光标）、表头行删除语义、缩放、三种复制格式、打印、全屏/最小化、
+  深层目录文件树定位、源码撤销合并、图片相对路径与拖拽复制、偏好持久化与窗口尺寸记忆。
+  需先 `npm run build`（测试直接加载构建产物）。
+- `test/run-e2e.cjs`：通用 Electron 测试启动器（默认 `e2e.cjs`，可传脚本名复用），自动剔除宿主终端注入的
+  `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` 并附加无 GUI 会话所需的开关。
+- CI 的 `test` job：macOS 跑完整 `npm test`，Windows runner 跑静态检查 + 菜单运行时校验，
+  让 Windows 专属键位与菜单动作绑定每次提交都被验证；测试 job 与打包 job 相互独立。
+- 测试使用独立的临时 `userData` 目录（不读写真实应用配置），每次运行前清空，
   避免 Chromium 记住的页面缩放污染下一轮断言。
 
 > 国内环境下载 Electron 二进制较慢，可设置镜像：

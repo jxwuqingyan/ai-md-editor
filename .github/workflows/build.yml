@@ -119,3 +119,46 @@ jobs:
             apps/desktop/release/*.exe
           draft: false
           generate_release_notes: true
+
+  # 自动化验证：macOS 跑完整测试；Windows runner 实跑菜单构建与键位/动作派发校验，
+  # 把「Windows 快捷键只能实机验证」压缩成每次提交都能重复的 CI 检查。
+  # 测试 job 与打包 job 相互独立，互不阻塞 Release 上传。
+  test:
+    name: Test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            full: 'true'
+          - os: windows-latest
+            full: 'false'
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        env:
+          ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+        run: npm ci
+
+      - name: 构建产物（测试直接加载 out/）
+        run: npm run build
+
+      - name: 快捷键静态检查 + 真实菜单运行时校验
+        # workspace 名带 @，在 PowerShell 里必须加引号
+        run: |
+          npm run test:menu --workspace "@ai-md-editor/desktop"
+          npm run test:menu-runtime --workspace "@ai-md-editor/desktop"
+
+      - name: 完整端到端测试（macOS）
+        if: matrix.full == 'true'
+        run: npm run test:e2e --workspace "@ai-md-editor/desktop"

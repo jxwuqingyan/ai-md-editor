@@ -41,6 +41,8 @@ interface ActionOptions {
   checked?: boolean;
   /** 是否启用 */
   enabled?: boolean;
+  /** 菜单悬停说明（macOS 显示；用于解释不直观的动作语义） */
+  toolTip?: string;
 }
 
 /** 构造带动作的菜单项 */
@@ -49,6 +51,7 @@ function item(label: string, action: MenuAction, options: ActionOptions = {}): M
     label,
     accelerator: options.accelerator,
     enabled: options.enabled ?? true,
+    ...(options.toolTip ? { toolTip: options.toolTip } : {}),
     ...(options.checked === undefined ? {} : { type: 'checkbox' as const, checked: options.checked }),
     click: () => sendMenuAction(action, options.payload)
   };
@@ -211,9 +214,13 @@ function buildTemplate(): MenuItemConstructorOptions[] {
             // 增删行列只在光标位于表格内时可用：渲染层把光标上下文同步到 inTable / inTableHeader
             item('在下方插入行', MenuActions.TableAddRow, { enabled: s.inTable }),
             item('在右侧插入列', MenuActions.TableAddCol, { enabled: s.inTable }),
-            // 表头行也能删：编辑器会删掉旧表头并把首个数据行升级为新表头
+            // 表头行也能删：编辑器会删掉旧表头并把首个数据行升级为新表头。
+            // 语义不直观，菜单文案与悬停说明都写清楚，避免用户以为会删掉整张表。
             item(s.inTableHeader ? '删除当前表格行（表头）' : '删除当前表格行', MenuActions.TableDeleteRow, {
-              enabled: s.inTable
+              enabled: s.inTable,
+              toolTip: s.inTableHeader
+                ? '删除表头行后，首个数据行会成为新表头；表格只有表头时会删除整张表'
+                : undefined
             }),
             item('删除当前表格列', MenuActions.TableDeleteCol, { enabled: s.inTable })
           ]

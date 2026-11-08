@@ -110,6 +110,12 @@ function findMenuLabel(menu, label) {
   return null;
 }
 
+/** 当前应用菜单里是否存在指定文案的菜单项 */
+function menuHasLabel(label) {
+  const menu = Menu.getApplicationMenu();
+  return menu ? findMenuLabel(menu, label) !== null : false;
+}
+
 /** 等待指定文案的菜单项出现并返回 enabled 状态 */
 async function menuItemEnabled(label) {
   const started = Date.now();
@@ -134,6 +140,20 @@ void (window.__setSource = (value, caret) => {
   ta.focus();
   ta.setSelectionRange(pos, pos);
   ta.dispatchEvent(new Event('select', { bubbles: true }));
+  return true;
+})
+`;
+
+/**
+ * 静默移动光标：只调用 setSelectionRange，不派发 select / keyup / click。
+ * 用于验证程序化定位光标时表格上下文仍会刷新。
+ */
+const SET_CARET_SILENT = `
+void (window.__setCaretSilent = (pos) => {
+  const ta = document.querySelector('.source-editor');
+  if (!ta) return false;
+  ta.focus();
+  ta.setSelectionRange(pos, pos);
   return true;
 })
 `;
@@ -248,6 +268,15 @@ async function runTests() {
   );
   check('光标在表头时菜单项改为「删除当前表格行（表头）」', headerItem === true, `enabled=${headerItem}`);
 
+  // 表头删除语义不直观：macOS 用悬停说明，其它平台至少保证菜单文案明确标注「表头」
+  const headerTipItem = findMenuLabel(Menu.getApplicationMenu(), '删除当前表格行（表头）');
+  const headerTip = headerTipItem?.toolTip ?? '';
+  check(
+    '表头删除菜单项明确说明语义',
+    process.platform === 'darwin' ? headerTip.includes('首个数据行') : headerTipItem !== null,
+    process.platform === 'darwin' ? headerTip : '非 macOS 以「（表头）」文案为准'
+  );
+
   // ===== 2. 表头行删除（表头被删，首个数据行升级为表头） =====
   menuAction('format:table-delete-row');
   await new Promise((resolve) => setTimeout(resolve, 400));
@@ -291,6 +320,25 @@ async function runTests() {
 
   // ===== 3. 源码模式表格操作 =====
   await ensureSourceMode();
+
+  // 程序化 setSelectionRange 不派发任何事件，表格菜单上下文也必须跟着刷新
+  await exec(SET_CARET_SILENT);
+  await exec(`window.__setSource(${JSON.stringify(TABLE_DOC)}, 3)`);
+  await waitFor(() => menuHasLabel('删除当前表格行（表头）'), { label: '光标在表头的菜单文案' });
+  const bodyOffset = TABLE_DOC.indexOf('单元格 a1');
+  await exec(`window.__setCaretSilent(${bodyOffset})`);
+  const silentBody = await waitFor(
+    () => menuHasLabel('删除当前表格行') && !menuHasLabel('删除当前表格行（表头）'),
+    { label: '静默定位到数据行后菜单刷新', timeout: 5000 }
+  ).catch(() => false);
+  check('程序化定位光标到数据行后表格菜单刷新', silentBody === true, `menuRefreshed=${silentBody}`);
+  await exec(`window.__setCaretSilent(3)`);
+  const silentHeader = await waitFor(
+    () => menuHasLabel('删除当前表格行（表头）'),
+    { label: '静默定位回表头后菜单刷新', timeout: 5000 }
+  ).catch(() => false);
+  check('程序化定位光标回表头后菜单文案恢复', silentHeader === true, `menuRefreshed=${silentHeader}`);
+
   // 「在下方插入行」在表头时应插到分隔行之后（否则会破坏表格结构）
   await exec(`window.__setSource(${JSON.stringify(TABLE_DOC)}, 3)`);
   await new Promise((resolve) => setTimeout(resolve, 250));
