@@ -680,6 +680,16 @@ async function runTests() {
   }).catch(() => undefined);
   check('新窗口可正常关闭', BrowserWindow.getAllWindows().length === before, `windows=${BrowserWindow.getAllWindows().length}`);
 
+  // 主窗口的 zoomPercent 被本用例改成了 125%，必须恢复：
+  // getBoundingClientRect 返回 CSS 像素而 sendInputEvent 走 DIP 坐标，
+  // 缩放残留会让后续所有坐标注入（如任务列表方框点击）错位 25%
+  menuAction('view:zoom-reset');
+  await waitFor(() => Math.abs(win.webContents.getZoomFactor() - 1) < 0.01, {
+    timeout: 8000,
+    label: '主窗口缩放恢复 100%'
+  });
+  await exec(`window.api.updateSettings({ zoomPercent: 100 })`);
+
   // ===== 10.4 工具栏占位布局：固定在编辑区下方，不与内容滚动区重叠 =====
   const layout = await exec(
     `JSON.stringify((() => {
@@ -1312,14 +1322,18 @@ async function runTests() {
     label: '点击表格展开二级网格'
   });
   await exec(`document.querySelector('.slash-sub-cell[data-sub-r="2"][data-sub-c="5"]').click()`);
-  await waitFor(() => exec(`document.querySelectorAll('.ProseMirror table').length >= 2`), { label: '第二张表格已插入' });
-  const table2Cols = await exec(
-    `[...document.querySelectorAll('.ProseMirror table')].pop()?.querySelector('tr')?.children.length ?? 0`
+  await waitFor(
+    () =>
+      exec(
+        `[...document.querySelectorAll('.ProseMirror table')].some((t) => t.querySelector('tr')?.children.length === 5)`
+      ),
+    { label: '第二张表格已插入' }
   );
+  // 插入位置跟随光标（可能在 4×4 表之前），按「5 列」规格找到新表再验证行数
   const table2Rows = await exec(
-    `[...document.querySelectorAll('.ProseMirror table')].pop()?.querySelectorAll('tr').length ?? 0`
+    `[...document.querySelectorAll('.ProseMirror table')].find((t) => t.querySelector('tr')?.children.length === 5)?.querySelectorAll('tr').length ?? 0`
   );
-  check('点击格子按 2 行 × 5 列插入表格', table2Cols === 5 && table2Rows === 2, `cols=${table2Cols} rows=${table2Rows}`);
+  check('点击格子按 2 行 × 5 列插入表格', table2Rows === 2, `rows=${table2Rows}`);
 
   // 再次输入「/」应出现「最近使用」（图片 + 表格），Esc 关闭菜单
   await clickSelector('.ProseMirror p', 0);
@@ -1352,6 +1366,43 @@ async function runTests() {
     label: 'Esc 关闭菜单'
   });
   check('斜杠菜单 Esc 可关闭', true);
+
+  // ===== 10.3 任务列表：复选框渲染与点击勾选（视觉由 CSS 自绘，交互走 taskListPlugin） =====
+  writeFileSync(join(root, '清单.md'), '# 清单\n\n- [ ] 待办一\n- [x] 已办\n- 普通项\n', 'utf-8');
+  await exec(`document.querySelector('.filetree-more-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), {
+    label: '⋮ 菜单弹出（任务列表用例）'
+  });
+  await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '刷新').click()`);
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.tree-name')].some((el) => el.textContent === '清单.md')`),
+    { label: '文件树出现清单', timeout: 8000 }
+  );
+  await exec(
+    `[...document.querySelectorAll('.tree-item.tree-file')].find((el) => el.textContent === '清单.md').click()`
+  );
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '清单.md'`), {
+    label: '打开清单',
+    timeout: 15000
+  });
+  await ensureWysiwygMode();
+  const taskCount = await exec(`document.querySelectorAll('.ProseMirror li[data-item-type="task"]').length`);
+  const plainCount = await exec(`document.querySelectorAll('.ProseMirror li:not([data-item-type])').length`);
+  check('任务项与普通项可区分', taskCount === 2 && plainCount === 1, `task=${taskCount} plain=${plainCount}`);
+
+  // 点击未完成项左侧方框 → 切换为已完成
+  const boxPoint = await exec(`(() => {
+    const li = document.querySelector('.ProseMirror li[data-item-type="task"]');
+    const r = li.getBoundingClientRect();
+    return { x: Math.round(r.left + 8), y: Math.round(r.top + Math.min(13, r.height / 2)) };
+  })()`);
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: boxPoint.x, y: boxPoint.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: boxPoint.x, y: boxPoint.y, button: 'left', clickCount: 1 });
+  await waitFor(
+    () => exec(`document.querySelector('.ProseMirror li[data-item-type="task"]')?.dataset.checked === 'true'`),
+    { label: '方框点击勾选', timeout: 8000 }
+  );
+  check('点击复选框切换完成状态', true);
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

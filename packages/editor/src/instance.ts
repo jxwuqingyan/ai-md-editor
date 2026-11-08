@@ -50,6 +50,7 @@ import { calloutPlugin, tocPlugin } from './decorations';
 import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
 import { slashMenuPlugin } from './slash';
+import { taskListPlugin } from './task';
 import { applyImageSources, imageSourcePlugin } from './images';
 import {
   applyTaskState,
@@ -128,6 +129,8 @@ export async function createEditor(
     .use(imageSourcePlugin(() => imageState.dir))
     // 斜杠快速插入菜单（确认后统一走 format，与工具栏/菜单同链路；实例就绪后经 formatRef 接线）
     .use(slashMenuPlugin({ format: (action, payload) => formatRef.current(action, payload) }))
+    // 任务列表：点击左侧方框切换完成状态（复选框视觉由 CSS 绘制）
+    .use(taskListPlugin)
     .use(highlight)
     .use(math)
     .use(diagram)
@@ -151,7 +154,10 @@ export async function createEditor(
     return level;
   };
 
-  /** 切换任务列表状态（不在列表项内时先包成无序列表再重试一次） */
+  /**
+   * 切换任务列表状态（不在列表项内时先包成无序列表再重试一次）。
+   * taskList 是开关语义：普通项 → 未完成任务；已勾选/未勾选的任务项 → 变回普通项。
+   */
   const applyTask = (mode: 'taskList' | 'taskDone' | 'taskUndone' | 'taskClear', retried = false): void => {
     let applied = false;
     withView((view) => {
@@ -162,7 +168,7 @@ export async function createEditor(
         mode === 'taskDone' ? true
           : mode === 'taskUndone' ? false
             : mode === 'taskClear' ? null
-              : previous == null ? false : previous;
+              : previous == null ? false : null;
       applied = applyTaskState(view, checked);
     });
     if (!applied && !retried) {
@@ -249,9 +255,19 @@ export async function createEditor(
           editor.action(callCommand(wrapInBlockquoteCommand.key));
           break;
         case 'bulletList':
+          // 任务项切普通列表：先清掉 checked，否则 wrapIn 对已有列表项是空操作，
+          // 看起来「点了没反应」
+          withView((view) => {
+            const found = findAncestor(view.state.selection.$from, 'list_item');
+            if (found && found.node.attrs['checked'] != null) applyTaskState(view, null);
+          });
           editor.action(callCommand(wrapInBulletListCommand.key));
           break;
         case 'orderedList':
+          withView((view) => {
+            const found = findAncestor(view.state.selection.$from, 'list_item');
+            if (found && found.node.attrs['checked'] != null) applyTaskState(view, null);
+          });
           editor.action(callCommand(wrapInOrderedListCommand.key));
           break;
         case 'heading':

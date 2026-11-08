@@ -947,8 +947,54 @@ button:focus-visible {
   margin: 0.1em 0;
 }
 
-/* 任务列表复选框 */
-.milkdown-container .ProseMirror li[data-checked='true'] {
+/* 任务列表：项目未启用 Milkdown 的 Vue 列表组件，复选框由 CSS 自绘
+   （li 上只有 data-item-type="task" / data-checked 属性） */
+.milkdown-container .ProseMirror li[data-item-type='task'] {
+  list-style: none;
+  position: relative;
+  padding-left: 1.65em;
+}
+
+.milkdown-container .ProseMirror li[data-item-type='task']::before {
+  content: '';
+  position: absolute;
+  left: 0.15em;
+  top: 0.38em;
+  width: 0.92em;
+  height: 0.92em;
+  box-sizing: border-box;
+  border: 1.5px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+
+.milkdown-container .ProseMirror li[data-item-type='task']:hover::before {
+  border-color: var(--accent);
+}
+
+.milkdown-container .ProseMirror li[data-item-type='task'][data-checked='true']::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* 勾选标记：两条边旋转 -45° 画对勾 */
+.milkdown-container .ProseMirror li[data-item-type='task'][data-checked='true']::after {
+  content: '';
+  position: absolute;
+  left: 0.42em;
+  top: 0.62em;
+  width: 0.4em;
+  height: 0.2em;
+  border-left: 1.6px solid #fff;
+  border-bottom: 1.6px solid #fff;
+  transform: rotate(-45deg);
+  pointer-events: none;
+}
+
+/* 已完成：正文置灰加删除线（只作用于自身段落，不影响嵌套子列表） */
+.milkdown-container .ProseMirror li[data-item-type='task'][data-checked='true'] > p {
   color: var(--text-tertiary);
   text-decoration: line-through;
 }

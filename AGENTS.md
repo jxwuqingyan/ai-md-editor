@@ -194,6 +194,8 @@ ai-md-editor/
 | 45 | 斜杠菜单（`packages/editor/src/slash.ts`）是自包含 ProseMirror 插件：触发要求光标在文本块、无选区、不在代码块/行内代码，且「/」前一字符不是字母数字/冒号/斜杠（防网址、路径误弹）；确认时先删「/过滤词」再统一走 `format()`（实例经 `formatRef` 延迟接线，不能用 callCommand 直调——插件内拿不到 Milkdown 上下文）；面板 mousedown 必须 preventDefault，否则编辑器 blur 先把菜单关掉；**面板必须挂在 `.app` 下**——主题 CSS 变量经 React style 注入在 `.app` 上，挂 body 下 `var(--bg-panel)` 解析失败会变透明底 |
 | 46 | 表格二级行列网格：`format('insertTable', '列数x行数')` 由 `instance.ts` 的 `buildTableSnippet` 动态构造片段（上限 10×20，默认 3×3）；子面板随主面板同挂 `.app`，悬停表格条目展开、悬停其他条目收回，键盘 Enter 展开后 ↑↓←→ 调行列、Esc 先收回子面板再关菜单 |
 | 47 | E2E 用 `sendInputEvent` 注入方向键时 keyCode 必须用 Chromium 键名 `Down`/`Up`/`Left`/`Right`——写 `ArrowDown` 会被静默忽略（无报错、无效果），排查注入「没生效」先查键名 |
+| 48 | 任务列表不启用 Milkdown 的 Vue 列表组件（`@milkdown/components/list-item-block`），复选框由 CSS 依据 `li[data-item-type="task"]` / `[data-checked]` 自绘，点击勾选在 `packages/editor/src/task.ts` 插件里做（mousedown 落在 li 左 padding 区才拦截）；任务项里 Enter 须重置新条目 `checked=false`（splitListItem 会原样复制勾选态），空条目 Enter 清 checked 退出任务态 |
+| 49 | E2E 里 `getBoundingClientRect` 返回 CSS 像素而 `sendInputEvent` 走 DIP 坐标，窗口 zoomFactor 非 1 时坐标注入按比例错位——任何改过 zoomPercent 的用例结束必须恢复 100%，否则后续窄目标点击（复选框、格子）稳定失败且宽目标（段落）带病通过 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
