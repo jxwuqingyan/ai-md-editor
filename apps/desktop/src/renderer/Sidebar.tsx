@@ -29,6 +29,8 @@ interface SidebarProps {
   onChooseFolder: () => void;
   /** 在目录里新建文件（⋮ 菜单） */
   onCreateFile: () => void;
+  /** 重命名当前活动文件（⋮ 菜单） */
+  onRenameFile: () => void;
   /** 在文件管理器中显示当前目录（⋮ 菜单） */
   onRevealFolder: () => void;
   /** 刷新文件树（⋮ 菜单） */
@@ -51,6 +53,7 @@ export default function Sidebar({
   onOpenFile,
   onChooseFolder,
   onCreateFile,
+  onRenameFile,
   onRevealFolder,
   onRefresh,
   refreshToken,
@@ -102,6 +105,7 @@ export default function Sidebar({
               onOpenFile={onOpenFile}
               onChooseFolder={onChooseFolder}
               onCreateFile={onCreateFile}
+              onRenameFile={onRenameFile}
               onRevealFolder={onRevealFolder}
               onOpenSearch={() => setSearchOpen(true)}
               onRefresh={onRefresh}

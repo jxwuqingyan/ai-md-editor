@@ -313,16 +313,23 @@ async function handleReadDir(_win: BrowserWindow | null, dirPath: string): Promi
 
 /**
  * 在目录里新建 Markdown 文件（文件树 ⋮ 菜单的「新建文件」）。
- * 命名「未命名.md」，与现有文件重名时追加序号（未命名-2.md、未命名-3.md…）。
+ * 未指定名称时用「未命名.md」；与现有文件重名时追加序号（未命名-2.md…）。
  */
-async function handleCreateFile(_win: BrowserWindow | null, dirPath: string): Promise<CreateFileResult> {
+async function handleCreateFile(
+  _win: BrowserWindow | null,
+  dirPath: string,
+  desiredName?: string
+): Promise<CreateFileResult> {
   try {
-    const base = '未命名';
-    let candidate = join(dirPath, `${base}.md`);
+    // 用户输入的名称：去掉路径分隔符与非法字符，补 .md 后缀
+    const raw = (desiredName ?? '').trim().replace(/[/\\:*?"<>|]/g, '').replace(/^\.+/, '');
+    const withExt = raw.length === 0 ? '未命名' : /\.(md|markdown|txt)$/i.test(raw) ? raw.replace(/\.(markdown|txt)$/i, '.md') : `${raw}.md`;
+    const stem = withExt.replace(/\.md$/i, '');
+    let candidate = join(dirPath, withExt);
     for (let n = 2; n <= 99; n += 1) {
       try {
         await stat(candidate);
-        candidate = join(dirPath, `${base}-${n}.md`); // 已存在则换下一个名字
+        candidate = join(dirPath, `${stem}-${n}.md`); // 已存在则换下一个名字
       } catch {
         break; // 不存在，可用
       }
@@ -388,10 +395,17 @@ async function handleRenameFile(input: RenameFileInput): Promise<RenameFileResul
   if (!newName || /[/\\]/.test(newName)) {
     return { ok: false, path: null, name: null, error: '文件名不合法' };
   }
+  // 用户没写扩展名时沿用原文件扩展名（重命名「纪要」→「纪要.md」，而不是丢掉 .md）
+  const originalExt = extname(input.path);
+  const finalName =
+    extname(newName) === '' && originalExt !== '' ? `${newName}${originalExt}` : newName;
   try {
-    const target = join(dirname(input.path), newName);
+    const target = join(dirname(input.path), finalName);
+    if (target === input.path) {
+      return { ok: true, path: input.path, name: finalName, error: null };
+    }
     await rename(input.path, target);
-    return { ok: true, path: target, name: newName, error: null };
+    return { ok: true, path: target, name: finalName, error: null };
   } catch (err) {
     return { ok: false, path: null, name: null, error: err instanceof Error ? err.message : String(err) };
   }
@@ -515,8 +529,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.ReadDir, (event, dirPath: string) =>
     handleReadDir(BrowserWindow.fromWebContents(event.sender), dirPath)
   );
-  ipcMain.handle(IpcChannel.CreateFile, (event, dirPath: string) =>
-    handleCreateFile(BrowserWindow.fromWebContents(event.sender), dirPath)
+  ipcMain.handle(IpcChannel.CreateFile, (event, dirPath: string, name?: string) =>
+    handleCreateFile(BrowserWindow.fromWebContents(event.sender), dirPath, name)
   );
   ipcMain.handle(IpcChannel.SearchFolder, (_event, input: SearchFolderInput) => searchFolder(input));
   ipcMain.handle(IpcChannel.ChooseFolder, (event) =>

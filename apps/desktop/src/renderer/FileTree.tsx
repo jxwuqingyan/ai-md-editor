@@ -13,6 +13,8 @@ interface FileTreeProps {
   onChooseFolder: () => void;
   /** 在目录里新建文件（⋮ 菜单） */
   onCreateFile: () => void;
+  /** 重命名当前活动文件（⋮ 菜单，无路径时置灰） */
+  onRenameFile: () => void;
   /** 在文件管理器中显示当前目录（⋮ 菜单） */
   onRevealFolder: () => void;
   /** 打开侧栏搜索面板（⋮ 菜单） */
@@ -51,6 +53,7 @@ export default function FileTree({
   onOpenFile,
   onChooseFolder,
   onCreateFile,
+  onRenameFile,
   onRevealFolder,
   onOpenSearch,
   onRefresh,
@@ -262,6 +265,16 @@ export default function FileTree({
       <div className="filetree-menu" role="menu">
         <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onCreateFile)}>
           新建文件
+        </button>
+        <button
+          type="button"
+          className="filetree-menu-item"
+          role="menuitem"
+          disabled={!activePath}
+          title={activePath ? '重命名当前打开的文件' : '当前文档还没有保存到磁盘'}
+          onClick={() => runMenuAction(onRenameFile)}
+        >
+          重命名当前文件…
         </button>
         <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onOpenSearch)}>
           搜索

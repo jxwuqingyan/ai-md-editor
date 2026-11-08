@@ -201,7 +201,8 @@ export default function App(): JSX.Element {
     recent: [],
     tree: []
   });
-  const [renameOpen, setRenameOpen] = useState(false);
+  // 命名对话框：'rename' = 重命名当前文件，'create' = 新建文件先命名
+  const [renameMode, setRenameMode] = useState<'rename' | 'create' | null>(null);
 
   // 文件树刷新信号：⋮ 菜单「刷新」与「新建文件」时递增，驱动 FileTree 重读根目录
   const [treeRefreshToken, setTreeRefreshToken] = useState(0);
@@ -292,14 +293,53 @@ export default function App(): JSX.Element {
     if (recent[0]) await openPath(recent[0].path, recent[0].name);
   }, [openPath]);
 
-  /** 重命名当前文档，成功后关闭对话框 */
+  /**
+   * 打开命名对话框：有路径就重命名，没有路径（未命名标签）走另存为，
+   * 因为改名对尚未落盘的文档没有落点。
+   */
+  const openRenameDialog = useCallback(() => {
+    const tab = tabsRef.current.find((item) => item.id === activeIdRef.current);
+    if (!tab) return;
+    if (tab.path) {
+      setRenameMode('rename');
+      return;
+    }
+    showNotice('当前文档尚未保存，已打开「另存为」');
+    void saveAs();
+  }, [saveAs, showNotice]);
+
+  /** 命名对话框提交：新建文件时按输入名创建，否则重命名当前文件 */
   const handleRename = useCallback(
     async (name: string) => {
+      const mode = renameMode;
+      setRenameMode(null);
+      if (mode === 'create') {
+        if (!treeRoot) {
+          showNotice('请先打开一个文件夹');
+          return;
+        }
+        const result = await window.api.createFile(treeRoot, name);
+        if (!result.ok || !result.path) {
+          showNotice(`新建文件失败：${result.error ?? '未知错误'}`);
+          return;
+        }
+        setTreeRefreshToken((v) => v + 1);
+        const segments = result.path.split(/[\\/]/);
+        await openPath(result.path, segments[segments.length - 1]);
+        return;
+      }
       await rename(name);
-      setRenameOpen(false);
     },
-    [rename]
+    [renameMode, treeRoot, openPath, rename, showNotice]
   );
+
+  /** 双击非活动标签：先切过去，等活动标签生效后再弹命名框 */
+  const pendingRenameRef = useRef(false);
+  useEffect(() => {
+    if (!pendingRenameRef.current) return;
+    pendingRenameRef.current = false;
+    openRenameDialog();
+  }, [activeId, openRenameDialog]);
 
   /** 插入链接 / 图片占位 */
   const handleInsertLink = useCallback(() => applyFormat('snippet', '[链接文字](url)'), [applyFormat]);
@@ -310,21 +350,14 @@ export default function App(): JSX.Element {
   /** 刷新文件树 */
   const handleRefreshTree = useCallback(() => setTreeRefreshToken((v) => v + 1), []);
 
-  /** 在目录里新建 Markdown 文件并打开 */
-  const handleCreateFile = useCallback(async () => {
+  /** 在目录里新建 Markdown 文件：先输入文件名，确认后再落盘并打开 */
+  const handleCreateFile = useCallback(() => {
     if (!treeRoot) {
       showNotice('请先打开一个文件夹');
       return;
     }
-    const result = await window.api.createFile(treeRoot);
-    if (!result.ok || !result.path) {
-      showNotice(`新建文件失败：${result.error ?? '未知错误'}`);
-      return;
-    }
-    setTreeRefreshToken((v) => v + 1);
-    const segments = result.path.split(/[\\/]/);
-    await openPath(result.path, segments[segments.length - 1]);
-  }, [treeRoot, openPath, showNotice]);
+    setRenameMode('create');
+  }, [treeRoot, showNotice]);
 
   /** 在文件管理器中显示当前目录（macOS Finder / Windows 资源管理器） */
   const handleRevealFolder = useCallback(() => {
@@ -524,9 +557,7 @@ export default function App(): JSX.Element {
     saveAs: () => void saveAs(),
     duplicate: () => void duplicate(),
     reloadFromDisk: () => void reloadFromDisk(),
-    openRename: () => {
-      if (tabsRef.current.find((tab) => tab.id === activeIdRef.current)?.path) setRenameOpen(true);
-    },
+    openRename: openRenameDialog,
     revealInFolder: () => {
       const path = tabsRef.current.find((tab) => tab.id === activeIdRef.current)?.path;
       if (path) void window.api.revealInFolder(path);
@@ -581,6 +612,13 @@ export default function App(): JSX.Element {
           onSelect={selectTab}
           onClose={closeTab}
           onNew={newTab}
+          onRename={(id) => {
+            if (id === activeId) openRenameDialog();
+            else {
+              pendingRenameRef.current = true;
+              selectTab(id);
+            }
+          }}
           actions={
             <TopbarActions
               themeId={themeId}
@@ -605,6 +643,7 @@ export default function App(): JSX.Element {
           onOpenFile={(path, name) => void openPath(path, name)}
           onChooseFolder={() => void chooseFolder()}
           onCreateFile={() => void handleCreateFile()}
+          onRenameFile={openRenameDialog}
           onRevealFolder={handleRevealFolder}
           onRefresh={handleRefreshTree}
           refreshToken={treeRefreshToken}
@@ -686,11 +725,12 @@ export default function App(): JSX.Element {
           onClose={() => setQuickOpenOpen(false)}
         />
       )}
-      {renameOpen && (
+      {renameMode && (
         <RenameDialog
-          initialName={activeTab?.name ?? '未命名.md'}
+          title={renameMode === 'create' ? '新建文件' : '重新命名'}
+          initialName={renameMode === 'create' ? '未命名.md' : activeTab?.name ?? '未命名.md'}
           onSubmit={(name) => void handleRename(name)}
-          onClose={() => setRenameOpen(false)}
+          onClose={() => setRenameMode(null)}
         />
       )}
 

@@ -436,7 +436,8 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 8px 8px 0;
+  padding: 8px 8px 6px;
+  flex-shrink: 0;
 }
 
 .search-input {
@@ -482,12 +483,12 @@ button:focus-visible {
   color: var(--text-primary);
 }
 
-/* 选项行：Aa / |“| / (.*) 三个开关 */
+/* 选项组：Aa / |“| / (.*) 三个开关，与搜索框同一行 */
 .search-options {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 6px 8px 4px;
+  gap: 3px;
+  flex-shrink: 0;
 }
 
 .search-option {
@@ -495,9 +496,10 @@ button:focus-visible {
   background: none;
   border-radius: var(--radius-sm);
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 10.5px;
   font-family: var(--font-mono, monospace);
-  padding: 2px 7px;
+  padding: 2px 5px;
+  line-height: 1.4;
   cursor: pointer;
   transition: background 150ms var(--ease-out), color 150ms var(--ease-out), border-color 150ms var(--ease-out);
 }
@@ -513,11 +515,13 @@ button:focus-visible {
   background: var(--accent-subtle);
 }
 
-.search-status {
-  margin-left: auto;
+.search-status-row {
+  padding: 0 10px 4px;
   font-size: 11px;
   color: var(--text-tertiary);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .search-error,
@@ -707,6 +711,13 @@ button:focus-visible {
 .filetree-menu-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.filetree-menu-item:disabled {
+  color: var(--text-tertiary);
+  opacity: 0.55;
+  cursor: default;
+  background: none;
 }
 
 .filetree-empty {

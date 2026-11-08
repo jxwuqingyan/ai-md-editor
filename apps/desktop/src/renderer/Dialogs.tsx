@@ -141,12 +141,14 @@ export function QuickOpen({ recent, treeFiles, onPick, onClose }: QuickOpenProps
 /** 重命名对话框属性 */
 export interface RenameDialogProps {
   initialName: string;
+  /** 标题文案（默认「重新命名」；新建文件时传「新建文件」） */
+  title?: string;
   onSubmit: (name: string) => void;
   onClose: () => void;
 }
 
-/** 重命名当前文档 */
-export function RenameDialog({ initialName, onSubmit, onClose }: RenameDialogProps): JSX.Element {
+/** 重命名当前文档 / 新建文件时命名 */
+export function RenameDialog({ initialName, title = '重新命名', onSubmit, onClose }: RenameDialogProps): JSX.Element {
   const [name, setName] = useState(initialName);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => inputRef.current?.select(), []);
@@ -154,7 +156,7 @@ export function RenameDialog({ initialName, onSubmit, onClose }: RenameDialogPro
   return (
     <div className="overlay-shade" onMouseDown={onClose}>
       <div className="rename-dialog" onMouseDown={(event) => event.stopPropagation()}>
-        <div className="rename-title">重新命名</div>
+        <div className="rename-title">{title}</div>
         <input
           ref={inputRef}
           className="rename-input"

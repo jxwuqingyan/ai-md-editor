@@ -169,6 +169,7 @@ ai-md-editor/
 | 21 | 自动化测试直接加载构建产物（`out/main/index.js`）跑真实主进程，经 `menu:action` 通道派发动作；修改菜单/表格/缩放行为后必须跑 `npm test` |
 | 22 | 用户偏好持久化到 `userData/settings.json`（主题 / 侧栏 / 标签栏 / 工具栏 / 缩放 / 窗口尺寸），主进程 `settings.ts` 读写、300ms 防抖、退出前强制落盘；渲染层启动后拉取应用，读取前不得回写默认值 |
 | 23 | 编辑区是纵向 flex 占位布局：`.editor-wrap`（查找栏 / `.editor-scroll` 滚动区 / 工具栏），工具栏与查找栏都固定成行、**不覆盖内容**；不要再改回 `position:absolute` 浮动（正文会从其下方穿过）。E2E 有「工具栏不与编辑内容区重叠」断言守门 |
+| 39 | 命名对话框复用 `RenameDialog`，用 `title` 区分「新建文件」与「重新命名」；新建文件走 `createFile(root, name)`（补 `.md`、清非法字符、重名加序号），重命名走 `renameFile`（未写扩展名时沿用原扩展名，避免产出无后缀文件）。侧栏搜索的三个开关必须和输入框同一行（E2E 有同行断言） |
 | 23 | 拖拽取文件真实路径必须走 preload 暴露的 `webUtils.getPathForFile`：Electron 32+ 的 `File` 已不再带 `path` 属性 |
 | 24 | 源码模式表格上下文必须覆盖程序化 `setSelectionRange`（不派发任何事件）：监听 `selectionchange` + 200ms 低频轮询兜底，hook 内先去重再上报，避免反复重建菜单 |
 | 25 | 菜单快捷键验证分三层：`menuAccelerators.cjs` 静态校验写法/唯一性/平台关键键位，`menuRuntime.cjs` 校验真实菜单注册与 click→动作派发，CI 的 Windows runner 实跑前两层。`sendInputEvent` 注入的按键不会触发原生菜单 accelerator，别用它做快捷键断言 |

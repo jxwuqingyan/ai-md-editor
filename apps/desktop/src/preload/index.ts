@@ -90,9 +90,9 @@ const api = {
   readDir: (dirPath: string): Promise<ReadDirResult> =>
     ipcRenderer.invoke(IpcChannel.ReadDir, dirPath),
 
-  /** 在目录里新建 Markdown 文件（自动避让重名），返回新文件路径 */
-  createFile: (dirPath: string): Promise<CreateFileResult> =>
-    ipcRenderer.invoke(IpcChannel.CreateFile, dirPath),
+  /** 在目录里新建 Markdown 文件（可指定名称；自动补 .md 并避让重名），返回新文件路径 */
+  createFile: (dirPath: string, name?: string): Promise<CreateFileResult> =>
+    ipcRenderer.invoke(IpcChannel.CreateFile, dirPath, name),
 
   /** 在目录内搜索所有 Markdown 文件内容 */
   searchFolder: (input: SearchFolderInput): Promise<SearchFolderResult> =>

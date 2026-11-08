@@ -884,20 +884,61 @@ async function runTests() {
   const menuItems = await exec(`[...document.querySelectorAll('.filetree-menu-item')].map((el) => el.textContent)`);
   const menuOk =
     menuItems.includes('新建文件') &&
+    menuItems.includes('重命名当前文件…') &&
     menuItems.includes('搜索') &&
     menuItems.some((label) => /Finder|资源管理器/.test(label)) &&
     menuItems.includes('打开文件夹…') &&
     menuItems.includes('刷新');
-  check('⋮ 菜单包含五项操作', menuOk === true, JSON.stringify(menuItems));
+  check('⋮ 菜单包含六项操作', menuOk === true, JSON.stringify(menuItems));
   const revealLabel = menuItems.find((label) => /Finder|资源管理器/.test(label));
   check('显示项按平台命名', /Finder|资源管理器/.test(String(revealLabel)) && !/YAML/.test(String(revealLabel)), revealLabel);
   await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '新建文件').click()`);
-  const newFileOnDisk = await waitFor(
-    () => (existsSync(join(root, '未命名.md')) || existsSync(join(root, '未命名-2.md')) ? true : null),
-    { label: '新建文件落盘', timeout: 10000 }
+  // 新建文件先弹命名对话框（input 预填「未命名.md」并全选），输入名字回车即创建
+  const renameDialogTitle = await waitFor(
+    () => exec(`document.querySelector('.rename-dialog .rename-title')?.textContent ?? ''`).then((t) => (t ? t : null)),
+    { label: '新建文件弹出命名对话框', timeout: 8000 }
   ).catch(() => null);
-  const newFileTab = await exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`);
-  check('新建文件已落盘并打开', newFileOnDisk === true && String(newFileTab).startsWith('未命名'), `tab=${newFileTab} disk=${newFileOnDisk}`);
+  const prefilledName = await exec(`document.querySelector('.rename-dialog .rename-input')?.value ?? ''`);
+  check('新建文件先命名（预填未命名.md）', renameDialogTitle === '新建文件' && prefilledName === '未命名.md', `title=${renameDialogTitle} value=${prefilledName}`);
+  await exec(`(() => {
+    const input = document.querySelector('.rename-dialog .rename-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '纪要-测试');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    return true;
+  })()`);
+  const newFileOnDisk = await waitFor(
+    () => (existsSync(join(root, '纪要-测试.md')) ? true : null),
+    { label: '新建文件按输入名落盘', timeout: 10000 }
+  ).catch(() => null);
+  const newFileTab = await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`).then((t) => (t === '纪要-测试.md' ? t : null)),
+    { label: '新建文件打开为活动标签', timeout: 10000 }
+  ).catch(() => null);
+  check('新建文件按输入名落盘并打开', newFileOnDisk === true && newFileTab === '纪要-测试.md', `tab=${newFileTab} disk=${newFileOnDisk}`);
+
+  // 双击标签打开重命名对话框（该文件已有路径，直接改名）
+  await exec(`document.querySelector('.tab-active').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+  const tabRenameTitle = await waitFor(
+    () => exec(`document.querySelector('.rename-dialog .rename-title')?.textContent ?? ''`).then((t) => (t === '重新命名' ? t : null)),
+    { label: '双击标签弹出重命名', timeout: 8000 }
+  ).catch(() => null);
+  check('双击标签可重命名', tabRenameTitle === '重新命名', String(tabRenameTitle));
+  await exec(`document.querySelector('.rename-dialog .rename-input') && (() => {
+    const input = document.querySelector('.rename-dialog .rename-input');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+    setter.call(input, '纪要-改名');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    return true;
+  })()`);
+  const renamedTab = await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`).then((t) => (t === '纪要-改名.md' ? t : null)),
+    { label: '标签名已更新', timeout: 8000 }
+  ).catch(() => null);
+  const renamedOnDisk = existsSync(join(root, '纪要-改名.md')) && !existsSync(join(root, '纪要-测试.md'));
+  check('重命名同步磁盘文件名', renamedTab === '纪要-改名.md' && renamedOnDisk, `tab=${renamedTab} disk=${renamedOnDisk}`);
 
   // 侧栏搜索：区分大小写 / 全单词 / 正则表达式三个开关都生效
   writeFileSync(
@@ -907,6 +948,17 @@ async function runTests() {
   );
   await exec(`document.querySelector('.sidebar-search-btn').click()`);
   await waitFor(() => exec(`Boolean(document.querySelector('.search-input'))`), { label: '搜索面板打开' });
+  // 三个选项开关必须和输入框同一行、位于其右侧（不占额外纵向空间）
+  const searchLayout = await exec(`JSON.stringify((() => {
+    const input = document.querySelector('.search-input').getBoundingClientRect();
+    const opts = [...document.querySelectorAll('.search-option')].map((el) => el.getBoundingClientRect());
+    if (opts.length !== 3) return { ok: false, reason: 'options=' + opts.length };
+    const center = (r) => (r.top + r.bottom) / 2;
+    const sameRow = opts.every((r) => Math.abs(center(r) - center(input)) < 8);
+    const rightOfInput = opts.every((r) => r.left >= input.right - 2);
+    return { ok: sameRow && rightOfInput, sameRow, rightOfInput, count: opts.length };
+  })())`);
+  check('搜索选项与输入框同行且位于右侧', JSON.parse(searchLayout).ok === true, searchLayout);
   const typeSearch = (value) =>
     exec(`(() => {
       const input = document.querySelector('.search-input');

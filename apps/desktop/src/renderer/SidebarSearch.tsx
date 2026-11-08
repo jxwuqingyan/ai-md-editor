@@ -116,6 +116,7 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
 
   return (
     <div className="sidebar-search">
+      {/* 单行布局：输入框 + 三个选项开关 + 关闭，选项与输入框同行避免占用纵向空间 */}
       <div className="search-input-row">
         <input
           ref={inputRef}
@@ -128,18 +129,20 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
           }}
           spellCheck={false}
         />
+        <div className="search-options" role="toolbar" aria-label="搜索选项">
+          {renderToggle(caseSensitive, 'Aa', '区分大小写', () => setCaseSensitive((v) => !v))}
+          {renderToggle(wholeWord, '|“|', '查找整个单词', () => setWholeWord((v) => !v))}
+          {renderToggle(regex, '(.*)', '正则表达式', () => setRegex((v) => !v))}
+        </div>
         <button type="button" className="search-close" aria-label="关闭搜索" title="关闭搜索" onClick={onClose}>
           ✕
         </button>
       </div>
-      <div className="search-options" role="toolbar" aria-label="搜索选项">
-        {renderToggle(caseSensitive, 'Aa', '区分大小写', () => setCaseSensitive((v) => !v))}
-        {renderToggle(wholeWord, '|“|', '查找整个单词', () => setWholeWord((v) => !v))}
-        {renderToggle(regex, '(.*)', '正则表达式', () => setRegex((v) => !v))}
-        <span className="search-status">
-          {error ? '正则表达式无效' : searching ? '搜索中…' : query.trim().length > 0 ? `${results.length} 个文件 · ${totalMatches} 处匹配` : ''}
-        </span>
-      </div>
+      {(error || searching || query.trim().length > 0) && (
+        <div className="search-status-row">
+          {error ? '正则表达式无效' : searching ? '搜索中…' : `${results.length} 个文件 · ${totalMatches} 处匹配`}
+        </div>
+      )}
       {error && <div className="search-error">{error}</div>}
       {truncated && !error && (
         <div className="search-truncated">结果较多，仅显示前一部分（打开文件夹根目录可缩小范围）</div>
