@@ -113,6 +113,18 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
       const prev = tabsRef.current;
       const index = prev.findIndex((t) => t.id === id);
       if (index < 0) return;
+      const target = prev[index];
+
+      // 有路径的改动直接补写一次，不打断用户（自动保存的防抖可能还没到）
+      if (target.path && target.dirty) {
+        void window.api.writeFile(target.path, target.content);
+      }
+      // 未落盘的新文档没有兜底，关掉就真的没了，必须问一句
+      if (!target.path && target.dirty) {
+        const confirmed = window.confirm(`「${target.name}」尚未保存到磁盘，关闭后内容会丢失。仍要关闭吗？`);
+        if (!confirmed) return;
+      }
+
       const rest = prev.filter((t) => t.id !== id);
 
       if (id !== activeIdRef.current) {
@@ -216,9 +228,11 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     if (!tab) return;
     const result = await window.api.saveFileAs(tab.content, tab.name);
     if (!result.canceled && result.path) {
-      setTabs((prev) =>
-        prev.map((t) => (t.id === tab.id ? { ...t, path: result.path, name: result.name ?? t.name, dirty: false } : t))
-      );
+      const path = result.path;
+      const name = result.name ?? tab.name;
+      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false } : t)));
+      // 与保存/重命名保持一致：另存出来的新路径也要进最近文件
+      void window.api.addRecent(path, name);
     }
   }, [findActive]);
 
@@ -296,15 +310,27 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     return { recent, tree };
   }, [treeRoot]);
 
-  // 自动保存：编辑内容变化后防抖 1.5s 自动写入（仅当标签有路径且 dirty）
+  // 自动保存：内容变化后防抖 1.5s 写入所有「有路径且 dirty」的标签。
+  // 只保存当前标签会丢稿：敲完立刻切到别的标签（或新建标签）时，
+  // 原标签的计时器被清掉且再也不会重新触发。
   useEffect(() => {
     const timer = setTimeout(() => {
-      const tab = tabsRef.current.find((t) => t.id === activeIdRef.current);
-      if (tab && tab.path && tab.dirty) {
-        void window.api.writeFile(tab.path, tab.content).then(() => {
-          setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, dirty: false } : t)));
+      const dirty = tabsRef.current.filter((tab) => tab.path && tab.dirty);
+      if (dirty.length === 0) return;
+      // 记录写入时的内容快照：写盘过程中用户继续编辑，不能把 dirty 清掉
+      const snapshots = new Map(dirty.map((tab) => [tab.id, tab.content]));
+      void Promise.all(dirty.map((tab) => window.api.writeFile(tab.path as string, tab.content)))
+        .then(() => {
+          setTabs((prev) =>
+            prev.map((tab) => {
+              const written = snapshots.get(tab.id);
+              return written !== undefined && written === tab.content ? { ...tab, dirty: false } : tab;
+            })
+          );
+        })
+        .catch(() => {
+          // 写盘失败保留 dirty，下一次编辑继续重试
         });
-      }
     }, 1500);
     return () => clearTimeout(timer);
   }, [tabs]);

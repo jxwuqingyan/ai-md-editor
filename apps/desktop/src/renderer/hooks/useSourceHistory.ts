@@ -37,8 +37,10 @@ export function useSourceHistory(): SourceHistory {
 
   const push = useCallback((content: string) => {
     const history = store.current;
+    // 与栈顶完全相同的快照没有信息量，重复压栈只会让 Cmd+Z「按几下都没反应」
+    if (history.past.length > 0 && history.past[history.past.length - 1] === content) return;
     const now = Date.now();
-    // 合并窗口内且与栈顶内容不同：不新增快照，继续沿用本次输入的起点
+    // 合并窗口内：不新增快照，继续沿用本次输入的起点
     if (now - history.lastPushAt < COALESCE_WINDOW_MS && history.past.length > 0) {
       history.lastPushAt = now;
       history.future = [];

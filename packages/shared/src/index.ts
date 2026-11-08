@@ -13,9 +13,9 @@ export const IpcChannel = {
   ReadFile: 'file:read',
   /** 写入内容到指定路径 */
   WriteFile: 'file:write',
-  /** 保存粘贴的图片到 assets 目录（返回相对路径） */
+  /** 保存粘贴的图片到文档同级 img/ 目录（返回相对路径） */
   SaveImage: 'image:save',
-  /** 选择本地图片并保存到 assets 目录（返回相对路径） */
+  /** 选择本地图片并暂存到文档同级 img/ 目录（返回相对路径） */
   ChooseImage: 'image:choose',
   /** 读取最近文件列表 */
   GetRecent: 'recent:get',
@@ -107,22 +107,6 @@ export interface ReadDirResult {
   entries: FsEntry[];
   /** 错误信息（成功为 null） */
   error: string | null;
-}
-
-/** 应用基础信息 */
-export interface AppInfo {
-  version: string;
-  platform: string;
-}
-
-/** 文档基础模型 */
-export interface DocMeta {
-  /** 绝对路径 */
-  path: string;
-  /** 文件名 */
-  name: string;
-  /** 最近修改时间戳（毫秒） */
-  modifiedAt: number;
 }
 
 /** 最近文件条目 */

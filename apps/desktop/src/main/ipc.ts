@@ -40,6 +40,45 @@ const MD_FILTERS = [
   { name: '所有文件', extensions: ['*'] }
 ];
 
+/** 打开文本文件的体积上限：超过这个量级已不是「写文档」的场景，读进内存会长时间卡住 */
+const MAX_TEXT_FILE_BYTES = 20 * 1024 * 1024;
+
+/**
+ * 读取文本文件，附带体积与二进制校验。
+ * 返回 error 时由调用方弹窗告知用户，而不是静默失败。
+ */
+async function readTextFile(
+  filePath: string
+): Promise<{ content: string | null; error: string | null }> {
+  try {
+    const info = await stat(filePath);
+    if (!info.isFile()) {
+      return { content: null, error: '只能打开文件，不能打开文件夹' };
+    }
+    if (info.size > MAX_TEXT_FILE_BYTES) {
+      return {
+        content: null,
+        error: `文件大小 ${(info.size / 1024 / 1024).toFixed(1)} MB，超过 20 MB 上限`
+      };
+    }
+    const content = await readFile(filePath, 'utf-8');
+    // 二进制文件（图片/压缩包/pdf 等）用 UTF-8 解出来必然带 NUL，别当成 Markdown 打开
+    if (content.includes('\u0000')) {
+      return { content: null, error: '这不是文本文件' };
+    }
+    return { content, error: null };
+  } catch (err) {
+    return { content: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** 用系统对话框告知「无法打开」（拖拽二进制/超大文件时给出明确反馈） */
+async function notifyOpenError(win: BrowserWindow | null, message: string): Promise<void> {
+  const options = { type: 'error' as const, title: '无法打开文件', message, buttons: ['好'] };
+  if (win) await dialog.showMessageBox(win, options);
+  else await dialog.showMessageBox(options);
+}
+
 /**
  * 打开文件对话框，读取选中的 Markdown 文件内容。
  * 打开成功后记录到最近文件。
@@ -54,25 +93,29 @@ async function handleOpenFile(win: BrowserWindow | null): Promise<OpenFileResult
     return { canceled: true, path: null, name: null, content: null };
   }
   const filePath = result.filePaths[0];
-  const content = await readFile(filePath, 'utf-8');
+  const read = await readTextFile(filePath);
+  if (read.content === null) {
+    await notifyOpenError(win, `${basename(filePath)}：${read.error ?? '读取失败'}`);
+    return { canceled: true, path: null, name: null, content: null };
+  }
   const name = basename(filePath);
   await addRecent(filePath, name);
-  return { canceled: false, path: filePath, name, content };
+  return { canceled: false, path: filePath, name, content: read.content };
 }
 
 /**
  * 打开指定路径的文件（供拖拽打开使用）。
  * 读取内容并记录最近文件。
  */
-async function handleOpenPath(_win: BrowserWindow | null, filePath: string): Promise<OpenFileResult> {
-  try {
-    const content = await readFile(filePath, 'utf-8');
-    const name = basename(filePath);
-    await addRecent(filePath, name);
-    return { canceled: false, path: filePath, name, content };
-  } catch {
+async function handleOpenPath(win: BrowserWindow | null, filePath: string): Promise<OpenFileResult> {
+  const read = await readTextFile(filePath);
+  if (read.content === null) {
+    await notifyOpenError(win, `${basename(filePath)}：${read.error ?? '读取失败'}`);
     return { canceled: true, path: null, name: null, content: null };
   }
+  const name = basename(filePath);
+  await addRecent(filePath, name);
+  return { canceled: false, path: filePath, name, content: read.content };
 }
 
 /**

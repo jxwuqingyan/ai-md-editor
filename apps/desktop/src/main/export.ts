@@ -5,7 +5,9 @@
  * - PDF：用隐藏 BrowserWindow 加载 HTML 后 printToPDF
  */
 import { BrowserWindow } from 'electron';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { marked } from 'marked';
 import type { ExportFormat } from '@ai-md-editor/shared';
 
@@ -134,7 +136,8 @@ export async function exportWord(markdown: string, filePath: string, title: stri
 
 /**
  * 导出 Markdown 为 PDF。
- * 用隐藏 BrowserWindow 加载 HTML，再 printToPDF 输出。
+ * 先把 HTML 写成临时文件再用隐藏窗口加载：data: URL 在文档较大时
+ * 会超过 Chromium 的导航长度限制，导致 PDF 一页空白。
  */
 export async function exportPdf(
   markdown: string,
@@ -142,12 +145,17 @@ export async function exportPdf(
   title: string
 ): Promise<void> {
   const html = buildHtml(markdown, title);
+  const tempHtml = join(
+    tmpdir(),
+    `markdownnote-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`
+  );
+  await writeFile(tempHtml, html, 'utf-8');
   const win = new BrowserWindow({
     show: false,
     webPreferences: { sandbox: true, contextIsolation: true }
   });
   try {
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await win.loadFile(tempHtml);
     const pdf = await win.webContents.printToPDF({
       printBackground: true,
       margins: { top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 },
@@ -156,6 +164,8 @@ export async function exportPdf(
     await writeFile(filePath, pdf);
   } finally {
     win.destroy();
+    // 临时文件清理失败不影响导出结果
+    await rm(tempHtml, { force: true }).catch(() => undefined);
   }
 }
 

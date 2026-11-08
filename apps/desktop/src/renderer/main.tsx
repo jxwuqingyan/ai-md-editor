@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
+import ErrorBoundary from './ErrorBoundary';
 import './styles/global.css';
 // Milkdown 必需的 ProseMirror 基础排版样式 + 表格样式
 import '@milkdown/kit/prose/view/style/prosemirror.css';
@@ -15,6 +16,8 @@ import 'katex/dist/katex.min.css';
 const root = ReactDOM.createRoot(document.getElementById('root') as HTMLElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </React.StrictMode>
 );

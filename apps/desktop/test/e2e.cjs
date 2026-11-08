@@ -1,7 +1,7 @@
 /**
  * 端到端自动化测试（真实 Electron 主进程 + preload + 渲染层）。
  *
- * 覆盖 TODO.md 里「需要真实环境手工验证」的条目：
+ * 覆盖需要真实运行环境才能验证的条目：
  * - 表格菜单项按光标上下文置灰
  * - 表头行删除（WYSIWYG 与源码模式）
  * - 缩放档位与状态栏百分比
@@ -658,6 +658,30 @@ async function runTests() {
   second.close();
   await new Promise((resolve) => setTimeout(resolve, 500));
   check('新窗口可正常关闭', BrowserWindow.getAllWindows().length === before, `windows=${BrowserWindow.getAllWindows().length}`);
+
+  // ===== 10.5 自动保存：已切走的后台标签也要落盘 =====
+  // 只保存「当前标签」时，敲完立刻切标签/新建标签会丢掉写盘（计时器被清且不再重排）
+  const autoDir = join(tmpdir(), 'md-note-e2e-autosave');
+  mkdirSync(autoDir, { recursive: true });
+  const autoPath = join(autoDir, 'auto.md');
+  writeFileSync(autoPath, '# 初始标题\n\n原始内容\n', 'utf-8');
+  menuAction('file:open-recent-path', autoPath);
+  await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent === 'auto.md'`),
+    { label: '打开自动保存用例文档', timeout: 20000 }
+  );
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource('# 初始标题\\n\\n改过的内容\\n')`);
+  // 立刻新建标签，让刚改过的标签变成后台标签
+  menuAction('file:new-tab');
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '未命名.md'`), {
+    label: '切到新标签',
+    timeout: 8000
+  });
+  await new Promise((resolve) => setTimeout(resolve, 2600));
+  const autoSaved = readFileSync(autoPath, 'utf-8');
+  check('后台标签在 1.5s 防抖后自动保存', autoSaved.includes('改过的内容'), JSON.stringify(autoSaved));
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

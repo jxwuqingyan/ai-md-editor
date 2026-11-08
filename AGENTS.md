@@ -61,6 +61,7 @@ ai-md-editor/
 │       │   │   ├── useSourceHistory.ts   # 源码模式撤销栈
 │       │   │   └── useMenuBridge.ts      # 原生菜单动作分发
 │       │   ├── App.tsx           # 根组件（编排 hooks + 布局）
+│       │   ├── ErrorBoundary.tsx # 渲染层异常兜底（避免整窗白屏）
 │       │   ├── Sidebar.tsx       # 左侧文件树 / 大纲面板
 │       │   ├── menuHandlers.ts   # 原生菜单动作分发表（纯函数）
 │       │   ├── sourceActions.ts  # 源码模式格式化（纯函数，含表格增删行列）
@@ -107,7 +108,8 @@ ai-md-editor/
 
 - 开启 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`。
 - 渲染进程禁用 `remote`，所有原生能力经 `contextBridge` 暴露的白名单 API。
-- 只加载本地资源，**不加载任何远程内容**；`CSP` 限制 `script-src 'self'`。
+- 只加载本地资源，**不加载任何远程内容**；`CSP` 限制 `script-src 'self'`，并保持
+  `object-src 'none'` / `base-uri 'self'` / `form-action 'none'`；`img-src` 额外放行 `file:` 供本地图片显示。
 - 所有文件 I/O 走主进程，渲染进程不直接碰文件系统。
 
 ## 8. 功能更新记录（CHANGELOG.md）
@@ -186,6 +188,8 @@ ai-md-editor/
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
 | 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |
 | 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验 |
+| 自动保存范围 | `renderer/hooks/useTabs.ts` | 防抖到点写入**所有**「有路径且 dirty」的标签，按内容快照清 dirty；只写当前标签会在切标签时丢稿 |
+| 打开文件校验 | `apps/desktop/src/main/ipc.ts` `readTextFile` | 先 `stat`：> 20 MB 或含 NUL 字节（二进制）直接拒绝并弹窗说明；不要静默返回「已取消」 |
 | 拖拽取路径 | `apps/desktop/src/preload/index.ts` | `getPathForFile(file)` = `webUtils.getPathForFile`；渲染层据此区分 图片 / 文件夹 / 文档 |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
@@ -214,6 +218,10 @@ ai-md-editor/
 | 升版本后第三方依赖版本被误改 | 全局替换 lock 里的版本号，命中 `retry@0.12.0` 等同号第三方包 | 只精确改 lock 顶层 `version` 与两个 workspace 条目 |
 | CI 上「窗口尺寸写入设置文件」断言失败 | 硬编码请求值 `1000×700`，macOS runner 工作区较小会裁剪成 `1000×684` | 与 `win.getBounds()` 实际值比对，请求值只做容差检查 |
 | Intel job 打 dmg 偶发 `hdiutil detach` 失败（exit 16） | runner 上磁盘镜像卸载冲突，非代码问题，重试 5 次仍可能失败 | `gh run rerun --failed` 重跑失败 job，或等下次 push 重新触发 |
+| 敲完立刻切标签，改动没落盘 | 自动保存只写「当前活动标签」，切走后计时器被清理且不再重排 | 防抖到点遍历所有 `path && dirty` 的标签批量写入 |
+| 拖入二进制/超大文件后窗口卡死 | `readFile(path, 'utf-8')` 无体积与类型校验，几百 MB 直接进内存 | 打开前 `stat` 校验体积上限，内容含 NUL 视为非文本 |
+| 大文档导出 PDF 得到空白页 | 用 `data:text/html,<整篇 HTML>` 导航，超过 Chromium 的 URL 长度上限 | 先写临时 HTML 文件再 `win.loadFile`，导出后删除 |
+| Windows 图片显示不出来 | `encodeURIComponent` 把盘符编成 `C%3A`，`file:///C%3A/...` 不是合法地址 | 盘符段（`/^[A-Za-z]:$/`）跳过编码 |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 

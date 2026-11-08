@@ -55,13 +55,16 @@ export function useFindReplace({
   const replaceTextRef = useRef(replaceText);
   replaceTextRef.current = replaceText;
 
-  // 搜索文本：wysiwyg 用纯文本，源码模式用 Markdown 原文
+  // 搜索文本：wysiwyg 用纯文本，源码模式用 Markdown 原文。
+  // 只在查找栏打开时才取纯文本——getPlainText 会遍历整篇文档，
+  // 常驻计算会让每次按键都多一次全文档扫描。
   useEffect(() => {
+    if (!findOpen) return;
     const text = viewMode === 'wysiwyg' && editorRef.current
       ? editorRef.current.getPlainText()
       : activeContent;
     setSearchText(text);
-  }, [activeContent, activeId, viewMode, editorVersion, editorRef]);
+  }, [findOpen, activeContent, activeId, viewMode, editorVersion, editorRef]);
 
   const matches = useMemo<MatchRange[]>(() => {
     if (!findQuery) return [];

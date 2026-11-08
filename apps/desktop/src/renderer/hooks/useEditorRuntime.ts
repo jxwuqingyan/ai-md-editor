@@ -5,7 +5,8 @@
  * - 编辑器异步就绪后补同步内容、恢复只读状态
  * - 打字机模式：按键或点击后把光标保持在视区中部
  */
-import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';import type { EditorInstance } from '@ai-md-editor/editor';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
+import type { EditorInstance } from '@ai-md-editor/editor';
 import type { Tab } from '../types';
 
 /** useEditorRuntime 的入参 */

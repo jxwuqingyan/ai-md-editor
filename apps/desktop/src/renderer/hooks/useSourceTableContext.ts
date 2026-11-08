@@ -5,7 +5,7 @@
  * 这里按「光标所在行是否以 | 开头 / 下一行是否为分隔行」判断，
  * 让原生菜单的表格项在两个模式下都能正确置灰。
  */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { TableContext } from '@ai-md-editor/editor';
 import { sourceTableContext } from '../sourceActions';
 
@@ -21,6 +21,10 @@ interface UseSourceTableContextOptions {
 
 /** 源码模式表格上下文 hook */
 export function useSourceTableContext({ viewMode, content, onContext }: UseSourceTableContextOptions): void {
+  // 用 ref 保存最新内容：避免每次按键都重建监听与轮询定时器
+  const contentRef = useRef(content);
+  contentRef.current = content;
+
   useEffect(() => {
     if (viewMode !== 'source') return;
 
@@ -29,7 +33,7 @@ export function useSourceTableContext({ viewMode, content, onContext }: UseSourc
     const update = (): void => {
       const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
       if (!ta) return;
-      const next = sourceTableContext(content, ta.selectionStart);
+      const next = sourceTableContext(contentRef.current, ta.selectionStart);
       const key = `${next.inTable ? 1 : 0}${next.inHeader ? 1 : 0}`;
       if (key === lastKey) return;
       lastKey = key;
@@ -55,5 +59,5 @@ export function useSourceTableContext({ viewMode, content, onContext }: UseSourc
       document.removeEventListener('selectionchange', update, true);
       window.clearInterval(poll);
     };
-  }, [viewMode, content, onContext]);
+  }, [viewMode, onContext]);
 }

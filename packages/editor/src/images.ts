@@ -29,10 +29,11 @@ export function toFileUrl(baseDir: string, relative: string): string {
   const cleanBase = baseDir.replace(/[\\/]+$/, '').replace(/\\/g, '/');
   const cleanRel = relative.replace(/^\.\//, '').replace(/\\/g, '/');
   const fullPath = `${cleanBase}/${cleanRel}`;
-  // 逐段编码，避免中文/空格导致加载失败；Windows 盘符路径需要补一个前导斜杠
+  // 逐段编码，避免中文/空格导致加载失败；
+  // Windows 盘符（C:）不能编码成 C%3A，否则 file:///C%3A/... 不是合法地址。
   const encoded = fullPath
     .split('/')
-    .map((segment) => encodeURIComponent(segment))
+    .map((segment) => (/^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
     .join('/');
   return `file://${encoded.startsWith('/') ? '' : '/'}${encoded}`;
 }

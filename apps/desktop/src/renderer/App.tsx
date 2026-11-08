@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { extractOutline } from '@ai-md-editor/markdown-core';
 import { NO_TABLE_CONTEXT, type EditorInstance, type TableContext } from '@ai-md-editor/editor';
 import MarkdownEditor from './MarkdownEditor';
@@ -180,8 +180,11 @@ export default function App(): JSX.Element {
   });
   const [renameOpen, setRenameOpen] = useState(false);
 
-  // 从活动标签内容提取大纲（实时跟随编辑）
-  const outline = useMemo(() => extractOutline(activeTab?.content ?? ''), [activeTab]);
+  // 从活动标签内容提取大纲（实时跟随编辑）。
+  // remark 解析要遍历整篇文档，用延迟值把渲染降为低优先级：
+  // 连续输入时只解析最后一次，长文档不再每敲一个字就卡一下。
+  const deferredContent = useDeferredValue(activeTab?.content ?? '');
+  const outline = useMemo(() => extractOutline(deferredContent), [deferredContent]);
 
   // 统计信息
   const stats: DocStats = useMemo(() => {
@@ -276,7 +279,7 @@ export default function App(): JSX.Element {
   const handleInsertLink = useCallback(() => applyFormat('snippet', '[链接文字](url)'), [applyFormat]);
   const handleInsertImage = useCallback(() => applyFormat('snippet', '![图片](url)'), [applyFormat]);
 
-  // 图片粘贴：保存到 assets/ 并插入相对路径
+  // 图片粘贴：保存到文档同级 img/ 并插入相对路径
   useEffect(() => {
     const onPaste = (event: ClipboardEvent): void => void handlePaste(event);
     window.addEventListener('paste', onPaste);

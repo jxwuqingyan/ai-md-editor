@@ -3,10 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- 安全基线：CSP 限制脚本来源，禁止远程内容；wasm-unsafe-eval 供 Shiki 的 Oniguruma 引擎实例化 WASM -->
+    <!-- 安全基线：CSP 限制脚本来源，禁止远程内容与内嵌对象；
+         wasm-unsafe-eval 供 Shiki 的 Oniguruma 引擎实例化 WASM；file: 供本地图片显示 -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; object-src 'none'; base-uri 'self'; form-action 'none'"
     />
     <title>MarkdownNote</title>
   </head>
