@@ -1271,15 +1271,55 @@ async function runTests() {
   const afterImage = await exec(`document.querySelector('.ProseMirror p')?.textContent ?? ''`);
   check('确认后斜杠与过滤词被清除', !afterImage.includes('/') && !afterImage.includes('图'), afterImage);
 
-  // 键盘路径：输入「/格」过滤到表格一项，Enter 确认插入表格
+  // 键盘路径：输入「/格」过滤到表格一项，Enter 展开二级行列网格，再按行列调整后确认
   await clickSelector('.ProseMirror p', 0);
   await focusEditor();
   win.webContents.insertText('/格');
   await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到表格一项' });
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+  await waitFor(() => exec(`Boolean(document.querySelector('.slash-sub')) && document.querySelector('.slash-sub').style.display !== 'none'`), {
+    label: '二级行列网格展开'
+  });
+  const subLabel = await exec(`document.querySelector('.slash-sub-label')?.textContent ?? ''`);
+  check('二级网格默认 3 行 × 3 列', subLabel.includes('3 行 × 3 列'), subLabel);
+  // 方向键调整：↓ 加一行、→ 加一列 → 4 行 × 4 列
+  for (const key of ['Down', 'Right']) {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
+  }
+  await waitFor(() => exec(`(document.querySelector('.slash-sub-label')?.textContent ?? '').includes('4 行 × 4 列')`), {
+    label: '方向键调整行列'
+  });
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
   await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table td'))`), { label: '表格已插入' });
-  check('Enter 确认插入表格', true);
+  const tableCols = await exec(`document.querySelectorAll('.ProseMirror table tr')[0]?.children.length ?? 0`);
+  const tableRows = await exec(`document.querySelectorAll('.ProseMirror table tr').length`);
+  check('按选中的 4×4 插入表格', tableCols === 4 && tableRows === 4, `cols=${tableCols} rows=${tableRows}`);
+
+  // 鼠标路径：输入「/」点击表格条目展开二级网格，点 2 行 × 5 列的格子插入
+  await clickSelector('.ProseMirror p', 0);
+  await focusEditor();
+  win.webContents.insertText('/');
+  await waitFor(() => exec(`Boolean(document.querySelector('.slash-menu')) && document.querySelector('.slash-menu').style.display !== 'none'`), {
+    label: '菜单再次弹出'
+  });
+  await exec(
+    `[...document.querySelectorAll('.slash-item')].find((el) => el.textContent.includes('表格'))?.click()`
+  );
+  await waitFor(() => exec(`document.querySelector('.slash-sub')?.style.display !== 'none'`), {
+    label: '点击表格展开二级网格'
+  });
+  await exec(`document.querySelector('.slash-sub-cell[data-sub-r="2"][data-sub-c="5"]').click()`);
+  await waitFor(() => exec(`document.querySelectorAll('.ProseMirror table').length >= 2`), { label: '第二张表格已插入' });
+  const table2Cols = await exec(
+    `[...document.querySelectorAll('.ProseMirror table')].pop()?.querySelector('tr')?.children.length ?? 0`
+  );
+  const table2Rows = await exec(
+    `[...document.querySelectorAll('.ProseMirror table')].pop()?.querySelectorAll('tr').length ?? 0`
+  );
+  check('点击格子按 2 行 × 5 列插入表格', table2Cols === 5 && table2Rows === 2, `cols=${table2Cols} rows=${table2Rows}`);
 
   // 再次输入「/」应出现「最近使用」（图片 + 表格），Esc 关闭菜单
   await clickSelector('.ProseMirror p', 0);

@@ -1756,40 +1756,40 @@ button:focus-visible {
 .slash-menu {
   position: fixed;
   z-index: 1200;
-  width: 348px;
-  max-height: 380px;
+  width: 272px;
+  max-height: 330px;
   overflow-y: auto;
   background: var(--bg-panel, #fff);
   border: 1px solid var(--border, #e0e0e0);
-  border-radius: 10px;
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
-  padding: 8px;
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06);
+  padding: 5px;
   font-family: var(--font-sans);
 }
 
 .slash-section {
-  padding: 8px 8px 6px;
-  font-size: 12px;
+  padding: 6px 6px 4px;
+  font-size: 11px;
   color: var(--text-tertiary);
   user-select: none;
 }
 
-/* 最近使用胶囊：语雀风格浅底圆角块，区块下加分隔线 */
+/* 最近使用胶囊：浅底小圆角块，区块下加分隔线 */
 .slash-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 4px 10px;
-  margin: 0 4px;
+  gap: 5px;
+  padding: 0 4px 7px;
+  margin: 0 2px;
   border-bottom: 1px solid var(--border-subtle, #ececec);
 }
 
 .slash-chip {
   border: none;
   background: var(--bg-subtle, #f3f3f3);
-  border-radius: 6px;
-  padding: 5px 14px;
-  font-size: 13px;
+  border-radius: 5px;
+  padding: 2.5px 9px;
+  font-size: 12px;
   color: var(--text-primary);
   cursor: pointer;
   font-family: var(--font-sans);
@@ -1801,40 +1801,40 @@ button:focus-visible {
   color: var(--accent);
 }
 
-/* 格式网格：图标按钮（13 项 → 7+6 两行，不出孤行） */
+/* 格式网格：紧凑图标按钮，13 项 7+6 两行 */
 .slash-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
-  padding: 2px 2px 4px;
+  gap: 1px;
+  padding: 1px 2px 3px;
 }
 
 .slash-grid-item {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 40px;
+  height: 28px;
   border: none;
   background: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   color: var(--text-secondary);
   transition: background 120ms ease, color 120ms ease;
 }
 
 .slash-glyph {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 .slash-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 
-/* 插入区：语雀风格两列，图标带圆角方块底座 */
+/* 插入区：两列，图标带圆角方块底座 */
 .slash-list {
   display: flex;
   flex-direction: column;
@@ -1843,21 +1843,21 @@ button:focus-visible {
 .slash-list-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2px;
-  padding: 0 2px 4px;
+  gap: 1px;
+  padding: 0 2px 2px;
 }
 
 .slash-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 8px;
+  gap: 7px;
+  padding: 3.5px 6px;
   border: none;
   background: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 12.5px;
   text-align: left;
   font-family: var(--font-sans);
   transition: background 120ms ease;
@@ -1867,18 +1867,18 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
+  width: 26px;
+  height: 26px;
   flex-shrink: 0;
   border: 1px solid var(--border, #e0e0e0);
-  border-radius: 8px;
+  border-radius: 6px;
   color: var(--text-secondary);
   background: var(--bg-panel, #fff);
 }
 
 .slash-icon-box .slash-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
 }
 
 .slash-item-label {
@@ -1889,10 +1889,19 @@ button:focus-visible {
 
 .slash-item-hint {
   margin-left: auto;
-  padding-left: 6px;
-  font-size: 11px;
+  padding-left: 4px;
+  font-size: 10.5px;
   color: var(--text-tertiary);
   white-space: nowrap;
+}
+
+/* 表格条目的 › 二级箭头 */
+.slash-item-arrow {
+  margin-left: auto;
+  padding-left: 4px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-tertiary);
 }
 
 .slash-grid-item:hover,
@@ -1907,4 +1916,53 @@ button:focus-visible {
 .slash-item.slash-active .slash-icon-box {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+/* ===== 表格二级行列网格（悬扫 / 方向键选 N 行 × M 列） ===== */
+.slash-sub {
+  position: fixed;
+  z-index: 1210;
+  background: var(--bg-panel, #fff);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06);
+  padding: 8px 10px 9px;
+  font-family: var(--font-sans);
+}
+
+.slash-sub-title {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 6px;
+  user-select: none;
+}
+
+.slash-sub-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 14px);
+  grid-auto-rows: 14px;
+  gap: 2.5px;
+}
+
+.slash-sub-cell {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border, #dcdcdc);
+  border-radius: 2.5px;
+  background: var(--bg-panel, #fff);
+  cursor: pointer;
+  transition: background 80ms ease, border-color 80ms ease;
+}
+
+.slash-sub-cell-on {
+  background: var(--accent-subtle, #eef4ff);
+  border-color: var(--accent, #4a7dff);
+}
+
+.slash-sub-label {
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
 }

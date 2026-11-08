@@ -65,7 +65,14 @@ import {
 import type { CreateEditorOptions, EditorInstance, FormatAction, TableContext } from './types';
 
 /** 3×3 表格片段（带表头文字，插入后可直接填写） */
-const TABLE_SNIPPET = '\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n';
+/** 动态构造表格片段：cols 列（带「列 N」表头）、rows 行（含表头行） */
+function buildTableSnippet(cols: number, rows: number): string {
+  const header = `| ${Array.from({ length: cols }, (_, i) => `列 ${i + 1}`).join(' | ')} |`;
+  const separator = `| ${Array.from({ length: cols }, () => '---').join(' | ')} |`;
+  const emptyRow = `| ${Array.from({ length: cols }, () => '').join(' | ')} |`;
+  const body = Array.from({ length: Math.max(0, rows - 1) }, () => emptyRow);
+  return ['\n' + header, separator, ...body].join('\n') + '\n';
+}
 
 /**
  * 创建编辑器实例（基于 Milkdown）。
@@ -276,10 +283,15 @@ export async function createEditor(
         case 'outdentList':
           editor.action(callCommand(liftListItemCommand.key));
           break;
-        case 'insertTable':
+        case 'insertTable': {
+          // 斜杠菜单二级网格会带 '列数x行数'（如 '5x2'）选择行列；默认 3×3
+          const size = typeof payload === 'string' ? /^(\d+)x(\d+)$/.exec(payload) : null;
+          const cols = size ? Math.min(10, Math.max(1, Number(size[1]))) : 3;
+          const rows = size ? Math.min(20, Math.max(1, Number(size[2]))) : 3;
           // 用带表头的片段插入，编辑器内直接可读；命令版只能得到空表头
-          insertFragment(TABLE_SNIPPET, false);
+          insertFragment(buildTableSnippet(cols, rows), false);
           break;
+        }
         case 'tableAddRow':
           editor.action(callCommand(addRowAfterCommand.key));
           break;

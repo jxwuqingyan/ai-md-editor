@@ -98,6 +98,19 @@ async function run() {
   await new Promise((resolve) => setTimeout(resolve, 200));
   win.webContents.insertText('格');
   await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到表格' });
+  // Enter 展开二级行列网格：截默认 3×3，再方向键调到 4×5 截一张，回车应用
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+  await waitFor(() => exec(`document.querySelector('.slash-sub')?.style.display !== 'none'`), { label: '二级网格展开' });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await shot('slash-5-sub-3x3.png');
+  for (const key of ['Down', 'Right', 'Right']) {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  console.log('二级标签 =', await exec(`document.querySelector('.slash-sub-label')?.textContent`));
+  await shot('slash-6-sub-4x5.png');
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
   await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table'))`), { label: '表格插入' });

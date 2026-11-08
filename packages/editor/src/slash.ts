@@ -109,8 +109,7 @@ const ITEMS: SlashItem[] = [
     aliases: ['bg', 'biaoge', 'table'],
     icon: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18M3 15h18M9.5 4v16M15.5 4v16"/>'),
     action: 'insertTable',
-    kind: 'insert',
-    hint: '3×3'
+    kind: 'insert'
   },
   {
     id: 'image',
@@ -209,13 +208,26 @@ export interface SlashMenuOptions {
   format: (action: FormatAction, payload?: number | string) => void;
 }
 
+/** 表格条目 id（二级行列网格挂在它上面） */
+const TABLE_ID = 'insertTable';
+/** 二级网格的单元格规模：最多可选 8 列 × 6 行 */
+const SUB_MAX_COLS = 8;
+const SUB_MAX_ROWS = 6;
+
 /**
  * 创建斜杠菜单插件。每个编辑器实例一份独立面板与状态。
  */
 export function slashMenuPlugin(options: SlashMenuOptions) {
   // —— 面板与状态（编辑器实例级） ——
   let panel: HTMLDivElement | null = null;
+  /** 表格二级行列网格面板 */
+  let subPanel: HTMLDivElement | null = null;
   let isOpen = false;
+  /** 二级网格是否展开 */
+  let subOpen = false;
+  /** 二级网格当前选中的行数 / 列数 */
+  let subRows = 3;
+  let subCols = 3;
   let trigger: SlashTrigger | null = null;
   let activeIndex = 0;
   /** 当前展示（过滤后）的条目，键盘导航与点击确认都用它的下标 */
@@ -229,6 +241,17 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     panel.setAttribute('aria-label', '快速插入菜单');
     // 按下不抢焦点：否则编辑器 blur 会先把菜单关掉
     panel.addEventListener('mousedown', (event) => event.preventDefault());
+    // 悬停表格条目时展开二级网格，悬停其他条目时收回
+    panel.addEventListener('mouseover', (event) => {
+      if (!isOpen) return;
+      const target = (event.target as HTMLElement).closest<HTMLElement>('[data-slash-id],[data-slash-index]');
+      if (!target) return;
+      if (target.dataset['slashId'] === TABLE_ID || visible[Number(target.dataset['slashIndex'])]?.id === TABLE_ID) {
+        if (!subOpen) openSub();
+      } else {
+        closeSub();
+      }
+    });
     panel.addEventListener('click', (event) => {
       const view = viewRef;
       if (!view || !isOpen) return;
@@ -238,7 +261,15 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       const item = byId
         ? ITEMS.find((candidate) => candidate.id === byId)
         : visible[Number(target.dataset['slashIndex'])];
-      if (item) applyItem(view, item);
+      if (!item) return;
+      if (item.id === TABLE_ID) {
+        // 表格不直接插入：第一次点展开二级网格，再点按当前选中行列插入
+        if (subOpen) applyTable(view);
+        else openSub();
+        return;
+      }
+      closeSub();
+      applyItem(view, item);
     });
     // 必须挂在 .app（主题 CSS 变量的宿主）下而不是 body：
     // 变量经 React style 注入在 .app 上，挂 body 下 var(--bg-panel) 全部解析失败，
@@ -250,7 +281,100 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
 
   const hidePanel = (): void => {
     if (panel) panel.style.display = 'none';
+    closeSub();
     isOpen = false;
+  };
+
+  // —— 表格二级行列网格（语雀式：悬扫单元格选行列，实时显示 N 行 × M 列） ——
+
+  const ensureSubPanel = (): HTMLDivElement => {
+    if (subPanel) return subPanel;
+    subPanel = document.createElement('div');
+    subPanel.className = 'slash-sub';
+    subPanel.setAttribute('role', 'grid');
+    subPanel.setAttribute('aria-label', '选择表格行列');
+    subPanel.addEventListener('mousedown', (event) => event.preventDefault());
+    // 悬扫单元格：以悬停到的格子为右下角，高亮 subRows × subCols 区域
+    subPanel.addEventListener('mouseover', (event) => {
+      const cell = (event.target as HTMLElement).closest<HTMLElement>('[data-sub-r]');
+      if (!cell) return;
+      subRows = Math.max(1, Number(cell.dataset['subR']));
+      subCols = Math.max(1, Number(cell.dataset['subC']));
+      renderSub();
+    });
+    subPanel.addEventListener('click', (event) => {
+      const view = viewRef;
+      const cell = (event.target as HTMLElement).closest<HTMLElement>('[data-sub-r]');
+      if (!view || !cell) return;
+      subRows = Math.max(1, Number(cell.dataset['subR']));
+      subCols = Math.max(1, Number(cell.dataset['subC']));
+      applyTable(view);
+    });
+    // 与主面板挂同一宿主（.app），保证主题变量可达
+    const host = document.querySelector('.app');
+    (host instanceof HTMLElement ? host : document.body).appendChild(subPanel);
+    return subPanel;
+  };
+
+  /** 把二级网格定位到表格条目右侧；放不下时翻到左侧 */
+  const positionSub = (): void => {
+    if (!subPanel || !panel || subPanel.style.display === 'none') return;
+    const anchor =
+      panel.querySelector<HTMLElement>(`[data-slash-id="${TABLE_ID}"]`) ??
+      panel.querySelector<HTMLElement>('[data-slash-index]');
+    if (!anchor) return;
+    const a = anchor.getBoundingClientRect();
+    const rect = subPanel.getBoundingClientRect();
+    const margin = 8;
+    let left = a.right + 6;
+    if (left + rect.width + margin > window.innerWidth) left = a.left - rect.width - 6;
+    if (left < margin) left = margin;
+    let top = Math.min(a.top, window.innerHeight - rect.height - margin);
+    if (top < margin) top = margin;
+    subPanel.style.left = `${Math.round(left)}px`;
+    subPanel.style.top = `${Math.round(top)}px`;
+  };
+
+  /** 重建二级网格内容并显示 */
+  const renderSub = (): void => {
+    const node = ensureSubPanel();
+    let cells = '';
+    for (let r = 1; r <= SUB_MAX_ROWS; r += 1) {
+      for (let c = 1; c <= SUB_MAX_COLS; c += 1) {
+        const on = r <= subRows && c <= subCols ? ' slash-sub-cell-on' : '';
+        cells += `<i class="slash-sub-cell${on}" data-sub-r="${r}" data-sub-c="${c}" role="gridcell" aria-label="${r}行${c}列"></i>`;
+      }
+    }
+    node.innerHTML =
+      `<div class="slash-sub-title">表格</div>` +
+      `<div class="slash-sub-grid">${cells}</div>` +
+      `<div class="slash-sub-label">${subRows} 行 × ${subCols} 列</div>`;
+    node.style.display = '';
+    positionSub();
+  };
+
+  const openSub = (): void => {
+    subOpen = true;
+    subRows = 3;
+    subCols = 3;
+    if (panel) renderSub();
+  };
+
+  const closeSub = (): void => {
+    subOpen = false;
+    if (subPanel) subPanel.style.display = 'none';
+  };
+
+  /** 确认表格：删掉「/过滤词」→ 按选中行列插入 → 记录最近使用 */
+  const applyTable = (view: EditorView): void => {
+    if (!trigger) return;
+    const cursor = view.state.selection.from;
+    const from = trigger.from;
+    trigger = null;
+    hidePanel();
+    if (cursor >= from) view.dispatch(view.state.tr.delete(from, cursor));
+    options.format('insertTable', `${subCols}x${subRows}`);
+    saveRecent(TABLE_ID);
   };
 
   /** 把面板定位到「/」下方，越界时收进窗口 / 向上翻转 */
@@ -327,14 +451,24 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     positionPanel(view);
     // 键盘移动高亮后保证可见
     node.querySelector('.slash-active')?.scrollIntoView({ block: 'nearest' });
+    // 主面板重渲染（过滤变化 / 键盘移动）后同步二级网格：表格不在可见项里就收回
+    if (subOpen) {
+      if (visible.some((item) => item.id === TABLE_ID)) renderSub();
+      else closeSub();
+    }
   };
 
-  /** 插入区 / 过滤态的单行条目（图标带圆角方块底座） */
+  /** 插入区 / 过滤态的单行条目（图标带圆角方块底座；表格带 › 二级箭头） */
   const rowHtml = (item: SlashItem, index: number, active: boolean): string => {
     const icon = item.icon.startsWith('<svg')
       ? `<span class="slash-icon">${item.icon}</span>`
       : `<span class="slash-glyph">${esc(item.icon)}</span>`;
-    return `<button type="button" class="slash-item${active ? ' slash-active' : ''}" data-slash-index="${index}"><span class="slash-icon-box">${icon}</span><span class="slash-item-label">${esc(item.label)}</span>${item.hint ? `<span class="slash-item-hint">${esc(item.hint)}</span>` : ''}</button>`;
+    const tail = item.id === TABLE_ID
+      ? '<span class="slash-item-arrow">›</span>'
+      : item.hint
+        ? `<span class="slash-item-hint">${esc(item.hint)}</span>`
+        : '';
+    return `<button type="button" class="slash-item${active ? ' slash-active' : ''}" data-slash-index="${index}"><span class="slash-icon-box">${icon}</span><span class="slash-item-label">${esc(item.label)}</span>${tail}</button>`;
   };
 
   /** 确认条目：删掉「/过滤词」→ 套用动作 → 记录最近使用 */
@@ -360,7 +494,10 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     }
     const filterChanged = !trigger || trigger.filter !== detected.filter;
     trigger = detected;
-    if (filterChanged) activeIndex = 0;
+    if (filterChanged) {
+      activeIndex = 0;
+      closeSub();
+    }
     renderPanel(view);
   };
 
@@ -377,7 +514,10 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
             if (isOpen) hidePanel();
           };
           const onScroll = (): void => {
-            if (isOpen && trigger) positionPanel(view);
+            if (isOpen && trigger) {
+              positionPanel(view);
+              if (subOpen) positionSub();
+            }
           };
           view.dom.addEventListener('blur', onBlur);
           // 编辑器内滚动（捕获：内层容器滚动也会触发）时跟随「/」的位置
@@ -392,6 +532,10 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
                 panel.remove();
                 panel = null;
               }
+              if (subPanel) {
+                subPanel.remove();
+                subPanel = null;
+              }
               viewRef = null;
               view.dom.removeEventListener('blur', onBlur);
               view.dom.removeEventListener('scroll', onScroll, true);
@@ -403,6 +547,35 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
             if (!isOpen || !trigger) return false;
             // 中文输入法组合期间不拦截（Enter 上屏、方向键选候选）
             if (event.isComposing || event.key === 'Process') return false;
+            // 二级网格展开时：方向键调整行列，Enter 插入，Esc 先收回网格
+            if (subOpen) {
+              switch (event.key) {
+                case 'ArrowDown':
+                  subRows = Math.min(SUB_MAX_ROWS, subRows + 1);
+                  renderSub();
+                  return true;
+                case 'ArrowUp':
+                  subRows = Math.max(1, subRows - 1);
+                  renderSub();
+                  return true;
+                case 'ArrowRight':
+                  subCols = Math.min(SUB_MAX_COLS, subCols + 1);
+                  renderSub();
+                  return true;
+                case 'ArrowLeft':
+                  subCols = Math.max(1, subCols - 1);
+                  renderSub();
+                  return true;
+                case 'Enter':
+                  applyTable(view);
+                  return true;
+                case 'Escape':
+                  closeSub();
+                  return true;
+                default:
+                  return false;
+              }
+            }
             switch (event.key) {
               case 'ArrowDown':
                 activeIndex = Math.min(visible.length - 1, activeIndex + 1);
@@ -414,6 +587,11 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
                 return true;
               case 'Enter': {
                 const item = visible[activeIndex];
+                // 高亮在表格上时 Enter 先展开二级网格（再按确认插入）
+                if (item && item.id === TABLE_ID) {
+                  openSub();
+                  return true;
+                }
                 if (item) applyItem(view, item);
                 return true;
               }
