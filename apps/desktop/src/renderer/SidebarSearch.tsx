@@ -103,10 +103,10 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
     return (
       <div className="sidebar-search">
         <div className="search-input-row">
-          <input className="search-input" placeholder="先打开文件夹才能搜索" disabled />
           <button type="button" className="search-close" aria-label="关闭搜索" title="关闭搜索" onClick={onClose}>
-            ✕
+            ←
           </button>
+          <input className="search-input" placeholder="先打开文件夹才能搜索" disabled />
         </div>
       </div>
     );
@@ -116,12 +116,15 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
 
   return (
     <div className="sidebar-search">
-      {/* 单行布局：输入框 + 三个选项开关 + 关闭，选项与输入框同行避免占用纵向空间 */}
+      {/* 下划线式搜索条：← 返回在左，无边框输入框，选项为纯文字开关，整行共用一条底部下划线 */}
       <div className="search-input-row">
+        <button type="button" className="search-close" aria-label="关闭搜索" title="关闭搜索" onClick={onClose}>
+          ←
+        </button>
         <input
           ref={inputRef}
           className="search-input"
-          placeholder="查找内容…"
+          placeholder="查找"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => {
@@ -131,12 +134,9 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
         />
         <div className="search-options" role="toolbar" aria-label="搜索选项">
           {renderToggle(caseSensitive, 'Aa', '区分大小写', () => setCaseSensitive((v) => !v))}
-          {renderToggle(wholeWord, '|“|', '查找整个单词', () => setWholeWord((v) => !v))}
+          {renderToggle(wholeWord, '「」', '查找整个单词', () => setWholeWord((v) => !v))}
           {renderToggle(regex, '(.*)', '正则表达式', () => setRegex((v) => !v))}
         </div>
-        <button type="button" className="search-close" aria-label="关闭搜索" title="关闭搜索" onClick={onClose}>
-          ✕
-        </button>
       </div>
       {(error || searching || query.trim().length > 0) && (
         <div className="search-status-row">
