@@ -123,6 +123,8 @@ npm run test:e2e --workspace @ai-md-editor/desktop
   工具栏与编辑内容区不重叠。需先 `npm run build`（测试直接加载构建产物）。
 - `test/run-e2e.cjs`：通用 Electron 测试启动器（默认 `e2e.cjs`，可传脚本名复用），自动剔除宿主终端注入的
   `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` 并附加无 GUI 会话所需的开关。
+- `test/shot.cjs`：界面截图脚本（`node test/run-e2e.cjs shot.cjs`，不参与 `npm test`）：
+  自动打开目录、搜索、切主题，输出窗口截图到 /tmp/md-note-shots/ 供视觉调整对照。
 - CI 的 `test` job：macOS 跑完整 `npm test`，Windows runner 跑单元测试 + 静态检查 + 菜单运行时校验，
   让 Windows 专属键位与菜单动作绑定每次提交都被验证；测试 job 与打包 job 相互独立。
 - 测试使用独立的临时 `userData` 目录（不读写真实应用配置），每次运行前清空，

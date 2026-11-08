@@ -545,14 +545,20 @@ button:focus-visible {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 4px 0 12px;
+  padding: 2px 0 12px;
+}
+
+/* 相邻文件组之间用发丝线分隔，组标题上方留出呼吸空间 */
+.search-file + .search-file {
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 4px;
 }
 
 .search-file-name {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px 3px;
+  padding: 7px 10px 3px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
@@ -596,23 +602,29 @@ button:focus-visible {
 
 .search-line-no {
   flex-shrink: 0;
-  min-width: 22px;
+  min-width: 24px;
   text-align: right;
   font-size: 10.5px;
   color: var(--text-tertiary);
+  font-family: var(--font-mono, monospace);
   font-variant-numeric: tabular-nums;
 }
 
+/* 预览行必须单行截断：text-overflow 生效的前提是 white-space: nowrap，
+   否则长行（表格行、长段落）会被 overflow:hidden 硬剪掉而看不到省略号 */
 .search-line-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .search-hit {
   background: var(--accent-subtle);
   color: var(--accent);
-  border-radius: 2px;
-  padding: 0 1px;
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 0 2px;
 }
 
 /* ============ 文件树 ============ */
