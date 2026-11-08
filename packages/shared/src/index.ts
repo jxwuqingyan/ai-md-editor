@@ -54,6 +54,8 @@ export const IpcChannel = {
   RenameFile: 'file:rename',
   /** 在系统文件管理器中显示当前文档 */
   RevealInFolder: 'file:reveal',
+  /** 用系统默认浏览器打开外部链接 */
+  OpenExternal: 'shell:open-external',
   /** 打印当前文档 */
   Print: 'app:print',
   /** 写剪贴板（纯文本 / Markdown / HTML 代码） */
@@ -252,6 +254,14 @@ export interface SaveImageInput {
 export interface SaveImageResult {
   /** 保存成功后的相对路径（如 img/20261026-123456.png），失败为 null */
   relativePath: string | null;
+  /** 错误信息（成功为 null） */
+  error: string | null;
+}
+
+/** 打开外部链接的结果 */
+export interface OpenExternalResult {
+  /** 是否已交给系统浏览器 */
+  ok: boolean;
   /** 错误信息（成功为 null） */
   error: string | null;
 }

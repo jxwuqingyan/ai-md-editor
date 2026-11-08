@@ -30,6 +30,7 @@ import type {
   AppSettings,
   StatPathResult,
   SaveImageFromPathInput,
+  OpenExternalResult,
   TextEncoding
 } from '@ai-md-editor/shared';
 import {
@@ -514,6 +515,24 @@ async function handleSaveImageFromPath(input: SaveImageFromPathInput): Promise<S
 }
 
 /**
+ * 用系统默认浏览器打开外部链接。
+ * 只放行 http/https：渲染进程内容可被任意文档注入，任意协议（file: 等）
+ * 都不应当被直接执行。
+ */
+async function handleOpenExternal(url: string): Promise<OpenExternalResult> {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return { ok: false, error: `不支持的链接协议：${parsed.protocol}` };
+    }
+    await shell.openExternal(parsed.href);
+    return { ok: true, error: null };
+  } catch {
+    return { ok: false, error: '链接格式无效' };
+  }
+}
+
+/**
  * 注册所有 IPC handler。
  * 每个 handler 通过 event.sender 获取发起请求的窗口，作为对话框的父窗口。
  */
@@ -588,6 +607,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.SaveImageFromPath, (_event, input: SaveImageFromPathInput) =>
     handleSaveImageFromPath(input)
   );
+  ipcMain.handle(IpcChannel.OpenExternal, (_event, url: string) => handleOpenExternal(url));
   ipcMain.handle(IpcChannel.AlwaysOnTop, (event, enabled: boolean) => {
     BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(enabled);
   });

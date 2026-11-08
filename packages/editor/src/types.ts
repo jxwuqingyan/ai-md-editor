@@ -87,4 +87,9 @@ export interface CreateEditorOptions {
    * 选中的图片复制到文档同级 img/ 目录并插入相对路径引用。
    */
   onPickImage?: () => void;
+  /**
+   * ⌘ / Ctrl + 点击编辑器内链接时的回调：由渲染层走主进程
+   * 用系统默认浏览器打开（仅 http/https 会到这里）。
+   */
+  onOpenLink?: (url: string) => void;
 }

@@ -2,6 +2,16 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.12 - 2026-11-09
+
+### 新增：编辑器内打开链接（⌘/Ctrl + 点击）
+
+- 此前编辑器里的链接只是普通文字，点击毫无反应（主进程虽有 `setWindowOpenHandler` 兜底，但 WYSIWYG 里点击链接不会触发导航）。现在 **⌘（Windows：Ctrl）+ 点击**链接用系统默认浏览器打开——普通单击保留光标定位语义（点了把光标放进去改文字），与常见编辑器习惯一致。
+- 悬停链接出现操作提示（「⌘ 点击打开链接」/「Ctrl+点击打开链接」，不覆盖 Markdown 自带 title），hover 光标变 pointer、显示下划线。
+- 安全：新通道 `shell:open-external`，主进程 handler 只放行 **http/https**（渲染内容可被任意文档注入，任意协议不允许执行）；编辑器插件侧同样先过滤非 http 开头的地址。
+- **重大排障**：本地 electron-builder 打包会**改写 `apps/desktop/package.json`**——剥掉全部 `scripts` 与 `devDependencies`，只留生产依赖（0.14.11 打包后工作区即被改写，`npm run build` / `npm test` 直接失效）。打包后必须 `git checkout -- apps/desktop/package.json` 恢复再继续，已记入 AGENTS 决策表 53。
+- 测试：E2E 扩到 97 项（普通单击不打开、悬停 title 提示、⌘+点击打开——主进程侧替换 `shell.openExternal` 收集调用；链接目标按文本精确匹配，行内片段插入会拆/并段落，不能假设 DOM 顺序与插入顺序一致）。
+
 ## 0.14.11 - 2026-11-08
 
 ### 优化：斜杠菜单「链接」二级表单 +「图片」打开文件选择器

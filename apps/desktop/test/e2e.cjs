@@ -1431,6 +1431,56 @@ async function runTests() {
   );
   check('键盘路径链接确认成功', true);
 
+  // ⌘+点击打开链接：E2E 脚本与主进程同进程，直接替换 shell.openExternal 收集调用
+  // （主进程 handler 里 import 的 shell 与这里 require 到的是同一对象，属性替换生效）
+  const { shell } = require('electron');
+  const realOpenExternal = shell.openExternal;
+  const openedUrls = [];
+  shell.openExternal = async (url) => {
+    openedUrls.push(url);
+  };
+  // 两条链接的 DOM 顺序不保证与插入顺序一致（行内片段插入会拆/并段落），
+  // 点击目标按文本精确匹配，别用「第一个 a」
+  const targetLink = await exec(`(() => {
+    const a = [...document.querySelectorAll('.ProseMirror a')].find(
+      (el) => el.textContent === '点击这里' && el.getAttribute('href') === 'https://example.com/docs'
+    );
+    if (!a) return null;
+    const r = a.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  })()`);
+  if (!targetLink) throw new Error('找不到目标链接「点击这里」');
+  // 普通单击：不打开，只定位光标
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: targetLink.x, y: targetLink.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: targetLink.x, y: targetLink.y, button: 'left', clickCount: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  check('普通单击不打开链接（保留光标定位）', openedUrls.length === 0, JSON.stringify(openedUrls));
+  // 悬停提示：对目标链接派发冒泡 mouseover 后应带上「⌘ 点击打开链接」的 title
+  await exec(`(() => {
+    const a = [...document.querySelectorAll('.ProseMirror a')].find((el) => el.textContent === '点击这里');
+    a.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    return a.title;
+  })()`);
+  const linkTitle = await exec(
+    `[...document.querySelectorAll('.ProseMirror a')].find((el) => el.textContent === '点击这里')?.title ?? ''`
+  );
+  check('悬停链接出现打开方式提示', linkTitle.includes('点击打开链接'), linkTitle);
+  // ⌘+点击：交给系统浏览器（这里是被替换后的收集器）
+  win.webContents.sendInputEvent({
+    type: 'mouseDown', x: targetLink.x, y: targetLink.y, button: 'left', clickCount: 1, modifiers: ['meta']
+  });
+  win.webContents.sendInputEvent({
+    type: 'mouseUp', x: targetLink.x, y: targetLink.y, button: 'left', clickCount: 1, modifiers: ['meta']
+  });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  check(
+    '⌘+点击用系统浏览器打开链接',
+    openedUrls.includes('https://example.com/docs'),
+    JSON.stringify(openedUrls)
+  );
+  // 恢复真实实现，避免影响其他用例
+  shell.openExternal = realOpenExternal;
+
   // ===== 10.4 最近使用：表格与链接确认后记入 localStorage，新文档置顶展示 =====
   // 单独开新文档验证：前面的表格用例会把首个段落吞进单元格，
   // 单元格里「/」前一字符是数字（列 1）按设计不触发，锚点不可靠。

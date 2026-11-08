@@ -50,6 +50,7 @@ import { calloutPlugin, tocPlugin } from './decorations';
 import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
 import { slashMenuPlugin } from './slash';
+import { linkClickPlugin } from './link';
 import { taskListPlugin } from './task';
 import { applyImageSources, imageSourcePlugin } from './images';
 import {
@@ -85,7 +86,7 @@ export async function createEditor(
   container: HTMLElement,
   options: CreateEditorOptions = {}
 ): Promise<EditorInstance> {
-  const { defaultValue = '', onChange, onTableContext, onPickImage } = options;
+  const { defaultValue = '', onChange, onTableContext, onPickImage, onOpenLink } = options;
 
   // 缓存最新的 Markdown 文本（由 markdownUpdated 回调更新）
   let currentMarkdown = defaultValue;
@@ -136,6 +137,8 @@ export async function createEditor(
     )
     // 任务列表：点击左侧方框切换完成状态（复选框视觉由 CSS 绘制）
     .use(taskListPlugin)
+    // ⌘ / Ctrl + 点击链接：经渲染层用系统默认浏览器打开（悬停补 title 提示）
+    .use(linkClickPlugin({ openLink: (url) => onOpenLink?.(url) }))
     .use(highlight)
     .use(math)
     .use(diagram)

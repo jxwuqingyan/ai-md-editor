@@ -199,6 +199,9 @@ ai-md-editor/
 | 50 | 斜杠菜单的链接二级表单是唯一允许焦点离开编辑器的浮层：面板 mousedown 只对**非输入框**元素 preventDefault；表单展开期（`formOpen`）编辑器 blur 不作为关闭信号，改靠 document 捕获阶段的 mousedown 关闭（点面板外整体收起）。其余浮层（菜单 / 网格）仍整体 preventDefault |
 | 51 | 斜杠菜单「图片」条目走 `onPickImage` 回调（`SlashMenuOptions` ← `CreateEditorOptions` ← `MarkdownEditor` ref 转发 ← 渲染层 `chooseImage`）：原生文件对话框无法自动化，E2E 尝试给 `window.api.chooseImage` 打桩，contextBridge 对象只读导致桩不上时**跳过点击**而不是硬等（原生对话框会卡死测试进程） |
 | 52 | E2E 斜杠用例的锚点段落会被块级插入（表格片段）吞进单元格：后续用例若继续点首个 `p`，光标落在「列 1」单元格里，「/」前一字符是数字按设计不触发菜单——「最近使用」等用例要**单独开新文档**，别在插过表格的文档里复用首段锚点 |
+| 53 | **本地 electron-builder 打包会改写 `apps/desktop/package.json`**：剥掉全部 `scripts` 与 `devDependencies`（只留生产依赖），打包后必须 `git checkout -- apps/desktop/package.json` 恢复，否则 `npm run build` / `npm test` 直接报 Missing script |
+| 54 | 链接打开走「⌘/Ctrl + 点击」（`packages/editor/src/link.ts`）：普通单击保留光标定位；平台判定用 `navigator.userAgent`（沙箱渲染进程没有完整 process）；主进程 `shell:open-external` 只放行 http/https（渲染内容可被任意文档注入）；E2E 在主进程侧替换 `shell.openExternal` 收集调用即可断言（与 `dialog` stub 同理，别在 renderer 侧桩 contextBridge） |
+| 55 | E2E 断言 DOM 元素别假设「第一个匹配」等于「先插入的」：行内 snippet 插入会拆/并段落，多个同类元素的 DOM 顺序与插入顺序不保证一致，按文本 / href 等内容特征精确匹配目标 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 

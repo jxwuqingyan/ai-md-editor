@@ -1032,6 +1032,8 @@ button:focus-visible {
 
 .milkdown-container .ProseMirror a:hover {
   text-decoration: underline;
+  /* ⌘/Ctrl+点击可打开链接（title 提示由 linkClickPlugin 悬停时补写） */
+  cursor: pointer;
 }
 
 /* 分割线：细线，无渐变 */

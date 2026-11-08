@@ -13,6 +13,8 @@ interface MarkdownEditorProps {
   onTableContext?: (context: TableContext) => void;
   /** 斜杠菜单「图片」条目确认后的回调：打开系统文件选择器并插入图片 */
   onPickImage?: () => void;
+  /** ⌘ / Ctrl + 点击编辑器内链接时的回调：用系统默认浏览器打开 */
+  onOpenLink?: (url: string) => void;
 }
 
 /**
@@ -34,7 +36,8 @@ export default function MarkdownEditor({
   onChange,
   onReady,
   onTableContext,
-  onPickImage
+  onPickImage,
+  onOpenLink
 }: MarkdownEditorProps): JSX.Element {
   // 编辑器挂载容器
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,6 +55,9 @@ export default function MarkdownEditor({
   // 斜杠菜单的图片回调同样经 ref 转发，避免闭包过期
   const onPickImageRef = useRef(onPickImage);
   onPickImageRef.current = onPickImage;
+  // 链接打开回调同理
+  const onOpenLinkRef = useRef(onOpenLink);
+  onOpenLinkRef.current = onOpenLink;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -73,6 +79,9 @@ export default function MarkdownEditor({
         },
         onPickImage: () => {
           onPickImageRef.current?.();
+        },
+        onOpenLink: (url) => {
+          onOpenLinkRef.current?.(url);
         }
       });
     })()

@@ -51,6 +51,16 @@ export default function App(): JSX.Element {
     setNotice({ text });
   }, []);
 
+  /** ⌘ / Ctrl + 点击链接：走主进程用系统默认浏览器打开（仅 http/https） */
+  const openLink = useCallback(
+    (url: string) => {
+      void window.api.openExternal(url).then((result) => {
+        if (!result.ok) showNotice(`链接打开失败：${result.error ?? '未知错误'}`);
+      });
+    },
+    [showNotice]
+  );
+
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(null), 6000);
@@ -714,6 +724,7 @@ export default function App(): JSX.Element {
                   onReady={handleReady}
                   onTableContext={updateTableContext}
                   onPickImage={chooseImage}
+                  onOpenLink={openLink}
                 />
               ) : (
                 <textarea

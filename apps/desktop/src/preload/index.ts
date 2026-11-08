@@ -22,6 +22,7 @@ import type {
   AppSettings,
   StatPathResult,
   SaveImageFromPathInput,
+  OpenExternalResult,
   TextEncoding,
   UnsavedSummary,
   FileChangedMessage
@@ -113,6 +114,10 @@ const api = {
   /** 在系统文件管理器中显示文档 */
   revealInFolder: (filePath: string): Promise<void> =>
     ipcRenderer.invoke(IpcChannel.RevealInFolder, filePath),
+
+  /** 用系统默认浏览器打开外部链接（仅 http/https） */
+  openExternal: (url: string): Promise<OpenExternalResult> =>
+    ipcRenderer.invoke(IpcChannel.OpenExternal, url),
 
   /** 打印当前文档 */
   print: (): Promise<void> => ipcRenderer.invoke(IpcChannel.Print),
