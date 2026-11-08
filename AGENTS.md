@@ -48,25 +48,26 @@
 ai-md-editor/
 ├── apps/
 │   └── desktop/              # Electron 桌面端
-│       ├── src/main/         # 主进程（窗口 window.ts、IPC、文件 I/O、最近文件、原生菜单 menu.ts）
+│       ├── src/main/         # 主进程（窗口 window.ts、IPC、文件 I/O、编码识别、外部修改监听 fileWatcher.ts、最近文件、原生菜单 menu.ts）
 │       ├── src/preload/      # preload 桥接（contextBridge 白名单 API）
 │       ├── src/renderer/     # 渲染进程（React + Milkdown）
 │       │   ├── hooks/            # 状态按职责拆分的自定义 Hook
-│       │   │   ├── useTabs.ts            # 标签/文档/文件读写/自动保存
+│       │   │   ├── useTabs.ts            # 标签/文档/文件读写/自动保存/会话恢复
 │       │   │   ├── useDisplayState.ts    # 主题/侧栏/显示开关/缩放/窗口状态 + 菜单状态同步
 │       │   │   ├── useEditorRuntime.ts   # 编辑器实例生命周期
 │       │   │   ├── useEditing.ts         # 格式化/撤销重做/粘贴/复制导出
 │       │   │   ├── useFindReplace.ts     # 查找替换
 │       │   │   ├── useSourceTableContext.ts # 源码模式表格上下文
 │       │   │   ├── useSourceHistory.ts   # 源码模式撤销栈
-│       │   │   └── useMenuBridge.ts      # 原生菜单动作分发
-│       │   ├── App.tsx           # 根组件（编排 hooks + 布局）
+│       │   │   └── useMenuBridge.ts      # 原生菜单动作分发（分发表只构造一次）
+│       │   ├── App.tsx           # 根组件（编排 hooks + 布局 + 状态栏提示）
 │       │   ├── ErrorBoundary.tsx # 渲染层异常兜底（避免整窗白屏）
+│       │   ├── constants.ts      # 渲染层小常量（避免入口静态依赖编辑器内核）
 │       │   ├── Sidebar.tsx       # 左侧文件树 / 大纲面板
 │       │   ├── menuHandlers.ts   # 原生菜单动作分发表（纯函数）
 │       │   ├── sourceActions.ts  # 源码模式格式化（纯函数，含表格增删行列）
 │       │   └── Dialogs.tsx       # 查找/快速打开/重命名/字数统计/大纲浮层
-│       ├── test/             # 自动化测试（run-e2e.cjs / e2e.cjs / menuRuntime.cjs / menuAccelerators.cjs）
+│       ├── test/             # 自动化测试（run-unit.cjs + unit.ts / run-e2e.cjs / e2e.cjs / menuRuntime.cjs / menuAccelerators.cjs）
 │       ├── build/            # 应用图标（icon.svg/png/icns）
 │       └── electron-builder.json  # 打包配置（官方识别文件名）
 ├── packages/
@@ -83,7 +84,7 @@ ai-md-editor/
 │   │   └── decorations.ts    # 警告框 / [TOC] 目录渲染装饰
 │   ├── markdown-core/        # 解析/序列化/大纲（纯函数）
 │   ├── theme/                # 主题系统（design tokens）
-│   └── shared/               # 跨进程共享类型（IPC 契约）
+│   └── shared/               # 跨进程共享类型（IPC 契约）+ 纯函数工具（text.ts：编码/路径/文本）
 ├── .github/workflows/        # CI 打包（macOS x64+arm64 / Windows x64）
 ├── docs/                     # 文档（技术方案、设计规范）
 └── package.json              # npm workspaces
@@ -171,7 +172,13 @@ ai-md-editor/
 | 24 | 源码模式表格上下文必须覆盖程序化 `setSelectionRange`（不派发任何事件）：监听 `selectionchange` + 200ms 低频轮询兜底，hook 内先去重再上报，避免反复重建菜单 |
 | 25 | 菜单快捷键验证分三层：`menuAccelerators.cjs` 静态校验写法/唯一性/平台关键键位，`menuRuntime.cjs` 校验真实菜单注册与 click→动作派发，CI 的 Windows runner 实跑前两层。`sendInputEvent` 注入的按键不会触发原生菜单 accelerator，别用它做快捷键断言 |
 | 26 | 表头删除语义保留「删旧表头 + 首个数据行升级为表头」（GFM 表格必须有表头），但菜单文案标注「（表头）」并给 macOS 悬停说明，避免用户以为会删整表 |
-| 27 | CI 新增独立 `test` job：macOS 跑完整 `npm test`，Windows 跑静态检查 + 菜单运行时校验；测试 job 不设 `needs`，不会阻塞 Release 上传 |
+| 27 | CI 新增独立 `test` job：macOS 跑完整 `npm test`，Windows 跑单元测试 + 静态检查 + 菜单运行时校验；测试 job 不设 `needs`，不会阻塞 Release 上传 |
+| 28 | 会话恢复只持久化**路径**（`settings.lastSession`），不存未落盘文档的内容：内容保存是退出确认的职责，设置文件不做隐式草稿 |
+| 29 | 关闭窗口前必须问渲染层要「未保存汇总」（`app:unsaved-ask` / `app:unsaved-reply`），只有「无路径且有改动」才拦人；确认后先 `app:flush-before-close` 立即写盘再关 |
+| 30 | 编码识别顺序固定为 BOM（UTF-8/UTF-16LE/BE）→ 严格 UTF-8 → GBK；保存统一写 UTF-8（`TextEncoder` 无法编码 GBK/UTF-16），带 BOM 的保留 BOM，并同步标签编码 |
+| 31 | 编辑器内核必须动态 `import`：入口 chunk 只留壳与文档状态（当前 ~0.59 MB），编辑器作为独立 chunk 按需加载；渲染层不要从 `@ai-md-editor/editor` 直接导入**值**（`NO_TABLE_CONTEXT` 放在 `renderer/constants.ts`） |
+| 32 | 外部修改监听由渲染层按「当前活动文档」登记（`fs:watch` / `fs:unwatch`）；主进程自身写盘前 `markSelfWrite`，1.5s 宽限期内忽略事件，否则会出现「自己保存后提示文件被修改」 |
+| 33 | 原生菜单重建前比较 `MenuViewState` 签名，未变化直接跳过；`useMenuBridge` 的分发表只构造一次并用代理读取最新回调 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -187,7 +194,13 @@ ai-md-editor/
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
 | 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |
-| 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验 |
+| 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验；`lastSession` 只保留非空路径且最多 40 条 |
+| 会话恢复 | `renderer/hooks/useTabs.ts` | 挂载时读设置 → 逐条 `readPathQuiet`（失败静默跳过）→ 替换标签并选中 `activePath`；`sessionReady` 之前禁止回写，否则默认标签会覆盖上次会话 |
+| 关闭前确认 | `main/window.ts` `confirmClose` | `close` 事件先 `preventDefault`，向渲染层要汇总；确认后发 `app:flush-before-close` 并等待 120ms 再真正 `close()` |
+| 编码识别 | `packages/shared/src/text.ts` | `decodeBytes` 按 BOM → 严格 UTF-8 → GBK；`writeEncoding` 除 BOM 外统一 UTF-8；主进程读写都走这两个函数 |
+| 外部修改监听 | `main/fileWatcher.ts` | 按文件登记 watcher，250ms 去抖、自身写入 1.5s 宽限；`rename` 事件后重建 watcher（保存常是「写临时文件 + rename」） |
+| 编辑器动态加载 | `renderer/MarkdownEditor.tsx` | `await import('@ai-md-editor/editor')`，卸载时判 `disposed` 后销毁；加载期间渲染 `.editor-loading` 占位 |
+| 文件树无障碍 | `renderer/FileTree.tsx` | 条目为 `<button>`（Enter/Space 生效），容器 `onKeyDown` 处理 ↑↓←→/Home/End，`data-depth` 用于「回父级」 |
 | 自动保存范围 | `renderer/hooks/useTabs.ts` | 防抖到点写入**所有**「有路径且 dirty」的标签，按内容快照清 dirty；只写当前标签会在切标签时丢稿 |
 | 打开文件校验 | `apps/desktop/src/main/ipc.ts` `readTextFile` | 先 `stat`：> 20 MB 或含 NUL 字节（二进制）直接拒绝并弹窗说明；不要静默返回「已取消」 |
 | 拖拽取路径 | `apps/desktop/src/preload/index.ts` | `getPathForFile(file)` = `webUtils.getPathForFile`；渲染层据此区分 图片 / 文件夹 / 文档 |
@@ -222,12 +235,22 @@ ai-md-editor/
 | 拖入二进制/超大文件后窗口卡死 | `readFile(path, 'utf-8')` 无体积与类型校验，几百 MB 直接进内存 | 打开前 `stat` 校验体积上限，内容含 NUL 视为非文本 |
 | 大文档导出 PDF 得到空白页 | 用 `data:text/html,<整篇 HTML>` 导航，超过 Chromium 的 URL 长度上限 | 先写临时 HTML 文件再 `win.loadFile`，导出后删除 |
 | Windows 图片显示不出来 | `encodeURIComponent` 把盘符编成 `C%3A`，`file:///C%3A/...` 不是合法地址 | 盘符段（`/^[A-Za-z]:$/`）跳过编码 |
+| 启动后上次会话被示例文档覆盖 | 恢复是异步的，默认标签先写入 `lastSession` 就会顶掉真实会话 | 恢复完成前 `sessionReady=false`，期间禁止回写；恢复后整体替换标签而非追加 |
+| 自己保存后立刻提示「文件被外部修改」 | `fs.watch` 把自身写入也当成外部变更 | 主进程写盘前 `markSelfWrite`，1.5s 宽限期内忽略事件 |
+| 外部改动只提示一次，之后不再触发 | 编辑器保存是「写临时文件 + rename」，watcher 盯着旧 inode | 收到 `rename` 事件后关闭并重建 watcher |
+| 关闭窗口的 E2E 断言偶发失败 | 关闭前多了异步询问流程，固定 sleep 不够 | 用 `waitFor` 等窗口真正消失（本次已改）；不要在有 dirty 未命名标签时关窗（会弹系统对话框阻塞测试） |
+| GBK 文档保存后变乱码 | 用 `TextEncoder` 原样写回 GBK 是不可能的（只支持 UTF-8） | 保存统一转 UTF-8，并把标签编码与状态栏同步更新为 UTF-8 |
+| 入口 chunk 3 MB，冷启动慢 | 入口静态 `import` 了编辑器包（含 Milkdown/Shiki/Mermaid/KaTeX），连 `NO_TABLE_CONTEXT` 这种小常量都会把整包拉进来 | 编辑器改为 `await import(...)`；渲染层常量放 `constants.ts`，只从编辑器包导入**类型** |
+| 纯函数单测在 Windows CI 跑不起来 | 直接用 Node 跑 `.ts` 依赖运行器/版本 | `test/run-unit.cjs` 用 esbuild（随 vite 安装）打包成 CJS 再执行 |
+| 只有竖线的普通段落被当成表格 | `findTableBlock` 只检查行首 `\|`，没要求 GFM 分隔行 | 第二行必须是合法分隔行（`isTableSeparator`），否则不算表格 |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 
 1. **测试**：每完成一个功能，都必须做一遍测试（类型检查 `tsc --noEmit` + 构建 `npm run build` + 功能验证）。受沙箱限制无法跑 GUI 时，明确告知用户需在系统终端验证的具体步骤。
-   - 改到菜单 / 表格 / 缩放 / 剪贴板 / 文件树行为时，跑 `npm test`（静态快捷键校验 + `test/menuRuntime.cjs` 真实菜单校验 + `test/e2e.cjs` 端到端）。
+   - 改到菜单 / 表格 / 缩放 / 剪贴板 / 文件树 / 编码 / 文件读写行为时，跑 `npm test`
+     （`test/unit.ts` 纯函数单测 → 静态快捷键校验 → `test/menuRuntime.cjs` 真实菜单校验 → `test/e2e.cjs` 端到端）。
    - Electron 测试统一由 `test/run-e2e.cjs` 启动（可传脚本名复用），会自动剔除宿主注入的 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS`；无需再手动 `env -u`。
+   - 纯函数（编码、路径、文本、源码格式化）优先补 `test/unit.ts`：不需要 GUI、跑得快，Windows CI 也能覆盖。
    - 改快捷键后除 `npm test` 外，还要确认 CI 的 Windows `test` job 通过（平台专属键位与动作绑定只在 Windows runner 上实跑）。
 2. **文档同步**：开发功能的同时，同步更新 `README.md`（项目说明）、`AGENTS.md`（协作规范）与 `docs/` 下的设计与方案文档，不得等到最后一次性补。文档中如与实际实现不符（依赖未引入、主题数量、包管理器等），一并订正。
 3. **提交前检查**（每次 `git commit` 前逐条确认）：

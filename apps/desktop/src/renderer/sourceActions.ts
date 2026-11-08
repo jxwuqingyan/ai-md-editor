@@ -155,7 +155,7 @@ interface TableBlock {
   lines: string[];
 }
 
-/** 找到光标所在的表格块（连续的以 | 开头的行） */
+/** 找到光标所在的表格块（连续的以 | 开头的行，且必须带分隔行） */
 function findTableBlock(content: string, caret: number): TableBlock | null {
   const lines = content.split('\n');
   const index = currentLineIndex(content, caret);
@@ -164,7 +164,11 @@ function findTableBlock(content: string, caret: number): TableBlock | null {
   while (start > 0 && isTableRow(lines[start - 1])) start -= 1;
   let end = index;
   while (end + 1 < lines.length && isTableRow(lines[end + 1])) end += 1;
-  return { start, end: end + 1, lines: lines.slice(start, end + 1) };
+  const block = lines.slice(start, end + 1);
+  // GFM 表格必须有「表头 + 分隔行」。只有竖线的普通段落（比如用 | 分隔的说明文字）
+  // 不是表格，不能在这里认领，否则菜单会误启用、格式化还会改写用户正文。
+  if (!isTableSeparator(block[1])) return null;
+  return { start, end: end + 1, lines: block };
 }
 
 /** 把一行拆成单元格原始文本（保留各自原有的空白，避免整表被重排） */

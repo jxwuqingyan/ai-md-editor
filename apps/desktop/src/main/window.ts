@@ -2,15 +2,87 @@
  * 窗口管理：创建应用窗口、向渲染层派发待打开的文件。
  * 独立成模块，供主入口与 IPC（新建窗口）共同复用，避免循环依赖。
  */
-import { BrowserWindow, screen, shell } from 'electron';
+import { BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
 import { join } from 'node:path';
+import {
+  FlushBeforeCloseChannel,
+  UnsavedAskChannel,
+  UnsavedReplyChannel,
+  type UnsavedSummary
+} from '@ai-md-editor/shared';
 import { getSettings, saveWindowBounds } from './settings';
 
 /** 主窗口引用（供 open-file 事件访问） */
 let mainWindow: BrowserWindow | null = null;
 
 /** 默认窗口尺寸 */
-const DEFAULT_SIZE = { width: 1200, height: 800 };
+const DEFAULT_WINDOW_SIZE = { width: 1200, height: 800 };
+
+/** 询问渲染层未保存文档的等待上限（渲染层未响应时按「无未保存内容」处理，不阻塞退出） */
+const UNSAVED_REPLY_TIMEOUT_MS = 800;
+
+/**
+ * 向渲染层询问未保存文档数量。
+ * 用一次性回复通道实现「主进程发问 → 渲染层同步回答」，比让渲染层主动上报更准确：
+ * 关闭动作发生的那一刻的标签状态才是要判断的对象。
+ */
+function requestUnsavedSummary(win: BrowserWindow): Promise<UnsavedSummary | null> {
+  return new Promise((resolve) => {
+    let timer: NodeJS.Timeout | null = null;
+    const cleanup = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      ipcMain.removeListener(UnsavedReplyChannel, onReply);
+    };
+    const onReply = (_event: Electron.IpcMainEvent, summary: UnsavedSummary): void => {
+      // 多窗口时只认发起询问的那个窗口，避免别的窗口抢先回复
+      if (_event.sender !== win.webContents) return;
+      cleanup();
+      resolve(summary && typeof summary === 'object' ? summary : null);
+    };
+
+    if (win.webContents.isDestroyed()) {
+      resolve(null);
+      return;
+    }
+    ipcMain.on(UnsavedReplyChannel, onReply);
+    timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, UNSAVED_REPLY_TIMEOUT_MS);
+    win.webContents.send(UnsavedAskChannel);
+  });
+}
+
+/**
+ * 关闭窗口前的确认流程。
+ *
+ * - 只有「未落盘（无磁盘路径）且有改动」的文档才拦人：这类内容关掉就真的没了。
+ * - 有路径的改动交给自动保存，这里额外触发一次立即写盘，避免卡在防抖窗口里丢内容。
+ *
+ * @returns true 表示可以关闭
+ */
+async function confirmClose(win: BrowserWindow): Promise<boolean> {
+  const summary = await requestUnsavedSummary(win);
+  if (summary && summary.untitledCount > 0) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['取消', '仍要退出'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      message: `有 ${summary.untitledCount} 个文档尚未保存到磁盘`,
+      detail: '退出后这些内容会丢失。建议先取消，用「另存为」保存后再退出。'
+    });
+    if (response !== 1) return false;
+  }
+  if (!win.webContents.isDestroyed()) {
+    win.webContents.send(FlushBeforeCloseChannel);
+    // 给渲染层一点时间把 writeFile 发出去（写盘本身在 IPC 里完成）
+    await new Promise((resolve) => setTimeout(resolve, 120));
+  }
+  return true;
+}
 
 /**
  * 判断上次保存的窗口位置是否还在某块屏幕内。
@@ -18,7 +90,7 @@ const DEFAULT_SIZE = { width: 1200, height: 800 };
  */
 function usableBounds(): { x?: number; y?: number; width: number; height: number } {
   const saved = getSettings().windowBounds;
-  if (!saved) return { ...DEFAULT_SIZE };
+  if (!saved) return { ...DEFAULT_WINDOW_SIZE };
   const inside = screen.getAllDisplays().some((display) => {
     const area = display.workArea;
     return (
@@ -28,7 +100,7 @@ function usableBounds(): { x?: number; y?: number; width: number; height: number
       saved.y + 40 < area.y + area.height
     );
   });
-  if (!inside) return { ...DEFAULT_SIZE };
+  if (!inside) return { ...DEFAULT_WINDOW_SIZE };
   return { x: saved.x, y: saved.y, width: saved.width, height: saved.height };
 }
 
@@ -79,6 +151,27 @@ export function createWindow(): void {
     if (!win.isDestroyed() && !win.isFullScreen() && !win.isMinimized() && !win.isMaximized()) {
       saveWindowBounds(win.getBounds());
     }
+  });
+
+  // 关闭前确认：未落盘的文档关掉就真的没了，先问一句。
+  // 只有确认通过后才真正关闭（先 preventDefault，再在回调里 close 一次）。
+  let closeConfirmed = false;
+  win.on('close', (event) => {
+    if (closeConfirmed) return;
+    event.preventDefault();
+    void confirmClose(win)
+      .then((ok) => {
+        if (!ok || win.isDestroyed()) return;
+        closeConfirmed = true;
+        win.close();
+      })
+      .catch(() => {
+        // 确认流程本身出错时不拦用户退出
+        if (!win.isDestroyed()) {
+          closeConfirmed = true;
+          win.close();
+        }
+      });
   });
 
   win.on('closed', () => {

@@ -11,11 +11,14 @@
  * - 图片存到文档同级 img/ 目录、Markdown 保持相对路径、编辑器内正常显示、粘贴链路
  * - 设置持久化（主题 / 工具栏 / 缩放重启后恢复）与窗口尺寸记忆
  * - 源码模式撤销栈的连续键入合并
+ * - 编码识别（GBK 读入、保存转 UTF-8）、外部修改提示与重新加载
+ * - 关闭前的未保存汇总与立即写盘、会话恢复
+ * - 文件树键盘导航（条目为按钮 + 方向键移动焦点）
  *
  * 运行：npm test（test/run-e2e.cjs 会自动剔除 ELECTRON_RUN_AS_NODE / NODE_OPTIONS 注入）
  * 单独跑：npm run test:e2e --workspace @ai-md-editor/desktop
  */
-const { app, BrowserWindow, Menu, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain } = require('electron');
 const { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } = require('node:fs');
 const { join } = require('node:path');
 const { tmpdir } = require('node:os');
@@ -474,6 +477,18 @@ async function runTests() {
   check('逐级展开三级目录', Number(expandedDirs) >= 3, `nodeCount=${expandedDirs}`);
   check('深层文件已作为标签打开', openTabName === 'deep.md', `tab=${openTabName}`);
 
+  // 无障碍：条目必须是真正的按钮（Enter/Space 天然可用），且方向键能在树内移动焦点
+  const treeKeyboard = await exec(`(() => {
+    const items = [...document.querySelectorAll('.tree-item')];
+    if (items.length < 2) return { ok: false, reason: 'items<2' };
+    items[0].focus();
+    const firstFocused = document.activeElement === items[0];
+    items[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    const movedToSecond = document.activeElement === items[1];
+    return { ok: items[0].tagName === 'BUTTON' && firstFocused && movedToSecond, tag: items[0].tagName, firstFocused, movedToSecond };
+  })()`);
+  check('文件树条目为按钮且方向键可导航', treeKeyboard.ok === true, JSON.stringify(treeKeyboard));
+
   // ===== 9. 图片：存到文档同级 img/、相对引用、编辑器内正常显示 =====
   await ensureWysiwygMode();
   const imgDir = join(root, 'img');
@@ -656,7 +671,11 @@ async function runTests() {
     `zoomFactor=${second.webContents.getZoomFactor()} status=${restoredState.status}`
   );
   second.close();
-  await new Promise((resolve) => setTimeout(resolve, 500));
+  // 关闭前会做一次「未保存确认」，是异步流程，等窗口真正消失而不是固定 sleep
+  await waitFor(() => BrowserWindow.getAllWindows().length === before, {
+    timeout: 8000,
+    label: '新窗口关闭'
+  }).catch(() => undefined);
   check('新窗口可正常关闭', BrowserWindow.getAllWindows().length === before, `windows=${BrowserWindow.getAllWindows().length}`);
 
   // ===== 10.5 自动保存：已切走的后台标签也要落盘 =====
@@ -682,6 +701,126 @@ async function runTests() {
   await new Promise((resolve) => setTimeout(resolve, 2600));
   const autoSaved = readFileSync(autoPath, 'utf-8');
   check('后台标签在 1.5s 防抖后自动保存', autoSaved.includes('改过的内容'), JSON.stringify(autoSaved));
+
+  // ===== 11. 编码识别：GBK 文档按原编码读入，保存后转为 UTF-8 =====
+  const encDir = join(tmpdir(), 'md-note-e2e-encoding');
+  mkdirSync(encDir, { recursive: true });
+  const gbkPath = join(encDir, 'gbk.md');
+  // 「你好，世界」的 GBK 字节：不是合法 UTF-8，读取时必须回退到 GBK
+  writeFileSync(gbkPath, Buffer.from([0xc4, 0xe3, 0xba, 0xc3, 0xa3, 0xac, 0xca, 0xc0, 0xbd, 0xe7]));
+  menuAction('file:open-recent-path', gbkPath);
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === 'gbk.md'`), {
+    label: '打开 GBK 文档',
+    timeout: 20000
+  });
+  await ensureSourceMode();
+  const gbkText = await exec(`document.querySelector('.source-editor').value`);
+  const gbkStatus = await exec(`document.querySelector('.statusbar').textContent`);
+  check('GBK 文档解码正确', String(gbkText).includes('你好，世界'), JSON.stringify(gbkText));
+  check('状态栏显示 GBK 编码', String(gbkStatus).includes('GBK'), String(gbkStatus));
+
+  // 保存后统一转成 UTF-8，状态栏与标签编码同步更新
+  menuAction('file:save');
+  const savedAsUtf8 = await waitFor(
+    () => {
+      try {
+        const text = readFileSync(gbkPath, 'utf-8');
+        return text.includes('你好，世界') ? text : null;
+      } catch {
+        return null;
+      }
+    },
+    { label: 'GBK 文档转存 UTF-8', timeout: 8000 }
+  ).catch(() => null);
+  check('保存后文档按 UTF-8 重写', savedAsUtf8 !== null, String(savedAsUtf8));
+  await waitFor(() => exec(`document.querySelector('.statusbar').textContent.includes('UTF-8')`), {
+    label: '状态栏编码更新',
+    timeout: 8000
+  }).catch(() => undefined);
+  const encStatusAfterSave = await exec(`document.querySelector('.statusbar').textContent`);
+  check('保存后状态栏编码变为 UTF-8', String(encStatusAfterSave).includes('UTF-8'), String(encStatusAfterSave));
+
+  // ===== 12. 外部修改：提示可在不丢改动的前提下重新加载 =====
+  const extPath = join(encDir, 'external.md');
+  writeFileSync(extPath, '# 外部\n\n原始内容\n', 'utf-8');
+  menuAction('file:open-recent-path', extPath);
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === 'external.md'`), {
+    label: '打开外部修改用例文档',
+    timeout: 20000
+  });
+  // 等渲染层把 fs.watch 注册上，否则本次写入会被漏掉
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  writeFileSync(extPath, '# 外部\n\n被别的程序改了\n', 'utf-8');
+  const changedNotice = await waitFor(
+    async () => {
+      const text = await exec(`document.querySelector('.statusbar-notice')?.textContent ?? ''`);
+      return String(text).includes('外部程序修改') ? String(text) : null;
+    },
+    { label: '外部修改提示', timeout: 10000 }
+  ).catch(() => '');
+  check('文件被外部修改时给出状态栏提示', changedNotice.includes('外部程序修改'), changedNotice);
+  check('提示里带重新加载动作', changedNotice.includes('重新加载'), changedNotice);
+
+  await exec(`document.querySelector('.statusbar-notice-action')?.click()`);
+  const reloaded = await waitFor(
+    () => exec(`document.querySelector('.source-editor').value.includes('被别的程序改了')`),
+    { label: '点击重新加载后内容更新', timeout: 10000 }
+  ).catch(() => false);
+  check('点击重新加载后读到新内容', reloaded === true, `reloaded=${reloaded}`);
+
+  // ===== 13. 关闭前：未保存汇总 + 立即写盘 =====
+  await exec(`window.__setSource('# 外部\\n\\n关闭前写入\\n')`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  const summary = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 3000);
+    ipcMain.once('app:unsaved-reply', (_event, payload) => {
+      clearTimeout(timer);
+      resolve(payload);
+    });
+    win.webContents.send('app:unsaved-ask');
+  });
+  check(
+    '关闭前能拿到未保存文档汇总',
+    Boolean(summary) && typeof summary.untitledCount === 'number' && summary.dirtyCount >= 1,
+    JSON.stringify(summary)
+  );
+
+  win.webContents.send('app:flush-before-close');
+  const flushed = await waitFor(
+    () => (readFileSync(extPath, 'utf-8').includes('关闭前写入') ? true : false),
+    { label: '退出前写盘', timeout: 8000 }
+  ).catch(() => false);
+  check('退出前立即写盘生效', flushed === true, `flushed=${flushed}`);
+
+  // ===== 14. 会话恢复：新窗口重新打开上次的文档 =====
+  await exec(
+    `window.api.updateSettings({ restoreSession: true, lastSession: { paths: [${JSON.stringify(extPath)}], activePath: ${JSON.stringify(extPath)} } })`
+  );
+  const beforeRestore = BrowserWindow.getAllWindows().length;
+  menuAction('file:new-window');
+  const restoredWin = await waitFor(
+    () => BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed() && candidate !== win) ?? null,
+    { label: '会话恢复窗口创建', timeout: 20000 }
+  );
+  const restoredTab = await waitFor(
+    () =>
+      execIn(restoredWin, `document.querySelector('.tab .tab-name')?.textContent ?? ''`).then((name) =>
+        name === 'external.md' ? name : null
+      ),
+    { label: '恢复上次打开的标签', timeout: 20000 }
+  ).catch(() => '');
+  check('会话恢复重新打开上次的文档', restoredTab === 'external.md', `tab=${restoredTab}`);
+  const restoreNotice = await execIn(
+    restoredWin,
+    `document.querySelector('.statusbar-notice')?.textContent ?? ''`
+  );
+  check('会话恢复给出提示', String(restoreNotice).includes('已恢复'), String(restoreNotice));
+  restoredWin.close();
+  await waitFor(() => BrowserWindow.getAllWindows().length === beforeRestore, {
+    timeout: 8000,
+    label: '会话恢复窗口关闭'
+  }).catch(() => undefined);
+  check('会话恢复窗口可正常关闭', BrowserWindow.getAllWindows().length === beforeRestore);
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

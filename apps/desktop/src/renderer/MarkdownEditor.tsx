@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { createEditor, type EditorInstance, type TableContext } from '@ai-md-editor/editor';
+import type { EditorInstance, TableContext } from '@ai-md-editor/editor';
 
 /** MarkdownEditor 组件的属性 */
 interface MarkdownEditorProps {
@@ -16,6 +16,10 @@ interface MarkdownEditorProps {
 /**
  * Markdown 编辑器 React 组件。
  * 内部用命令式方式创建 Milkdown 编辑器，管理其生命周期。
+ *
+ * 编辑器内核（Milkdown + ProseMirror + Shiki + Mermaid + KaTeX）体积很大，
+ * 这里用动态 import 切成独立 chunk：首屏只加载壳与文档数据，编辑器就绪后再填充内容，
+ * 冷启动不再被几 MB 的解析器/高亮器阻塞。
  *
  * 中文 IME 适配：Milkdown（ProseMirror）已内置 composition 事件处理，
  * 拼音组合输入期间不会触发 markdown 解析，此处无需额外干预。
@@ -35,6 +39,8 @@ export default function MarkdownEditor({
   const instanceRef = useRef<EditorInstance | null>(null);
   // 初始化失败原因（避免出错时只留一片空白）
   const [error, setError] = useState<string | null>(null);
+  // 编辑器是否已就绪（控制加载骨架）
+  const [loading, setLoading] = useState(true);
   // 保存最新的 onChange / onTableContext，避免闭包过期
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -47,29 +53,36 @@ export default function MarkdownEditor({
 
     let disposed = false;
 
-    // 异步创建编辑器（Milkdown 的 create 是异步的，Shiki 高亮器也需要异步加载）
-    void createEditor(container, {
-      defaultValue: initialValue,
-      onChange: (markdown) => {
-        onChangeRef.current?.(markdown);
-      },
-      onTableContext: (context) => {
-        onTableContextRef.current?.(context);
-      }
-    })
+    void (async () => {
+      // 动态加载编辑器内核：这是应用里最大的一块依赖
+      const { createEditor } = await import('@ai-md-editor/editor');
+      if (disposed) return;
+      return createEditor(container, {
+        defaultValue: initialValue,
+        onChange: (markdown) => {
+          onChangeRef.current?.(markdown);
+        },
+        onTableContext: (context) => {
+          onTableContextRef.current?.(context);
+        }
+      });
+    })()
       .then((instance) => {
+        if (!instance) return;
         if (disposed) {
           // 组件已卸载，立即销毁
           instance.destroy();
           return;
         }
         instanceRef.current = instance;
+        setLoading(false);
         onReady?.(instance);
       })
       .catch((err: unknown) => {
         if (disposed) return;
         const message = err instanceof Error ? err.message : String(err);
         console.error('编辑器初始化失败:', err);
+        setLoading(false);
         setError(message);
       });
 
@@ -85,6 +98,11 @@ export default function MarkdownEditor({
   return (
     <>
       <div ref={containerRef} className="milkdown-container" />
+      {loading && !error && (
+        <div className="editor-loading" role="status">
+          正在加载编辑器…
+        </div>
+      )}
       {error && (
         <div className="editor-error" role="alert">
           编辑器初始化失败：{error}

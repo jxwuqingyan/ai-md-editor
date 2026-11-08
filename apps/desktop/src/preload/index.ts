@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   OpenFileResult,
+  ReadFileResult,
   SaveFileResult,
   SaveImageInput,
   SaveImageResult,
@@ -17,9 +18,20 @@ import type {
   MenuActionMessage,
   AppSettings,
   StatPathResult,
-  SaveImageFromPathInput
+  SaveImageFromPathInput,
+  TextEncoding,
+  UnsavedSummary,
+  FileChangedMessage
 } from '@ai-md-editor/shared';
-import { IpcChannel, MenuActionChannel, MenuStateChannel } from '@ai-md-editor/shared';
+import {
+  FileChangedChannel,
+  FlushBeforeCloseChannel,
+  IpcChannel,
+  MenuActionChannel,
+  MenuStateChannel,
+  UnsavedAskChannel,
+  UnsavedReplyChannel
+} from '@ai-md-editor/shared';
 
 /**
  * 通过 contextBridge 暴露给渲染进程的白名单 API。
@@ -38,12 +50,23 @@ const api = {
   saveFileAs: (content: string, defaultName: string): Promise<SaveFileResult> =>
     ipcRenderer.invoke(IpcChannel.SaveFileAs, content, defaultName),
 
-  /** 读取指定路径的文件内容（UTF-8） */
-  readFile: (filePath: string): Promise<string> => ipcRenderer.invoke(IpcChannel.ReadFile, filePath),
+  /** 读取指定路径的文件内容与编码 */
+  readFile: (filePath: string): Promise<ReadFileResult> =>
+    ipcRenderer.invoke(IpcChannel.ReadFile, filePath),
 
-  /** 写入内容到指定路径 */
-  writeFile: (filePath: string, content: string): Promise<void> =>
-    ipcRenderer.invoke(IpcChannel.WriteFile, filePath, content),
+  /** 静默读取文件（会话恢复用：不存在时返回取消，不弹窗、不写最近文件） */
+  readPathQuiet: (filePath: string): Promise<OpenFileResult> =>
+    ipcRenderer.invoke(IpcChannel.ReadPathQuiet, filePath),
+
+  /** 写入内容到指定路径，返回实际使用的编码 */
+  writeFile: (filePath: string, content: string, encoding?: TextEncoding): Promise<TextEncoding> =>
+    ipcRenderer.invoke(IpcChannel.WriteFile, filePath, content, encoding),
+
+  /** 监听指定文件的外部修改 */
+  watchFile: (filePath: string): Promise<void> => ipcRenderer.invoke(IpcChannel.WatchFile, filePath),
+
+  /** 取消监听文件的外部修改 */
+  unwatchFile: (filePath: string): Promise<void> => ipcRenderer.invoke(IpcChannel.UnwatchFile, filePath),
 
   /** 保存粘贴的图片到文档同级 img/ 目录，返回相对路径 */
   saveImage: (input: SaveImageInput): Promise<SaveImageResult> =>
@@ -159,6 +182,32 @@ const api = {
     };
     ipcRenderer.on(MenuActionChannel, listener);
     return () => ipcRenderer.removeListener(MenuActionChannel, listener);
+  },
+
+  /** 监听「当前文档被外部程序修改」 */
+  onFileChanged: (callback: (message: FileChangedMessage) => void): (() => void) => {
+    const listener = (_event: unknown, message: FileChangedMessage): void => callback(message);
+    ipcRenderer.on(FileChangedChannel, listener);
+    return () => ipcRenderer.removeListener(FileChangedChannel, listener);
+  },
+
+  /** 监听「关闭窗口前询问未保存文档」，需用 replyUnsaved 同步回复 */
+  onUnsavedAsk: (callback: () => void): (() => void) => {
+    const listener = (): void => callback();
+    ipcRenderer.on(UnsavedAskChannel, listener);
+    return () => ipcRenderer.removeListener(UnsavedAskChannel, listener);
+  },
+
+  /** 回复未保存文档汇总（配合 onUnsavedAsk 使用） */
+  replyUnsaved: (summary: UnsavedSummary): void => {
+    ipcRenderer.send(UnsavedReplyChannel, summary);
+  },
+
+  /** 监听「退出前立即写盘」请求 */
+  onFlushBeforeClose: (callback: () => void): (() => void) => {
+    const listener = (): void => callback();
+    ipcRenderer.on(FlushBeforeCloseChannel, listener);
+    return () => ipcRenderer.removeListener(FlushBeforeCloseChannel, listener);
   }
 };
 

@@ -6,8 +6,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { themes, tokensToCssVars, type ThemeId } from '@ai-md-editor/theme';
-import { NO_TABLE_CONTEXT, type TableContext } from '@ai-md-editor/editor';
+import type { TableContext } from '@ai-md-editor/editor';
 import { DEFAULT_SETTINGS, type MenuViewState } from '@ai-md-editor/shared';
+import { NO_TABLE_CONTEXT } from '../constants';
 
 /** useDisplayState 的入参 */
 interface UseDisplayStateOptions {

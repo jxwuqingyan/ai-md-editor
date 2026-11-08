@@ -10,6 +10,7 @@ import { join, basename, dirname, extname } from 'node:path';
 import { marked } from 'marked';
 import type {
   OpenFileResult,
+  ReadFileResult,
   SaveFileResult,
   SaveImageInput,
   SaveImageResult,
@@ -25,14 +26,23 @@ import type {
   MenuViewState,
   AppSettings,
   StatPathResult,
-  SaveImageFromPathInput
+  SaveImageFromPathInput,
+  TextEncoding
 } from '@ai-md-editor/shared';
-import { IpcChannel, MenuStateChannel } from '@ai-md-editor/shared';
+import {
+  IpcChannel,
+  MenuStateChannel,
+  decodeBytes,
+  encodeText,
+  stripMarkdown,
+  writeEncoding
+} from '@ai-md-editor/shared';
 import { getRecent, addRecent } from './recent';
 import { getSettings, updateSettings } from './settings';
 import { exportFile } from './export';
 import { updateMenuState, refreshRecentMenu } from './menu';
 import { createWindow } from './window';
+import { markSelfWrite, watchDocumentFile, unwatchDocumentFile } from './fileWatcher';
 
 /** Markdown 文件扩展名过滤 */
 const MD_FILTERS = [
@@ -44,31 +54,34 @@ const MD_FILTERS = [
 const MAX_TEXT_FILE_BYTES = 20 * 1024 * 1024;
 
 /**
- * 读取文本文件，附带体积与二进制校验。
+ * 读取文本文件，附带体积、二进制与编码识别。
  * 返回 error 时由调用方弹窗告知用户，而不是静默失败。
  */
 async function readTextFile(
   filePath: string
-): Promise<{ content: string | null; error: string | null }> {
+): Promise<{ content: string | null; encoding: TextEncoding | null; error: string | null }> {
   try {
     const info = await stat(filePath);
     if (!info.isFile()) {
-      return { content: null, error: '只能打开文件，不能打开文件夹' };
+      return { content: null, encoding: null, error: '只能打开文件，不能打开文件夹' };
     }
     if (info.size > MAX_TEXT_FILE_BYTES) {
       return {
         content: null,
+        encoding: null,
         error: `文件大小 ${(info.size / 1024 / 1024).toFixed(1)} MB，超过 20 MB 上限`
       };
     }
-    const content = await readFile(filePath, 'utf-8');
-    // 二进制文件（图片/压缩包/pdf 等）用 UTF-8 解出来必然带 NUL，别当成 Markdown 打开
-    if (content.includes('\u0000')) {
-      return { content: null, error: '这不是文本文件' };
+    const bytes = await readFile(filePath);
+    // 二进制文件（图片/压缩包/pdf 等）里出现 NUL 字节，别当成 Markdown 打开
+    if (bytes.includes(0)) {
+      return { content: null, encoding: null, error: '这不是文本文件' };
     }
-    return { content, error: null };
+    // UTF-8 BOM / UTF-16 / GBK 都在这里识别；纯 UTF-8 也走同一分支
+    const { text, encoding } = decodeBytes(bytes);
+    return { content: text, encoding, error: null };
   } catch (err) {
-    return { content: null, error: err instanceof Error ? err.message : String(err) };
+    return { content: null, encoding: null, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -90,17 +103,17 @@ async function handleOpenFile(win: BrowserWindow | null): Promise<OpenFileResult
   };
   const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
   if (result.canceled || result.filePaths.length === 0) {
-    return { canceled: true, path: null, name: null, content: null };
+    return { canceled: true, path: null, name: null, content: null, encoding: null };
   }
   const filePath = result.filePaths[0];
   const read = await readTextFile(filePath);
   if (read.content === null) {
     await notifyOpenError(win, `${basename(filePath)}：${read.error ?? '读取失败'}`);
-    return { canceled: true, path: null, name: null, content: null };
+    return { canceled: true, path: null, name: null, content: null, encoding: null };
   }
   const name = basename(filePath);
   await addRecent(filePath, name);
-  return { canceled: false, path: filePath, name, content: read.content };
+  return { canceled: false, path: filePath, name, content: read.content, encoding: read.encoding };
 }
 
 /**
@@ -111,11 +124,29 @@ async function handleOpenPath(win: BrowserWindow | null, filePath: string): Prom
   const read = await readTextFile(filePath);
   if (read.content === null) {
     await notifyOpenError(win, `${basename(filePath)}：${read.error ?? '读取失败'}`);
-    return { canceled: true, path: null, name: null, content: null };
+    return { canceled: true, path: null, name: null, content: null, encoding: null };
   }
   const name = basename(filePath);
   await addRecent(filePath, name);
-  return { canceled: false, path: filePath, name, content: read.content };
+  return { canceled: false, path: filePath, name, content: read.content, encoding: read.encoding };
+}
+
+/**
+ * 静默读取文件（会话恢复用）。
+ * 与 handleOpenPath 的区别：文件不存在时直接返回取消，不弹窗、不写入最近文件。
+ */
+async function handleReadPathQuiet(filePath: string): Promise<OpenFileResult> {
+  const read = await readTextFile(filePath);
+  if (read.content === null) {
+    return { canceled: true, path: null, name: null, content: null, encoding: null };
+  }
+  return {
+    canceled: false,
+    path: filePath,
+    name: basename(filePath),
+    content: read.content,
+    encoding: read.encoding
+  };
 }
 
 /**
@@ -131,26 +162,36 @@ async function handleSaveFileAs(
   if (result.canceled || !result.filePath) {
     return { canceled: true, path: null, name: null };
   }
+  // 另存为一律写 UTF-8：新文件不存在「沿用原编码」的问题
+  markSelfWrite(result.filePath);
   await writeFile(result.filePath, content, 'utf-8');
   return { canceled: false, path: result.filePath, name: basename(result.filePath) };
 }
 
 /**
- * 读取指定路径的文件内容（UTF-8）。
+ * 读取指定路径的文件内容与编码。
  */
-async function handleReadFile(_win: BrowserWindow | null, filePath: string): Promise<string> {
-  return readFile(filePath, 'utf-8');
+async function handleReadFile(filePath: string): Promise<ReadFileResult> {
+  const { text, encoding } = decodeBytes(await readFile(filePath));
+  return { content: text, encoding };
 }
 
 /**
- * 写入内容到指定路径。
+ * 写入内容到指定路径，返回实际使用的编码。
+ *
+ * 除带 BOM 的 UTF-8 外统一写成 UTF-8：TextEncoder 无法编码 GBK / UTF-16，
+ * 强行写回会乱码，转存 UTF-8 内容不会丢失。
  */
 async function handleWriteFile(
-  _win: BrowserWindow | null,
   filePath: string,
-  content: string
-): Promise<void> {
-  await writeFile(filePath, content, 'utf-8');
+  content: string,
+  encoding: TextEncoding = 'utf-8'
+): Promise<TextEncoding> {
+  const effective = writeEncoding(encoding);
+  // 先登记再写：写盘与 fs.watch 事件之间存在竞态，提前登记才能可靠过滤自身写入
+  markSelfWrite(filePath);
+  await writeFile(filePath, encodeText(content, effective));
+  return effective;
 }
 
 /** 图片目录名：固定放在 Markdown 文件同级，随文档一起拷贝即可带走图片 */
@@ -331,21 +372,6 @@ async function handleRenameFile(input: RenameFileInput): Promise<RenameFileResul
   }
 }
 
-/** 简化 Markdown 为纯文本（复制为纯文本用，保留段落结构） */
-function stripMarkdown(markdown: string): string {
-  return markdown
-    .replace(/```[\s\S]*?```/g, (block) => block.replace(/^```[^\n]*\n?|```$/g, ''))
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]+>/g, '')
-    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
-    .replace(/^\s{0,3}>\s?/gm, '')
-    .replace(/^\s{0,3}([-*+]|\d+\.)\s+/gm, '')
-    .replace(/(\*\*|__|~~|`)/g, '')
-    .replace(/^\s{0,3}(-{3,}|\*{3,})\s*$/gm, '')
-    .trim();
-}
-
 /** 写剪贴板：纯文本 / Markdown 原文 / 渲染后的 HTML 代码（Electron 45 为异步 API） */
 async function handleClipboardWrite(input: ClipboardWriteInput): Promise<void> {
   if (input.format === 'markdown') {
@@ -438,12 +464,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.SaveFileAs, (event, content: string, defaultName: string) =>
     handleSaveFileAs(BrowserWindow.fromWebContents(event.sender), content, defaultName)
   );
-  ipcMain.handle(IpcChannel.ReadFile, (event, filePath: string) =>
-    handleReadFile(BrowserWindow.fromWebContents(event.sender), filePath)
+  ipcMain.handle(IpcChannel.ReadFile, (_event, filePath: string) => handleReadFile(filePath));
+  ipcMain.handle(IpcChannel.ReadPathQuiet, (_event, filePath: string) => handleReadPathQuiet(filePath));
+  ipcMain.handle(IpcChannel.WriteFile, (_event, filePath: string, content: string, encoding?: TextEncoding) =>
+    handleWriteFile(filePath, content, encoding)
   );
-  ipcMain.handle(IpcChannel.WriteFile, (event, filePath: string, content: string) =>
-    handleWriteFile(BrowserWindow.fromWebContents(event.sender), filePath, content)
-  );
+  ipcMain.handle(IpcChannel.WatchFile, (_event, filePath: string) => {
+    watchDocumentFile(filePath);
+  });
+  ipcMain.handle(IpcChannel.UnwatchFile, (_event, filePath: string) => {
+    unwatchDocumentFile(filePath);
+  });
   ipcMain.handle(IpcChannel.SaveImage, (event, input: SaveImageInput) =>
     handleSaveImage(BrowserWindow.fromWebContents(event.sender), input)
   );

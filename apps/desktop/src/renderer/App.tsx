@@ -1,6 +1,8 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { extractOutline } from '@ai-md-editor/markdown-core';
-import { NO_TABLE_CONTEXT, type EditorInstance, type TableContext } from '@ai-md-editor/editor';
+import type { EditorInstance, TableContext } from '@ai-md-editor/editor';
+import { TEXT_ENCODING_LABELS } from '@ai-md-editor/shared';
+import { NO_TABLE_CONTEXT } from './constants';
 import MarkdownEditor from './MarkdownEditor';
 import Tabs from './Tabs';
 import TopbarActions from './TopbarActions';
@@ -21,17 +23,39 @@ import { useMenuBridge } from './hooks/useMenuBridge';
  * 架构：单编辑器实例 + 切换内容；原生菜单动作统一经 IPC 分发到这里。
  *
  * 状态按职责拆到 hooks：
- * - useTabs           文档 / 标签 / 文件读写 / 自动保存
+ * - useTabs           文档 / 标签 / 文件读写 / 自动保存 / 会话恢复
  * - useDisplayState   主题 / 侧栏 / 视图模式 / 显示开关 / 缩放 / 窗口状态
  * - useEditorRuntime  编辑器实例生命周期
  * - useEditing        格式化 / 撤销重做 / 粘贴 / 复制导出
  * - useFindReplace    查找替换
  * - useMenuBridge     原生菜单动作分发
  */
+
+/** 状态栏提示：可带一个动作按钮（如「重新加载」） */
+interface Notice {
+  text: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}
+
 export default function App(): JSX.Element {
   // ===== 文档 =====
   const history = useSourceHistory();
   const editorRef = useRef<EditorInstance | null>(null);
+
+  // 状态栏短暂提示（图片保存失败、外部修改等）
+  const [notice, setNotice] = useState<Notice | null>(null);
+
+  /** 显示一条纯文本提示 */
+  const showNotice = useCallback((text: string) => {
+    setNotice({ text });
+  }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   const {
     tabs,
@@ -55,9 +79,17 @@ export default function App(): JSX.Element {
     ensureActivePath,
     duplicate,
     reloadFromDisk,
+    reloadPath,
     rename,
     loadQuickEntries
-  } = useTabs({ editorRef, history });
+  } = useTabs({
+    editorRef,
+    history,
+    onSessionRestored: (count) => {
+      if (count > 0) setNotice({ text: `已恢复上次打开的 ${count} 个文档` });
+    },
+    onNotice: showNotice
+  });
 
   // ===== 界面状态 =====
   const {
@@ -92,15 +124,6 @@ export default function App(): JSX.Element {
     toggleFullScreen,
     zoom
   } = useDisplayState({ hasPath: Boolean(activeTab?.path) });
-
-  // 状态栏短暂提示（图片保存失败等）
-  const [notice, setNotice] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 5000);
-    return () => clearTimeout(timer);
-  }, [notice]);
 
   // 当前文档所在目录：编辑器用它把相对图片路径解析成可显示地址
   const docDir = useMemo(() => {
@@ -143,7 +166,7 @@ export default function App(): JSX.Element {
     history,
     setActiveContent,
     ensureDocPath: ensureActivePath,
-    onError: setNotice
+    onError: showNotice
   });
 
   const {
@@ -330,6 +353,55 @@ export default function App(): JSX.Element {
   // 监听主进程的 open-file 事件（拖到 Dock 图标 / Finder 打开方式）
   useEffect(() => window.api.onOpenFile((filePath) => void openPath(filePath)), [openPath]);
 
+  // ===== 外部修改监听 =====
+  // 只监听当前活动文档：切换标签时取消上一个的监听，避免文件多开时反复触发
+  useEffect(() => {
+    const path = activeTab?.path ?? null;
+    if (!path) return;
+    void window.api.watchFile(path);
+    return () => {
+      void window.api.unwatchFile(path);
+    };
+  }, [activeTab?.path]);
+
+  useEffect(
+    () =>
+      window.api.onFileChanged(({ path }) => {
+        const tab = tabsRef.current.find((item) => item.path === path);
+        // 只对当前正在编辑的文档提示：后台标签重新激活时会重新读盘
+        if (!tab || tab.id !== activeIdRef.current) return;
+        if (tab.dirty) {
+          setNotice({ text: '文件已被外部程序修改，当前文档有未保存改动' });
+          return;
+        }
+        setNotice({
+          text: '文件已被外部程序修改',
+          actionLabel: '重新加载',
+          onAction: () => {
+            setNotice(null);
+            void reloadPath(path);
+          }
+        });
+      }),
+    [reloadPath]
+  );
+
+  // ===== 关闭窗口前的未保存确认 =====
+  // 主进程发问 → 这里同步回答当前标签状态；确认后主进程会再要求立即写盘一次
+  useEffect(
+    () =>
+      window.api.onUnsavedAsk(() => {
+        const list = tabsRef.current;
+        window.api.replyUnsaved({
+          untitledCount: list.filter((tab) => !tab.path && tab.dirty).length,
+          dirtyCount: list.filter((tab) => tab.path && tab.dirty).length
+        });
+      }),
+    [tabsRef]
+  );
+
+  useEffect(() => window.api.onFlushBeforeClose(() => void saveAll()), [saveAll]);
+
   // ===== 原生菜单动作分发 =====
   useMenuBridge({
     newTab,
@@ -510,8 +582,19 @@ export default function App(): JSX.Element {
       <footer className="statusbar">
         <span>{viewMode === 'wysiwyg' ? 'Markdown' : '源码'}</span>
         {readOnly && <span>只读</span>}
-        {notice && <span className="statusbar-notice">{notice}</span>}
-        <span>UTF-8</span>
+        {notice && (
+          <span className="statusbar-notice">
+            {notice.text}
+            {notice.actionLabel && (
+              <button type="button" className="statusbar-notice-action" onClick={notice.onAction}>
+                {notice.actionLabel}
+              </button>
+            )}
+          </span>
+        )}
+        <span title="文档编码（保存时统一写 UTF-8）">
+          {TEXT_ENCODING_LABELS[activeTab?.encoding ?? 'utf-8']}
+        </span>
         <div className="spacer" />
         <span title="界面缩放（显示 → 缩放）">{zoomPercent}%</span>
         <span>{stats.lineCount} 行</span>

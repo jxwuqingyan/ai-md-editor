@@ -429,13 +429,19 @@ button:focus-visible {
   color: var(--text-tertiary);
 }
 
+/* 文件树条目：用 <button> 承载，键盘可直接聚焦与触发 */
 .tree-item {
   display: flex;
   align-items: center;
   gap: 4px;
+  width: 100%;
   padding: 3px 8px;
+  border: none;
+  background: none;
+  font-family: inherit;
   font-size: 12.5px;
   color: var(--text-secondary);
+  text-align: left;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
@@ -445,6 +451,12 @@ button:focus-visible {
 
 .tree-item:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tree-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
   color: var(--text-primary);
 }
 
@@ -504,6 +516,7 @@ button:focus-visible {
   max-width: 720px;
   margin: 0 auto;
   padding: 24px 24px 120px;
+  position: relative;
 }
 
 /* ============ Milkdown 编辑器容器与内容排版 ============ */
@@ -783,11 +796,44 @@ button:focus-visible {
 
 /* 状态栏临时提示（图片保存失败等），短时出现，不打断写作 */
 .statusbar-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   max-width: 60%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-secondary);
+}
+
+/* 提示里的动作按钮（如「重新加载」） */
+.statusbar-notice-action {
+  flex-shrink: 0;
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.statusbar-notice-action:hover {
+  color: var(--accent-hover, var(--accent));
+}
+
+/* 编辑器内核（动态加载）就绪前的占位，避免整块区域空白 */
+.editor-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  pointer-events: none;
 }
 
 /* 正文图片：不超过编辑区宽度，避免撑破排版 */

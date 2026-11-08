@@ -402,18 +402,33 @@ function rebuildMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(buildTemplate()));
 }
 
+/**
+ * 上一次重建菜单时的界面状态签名。
+ * 渲染层每次界面变化都会同步状态，但其中相当一部分（例如只有缩放百分比以外的
+ * 字段抖动、或是重复上报同一个值）并不影响菜单内容。整棵菜单有近百项，
+ * 无脑重建会带来可感知的卡顿，因此用签名做一次廉价短路。
+ */
+let lastSignature = '';
+
 /** 渲染层同步界面状态，刷新菜单勾选项 */
 export function updateMenuState(next: MenuViewState): void {
-  viewState = { ...DEFAULT_MENU_VIEW_STATE, ...next };
+  const merged = { ...DEFAULT_MENU_VIEW_STATE, ...next };
+  const signature = JSON.stringify(merged);
+  if (signature === lastSignature) return;
+  lastSignature = signature;
+  viewState = merged;
   rebuildMenu();
 }
 
 /** 最近文件列表变化后刷新「打开最近文件」子菜单 */
 export function refreshRecentMenu(): void {
+  // 状态签名没变但最近文件变了，必须强制重建
+  lastSignature = '';
   rebuildMenu();
 }
 
 /** 安装原生应用菜单 */
 export function setupApplicationMenu(): void {
+  lastSignature = '';
   rebuildMenu();
 }

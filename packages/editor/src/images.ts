@@ -10,33 +10,7 @@
 import { $prose } from '@milkdown/kit/utils';
 import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
 import type { EditorView } from '@milkdown/kit/prose/view';
-
-/** 是否是「需要拼接文档目录」的相对路径（协议地址、协议相对地址、绝对路径都保持原样） */
-function isRelative(src: string): boolean {
-  if (!src) return false;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(src)) return false;
-  if (src.startsWith('//') || src.startsWith('/')) return false;
-  return true;
-}
-
-/**
- * 把相对图片路径解析成绝对 file:// 地址。
- *
- * @param baseDir 文档所在目录（绝对路径，mac/linux 用 /，Windows 用 \）
- * @param relative Markdown 中写的相对路径
- */
-export function toFileUrl(baseDir: string, relative: string): string {
-  const cleanBase = baseDir.replace(/[\\/]+$/, '').replace(/\\/g, '/');
-  const cleanRel = relative.replace(/^\.\//, '').replace(/\\/g, '/');
-  const fullPath = `${cleanBase}/${cleanRel}`;
-  // 逐段编码，避免中文/空格导致加载失败；
-  // Windows 盘符（C:）不能编码成 C%3A，否则 file:///C%3A/... 不是合法地址。
-  const encoded = fullPath
-    .split('/')
-    .map((segment) => (/^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment)))
-    .join('/');
-  return `file://${encoded.startsWith('/') ? '' : '/'}${encoded}`;
-}
+import { isRelativeImagePath, toFileUrl } from '@ai-md-editor/shared';
 
 /**
  * 把编辑器内所有相对图片的 src 解析成绝对地址。
@@ -47,7 +21,7 @@ export function applyImageSources(view: EditorView, baseDir: string): void {
   const images = view.dom.querySelectorAll('img');
   images.forEach((img) => {
     const raw = img.getAttribute('data-md-src') ?? img.getAttribute('src') ?? '';
-    if (!isRelative(raw)) return;
+    if (!isRelativeImagePath(raw)) return;
     img.setAttribute('data-md-src', raw);
     const absolute = toFileUrl(baseDir, raw);
     if (img.getAttribute('src') !== absolute) img.setAttribute('src', absolute);

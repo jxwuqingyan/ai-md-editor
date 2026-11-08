@@ -1,10 +1,11 @@
 /**
  * 文档（标签页）状态与文件读写。
  *
- * 承担原来 App.tsx 里「标签 / 打开 / 保存 / 自动保存 / 文件树根目录」这一整块职责，
+ * 承担原来 App.tsx 里「标签 / 打开 / 保存 / 自动保存 / 文件树根目录 / 会话恢复」这一整块职责，
  * 对外的回调都是稳定引用，供菜单分发表与其它 hook 直接使用。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
+import type { TextEncoding } from '@ai-md-editor/shared';
 import type { EditorInstance } from '@ai-md-editor/editor';
 import type { Tab } from '../types';
 import type { QuickEntry } from '../Dialogs';
@@ -38,8 +39,19 @@ function genTabId(): string {
 }
 
 /** 创建新标签的工厂函数 */
-function createTab(name = '未命名.md', content = '', path: string | null = null): Tab {
-  return { id: genTabId(), path, name, content, dirty: false };
+function createTab(
+  name = '未命名.md',
+  content = '',
+  path: string | null = null,
+  encoding: TextEncoding = 'utf-8'
+): Tab {
+  return { id: genTabId(), path, name, content, dirty: false, encoding };
+}
+
+/** 取路径的父目录 */
+function parentDir(targetPath: string): string {
+  const index = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'));
+  return index > 0 ? targetPath.slice(0, index) : '';
 }
 
 /** useTabs 的入参 */
@@ -48,13 +60,17 @@ interface UseTabsOptions {
   editorRef: MutableRefObject<EditorInstance | null>;
   /** 源码模式撤销栈（切换文档时清空） */
   history: SourceHistory;
+  /** 会话恢复完成（参数为恢复的文档数，0 表示没有可恢复的内容） */
+  onSessionRestored?: (count: number) => void;
+  /** 状态栏提示（外部修改、写盘失败等） */
+  onNotice?: (message: string) => void;
 }
 
 /**
  * 文档状态 hook。
  * 所有会修改标签内容的操作都在这里收口，避免多处 setState 竞争。
  */
-export function useTabs({ editorRef, history }: UseTabsOptions) {
+export function useTabs({ editorRef, history, onSessionRestored, onNotice }: UseTabsOptions) {
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', DEFAULT_DOC)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
   const [treeRoot, setTreeRoot] = useState<string | null>(null);
@@ -64,6 +80,12 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
   tabsRef.current = tabs;
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+
+  // 会话恢复完成后才允许回写，否则默认标签会先覆盖掉上次会话
+  const [sessionReady, setSessionReady] = useState(false);
+  // 通知回调放 ref：恢复流程只跑一次，不能因为回调重建而重跑
+  const notifyRef = useRef({ onSessionRestored, onNotice });
+  notifyRef.current = { onSessionRestored, onNotice };
 
   const activeTab = useMemo(() => tabs.find((t) => t.id === activeId) ?? null, [tabs, activeId]);
 
@@ -117,7 +139,7 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
 
       // 有路径的改动直接补写一次，不打断用户（自动保存的防抖可能还没到）
       if (target.path && target.dirty) {
-        void window.api.writeFile(target.path, target.content);
+        void window.api.writeFile(target.path, target.content, target.encoding);
       }
       // 未落盘的新文档没有兜底，关掉就真的没了，必须问一句
       if (!target.path && target.dirty) {
@@ -143,7 +165,7 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
 
   /** 打开文件内容（新建/复用标签），供对话框、拖拽、open-file 事件复用 */
   const openFileContent = useCallback(
-    (path: string, name: string, content: string) => {
+    (path: string, name: string, content: string, encoding: TextEncoding = 'utf-8') => {
       const existing = tabsRef.current.find((t) => t.path === path);
       if (existing) {
         history.reset();
@@ -151,12 +173,12 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
         editorRef.current?.setMarkdown(existing.content);
         return;
       }
-      const tab = createTab(name, content, path);
+      const tab = createTab(name, content, path, encoding);
       history.reset();
       setTabs((prev) => [...prev, tab]);
       setActiveId(tab.id);
       editorRef.current?.setMarkdown(content);
-      const dir = path.slice(0, Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')));
+      const dir = parentDir(path);
       if (dir) {
         // 文件在「已打开的文件夹」内部时保留原有根目录：
         // 否则每打开一个文件都会把树根改成它的父目录，
@@ -182,7 +204,7 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
   const openFile = useCallback(async () => {
     const result = await window.api.openFile();
     if (result.canceled || !result.path || result.content === null) return;
-    openFileContent(result.path, result.name ?? '未命名.md', result.content);
+    openFileContent(result.path, result.name ?? '未命名.md', result.content, result.encoding ?? 'utf-8');
   }, [openFileContent]);
 
   /** 打开指定路径（最近文件、快速打开、文件树共用） */
@@ -190,37 +212,68 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     async (path: string, fallbackName?: string) => {
       const result = await window.api.openPath(path);
       if (!result.canceled && result.path && result.content !== null) {
-        openFileContent(result.path, result.name ?? fallbackName ?? path, result.content);
+        openFileContent(
+          result.path,
+          result.name ?? fallbackName ?? path,
+          result.content,
+          result.encoding ?? 'utf-8'
+        );
       }
     },
     [openFileContent]
   );
+
+  /**
+   * 写盘并把标签标记为已保存。
+   * 非 UTF-8 文档会被转存为 UTF-8（TextEncoder 无法编码 GBK / UTF-16），
+   * 因此这里用主进程返回的实际编码覆盖标签编码，避免下次读回时按旧编码误解码。
+   */
+  const persistTab = useCallback(async (tab: Tab): Promise<void> => {
+    if (!tab.path) return;
+    const effective = await window.api.writeFile(tab.path, tab.content, tab.encoding);
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.id === tab.id
+          ? { ...t, encoding: effective, dirty: t.content === tab.content ? false : t.dirty }
+          : t
+      )
+    );
+  }, []);
 
   /** 保存活动标签：有路径直接写，无路径则另存为 */
   const save = useCallback(async () => {
     const tab = findActive();
     if (!tab) return;
     if (tab.path) {
-      await window.api.writeFile(tab.path, tab.content);
-      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, dirty: false } : t)));
+      try {
+        await persistTab(tab);
+      } catch (err) {
+        notifyRef.current.onNotice?.(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+      }
       return;
     }
     const result = await window.api.saveFileAs(tab.content, tab.name);
     if (!result.canceled && result.path) {
       setTabs((prev) =>
-        prev.map((t) => (t.id === tab.id ? { ...t, path: result.path, name: result.name ?? t.name, dirty: false } : t))
+        prev.map((t) =>
+          t.id === tab.id
+            ? { ...t, path: result.path, name: result.name ?? t.name, dirty: false, encoding: 'utf-8' }
+            : t
+        )
       );
     }
-  }, [findActive]);
+  }, [findActive, persistTab]);
 
   /** 保存全部打开的文件（只写有路径且已修改的标签） */
   const saveAll = useCallback(async () => {
-    const dirty = tabsRef.current.filter((t) => t.path && t.dirty);
-    await Promise.all(dirty.map((t) => window.api.writeFile(t.path as string, t.content)));
+    const dirty = tabsRef.current.filter((t) => t.path && t.dirty) as (Tab & { path: string })[];
     if (dirty.length === 0) return;
-    const ids = new Set(dirty.map((t) => t.id));
-    setTabs((prev) => prev.map((t) => (ids.has(t.id) ? { ...t, dirty: false } : t)));
-  }, []);
+    try {
+      await Promise.all(dirty.map((t) => persistTab(t)));
+    } catch (err) {
+      notifyRef.current.onNotice?.(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [persistTab]);
 
   /** 另存为：弹出保存对话框 */
   const saveAs = useCallback(async () => {
@@ -230,7 +283,11 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     if (!result.canceled && result.path) {
       const path = result.path;
       const name = result.name ?? tab.name;
-      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false } : t)));
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tab.id ? { ...t, path, name, dirty: false, encoding: 'utf-8' } : t
+        )
+      );
       // 与保存/重命名保持一致：另存出来的新路径也要进最近文件
       void window.api.addRecent(path, name);
     }
@@ -248,7 +305,9 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     if (result.canceled || !result.path) return null;
     const path = result.path;
     const name = result.name ?? tab.name;
-    setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false } : t)));
+    setTabs((prev) =>
+      prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false, encoding: 'utf-8' } : t))
+    );
     void window.api.addRecent(path, name);
     return path;
   }, [findActive]);
@@ -261,31 +320,61 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     const result = await window.api.saveFileAs(tab.content, `${base} 副本.md`);
     if (result.canceled || !result.path) return;
     const name = result.name ?? `${base} 副本.md`;
-    openFileContent(result.path, name, tab.content);
+    openFileContent(result.path, name, tab.content, 'utf-8');
     void window.api.addRecent(result.path, name);
   }, [findActive, openFileContent]);
 
-  /** 从磁盘重新加载当前文档（丢弃未写入磁盘的改动） */
+  /**
+   * 从磁盘重新加载指定路径的文档（丢弃未写入磁盘的改动）。
+   * 外部修改提示点击后会走到这里，因此按路径定位而不是「当前标签」。
+   */
+  const reloadPath = useCallback(
+    async (path: string) => {
+      const target = tabsRef.current.find((t) => t.path === path);
+      if (!target) return;
+      try {
+        const result = await window.api.readFile(path);
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === target.id
+              ? { ...t, content: result.content, encoding: result.encoding, dirty: false }
+              : t
+          )
+        );
+        if (target.id === activeIdRef.current) {
+          editorRef.current?.setMarkdown(result.content);
+        }
+      } catch (err) {
+        notifyRef.current.onNotice?.(`重新加载失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [editorRef]
+  );
+
+  /** 从磁盘重新加载当前文档 */
   const reloadFromDisk = useCallback(async () => {
     const tab = findActive();
     if (!tab?.path) return;
-    const content = await window.api.readFile(tab.path);
-    setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, content, dirty: false } : t)));
-    editorRef.current?.setMarkdown(content);
-  }, [editorRef, findActive]);
+    await reloadPath(tab.path);
+  }, [findActive, reloadPath]);
 
   /** 重命名当前文档（返回是否成功，供对话框决定是否关闭） */
-  const rename = useCallback(async (newName: string): Promise<void> => {
-    const tab = findActive();
-    if (!tab?.path) return;
-    const result = await window.api.renameFile({ path: tab.path, newName });
-    if (result.ok && result.path) {
-      const path = result.path;
-      const name = result.name ?? newName;
-      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false } : t)));
-      void window.api.addRecent(path, name);
-    }
-  }, [findActive]);
+  const rename = useCallback(
+    async (newName: string): Promise<void> => {
+      const tab = findActive();
+      if (!tab?.path) return;
+      const result = await window.api.renameFile({ path: tab.path, newName });
+      if (result.ok && result.path) {
+        const path = result.path;
+        const name = result.name ?? newName;
+        setTabs((prev) =>
+          prev.map((t) => (t.id === tab.id ? { ...t, path, name, dirty: false } : t))
+        );
+        void window.api.addRecent(path, name);
+      }
+    },
+    [findActive]
+  );
 
   /** 快速打开：载入最近文件 + 文件树两层内的 Markdown 文件 */
   const loadQuickEntries = useCallback(async (): Promise<{ recent: QuickEntry[]; tree: QuickEntry[] }> => {
@@ -310,6 +399,64 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     return { recent, tree };
   }, [treeRoot]);
 
+  // ===== 会话恢复 =====
+  // 只恢复「有磁盘路径」的标签：未落盘的新文档在退出前已经问过用户，
+  // 这里若把内容也存进设置文件，等于隐式做了草稿持久化，语义容易混淆。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const settings = await window.api.getSettings().catch(() => null);
+      if (cancelled) return;
+      const session = settings?.restoreSession ? settings.lastSession : null;
+      if (session && session.paths.length > 0) {
+        const restored: Tab[] = [];
+        for (const path of session.paths) {
+          const result = await window.api.readPathQuiet(path);
+          if (result.canceled || !result.path || result.content === null) continue;
+          restored.push(
+            createTab(result.name ?? path, result.content, result.path, result.encoding ?? 'utf-8')
+          );
+        }
+        if (!cancelled && restored.length > 0) {
+          const active = restored.find((tab) => tab.path === session.activePath) ?? restored[0];
+          history.reset();
+          setTabs(restored);
+          setActiveId(active.id);
+          // 编辑器可能还没挂载完：handleReady 会以活动标签内容为准再同步一次
+          editorRef.current?.setMarkdown(active.content);
+          const dir = active.path ? parentDir(active.path) : '';
+          if (dir) setTreeRoot(dir);
+          notifyRef.current.onSessionRestored?.(restored.length);
+        } else if (!cancelled) {
+          notifyRef.current.onSessionRestored?.(0);
+        }
+      } else {
+        notifyRef.current.onSessionRestored?.(0);
+      }
+      if (!cancelled) setSessionReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // 只在挂载时恢复一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 会话内容变化时落盘（防抖 + 签名去重：每次按键都写设置文件没有意义）
+  const sessionSignatureRef = useRef('');
+  useEffect(() => {
+    if (!sessionReady) return;
+    const paths = tabs.filter((tab) => tab.path).map((tab) => tab.path as string);
+    const activePath = tabs.find((tab) => tab.id === activeId)?.path ?? null;
+    const signature = `${paths.join('|')}::${activePath ?? ''}`;
+    if (signature === sessionSignatureRef.current) return;
+    const timer = setTimeout(() => {
+      sessionSignatureRef.current = signature;
+      void window.api.updateSettings({ lastSession: paths.length > 0 ? { paths, activePath } : null });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [sessionReady, tabs, activeId]);
+
   // 自动保存：内容变化后防抖 1.5s 写入所有「有路径且 dirty」的标签。
   // 只保存当前标签会丢稿：敲完立刻切到别的标签（或新建标签）时，
   // 原标签的计时器被清掉且再也不会重新触发。
@@ -319,12 +466,19 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
       if (dirty.length === 0) return;
       // 记录写入时的内容快照：写盘过程中用户继续编辑，不能把 dirty 清掉
       const snapshots = new Map(dirty.map((tab) => [tab.id, tab.content]));
-      void Promise.all(dirty.map((tab) => window.api.writeFile(tab.path as string, tab.content)))
-        .then(() => {
+      void Promise.all(
+        dirty.map((tab) => window.api.writeFile(tab.path as string, tab.content, tab.encoding))
+      )
+        .then((encodings) => {
+          const effective = new Map(dirty.map((tab, index) => [tab.id, encodings[index]]));
           setTabs((prev) =>
             prev.map((tab) => {
               const written = snapshots.get(tab.id);
-              return written !== undefined && written === tab.content ? { ...tab, dirty: false } : tab;
+              const encoding = effective.get(tab.id);
+              if (written === undefined || written !== tab.content) {
+                return encoding && encoding !== tab.encoding ? { ...tab, encoding } : tab;
+              }
+              return { ...tab, dirty: false, encoding: encoding ?? tab.encoding };
             })
           );
         })
@@ -358,6 +512,7 @@ export function useTabs({ editorRef, history }: UseTabsOptions) {
     ensureActivePath,
     duplicate,
     reloadFromDisk,
+    reloadPath,
     rename,
     loadQuickEntries
   };

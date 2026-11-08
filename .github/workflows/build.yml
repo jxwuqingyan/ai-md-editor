@@ -153,9 +153,10 @@ jobs:
       - name: 构建产物（测试直接加载 out/）
         run: npm run build
 
-      - name: 快捷键静态检查 + 真实菜单运行时校验
+      - name: 纯函数单测 + 快捷键静态检查 + 真实菜单运行时校验
         # workspace 名带 @，在 PowerShell 里必须加引号
         run: |
+          npm run test:unit --workspace "@ai-md-editor/desktop"
           npm run test:menu --workspace "@ai-md-editor/desktop"
           npm run test:menu-runtime --workspace "@ai-md-editor/desktop"
 

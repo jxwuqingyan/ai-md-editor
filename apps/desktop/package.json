@@ -1,6 +1,6 @@
 {
   "name": "@ai-md-editor/desktop",
-  "version": "0.12.2",
+  "version": "0.13.0",
   "private": true,
   "description": "MarkdownNote - 跨平台本地 Markdown 编辑器",
   "author": "wuqingyan <1131169640@qq.com>",
@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "dist": "electron-vite build && electron-builder",
+    "test:unit": "node test/run-unit.cjs",
     "test:menu": "node test/menuAccelerators.cjs",
     "test:menu-runtime": "node test/run-e2e.cjs menuRuntime.cjs",
     "test:e2e": "node test/run-e2e.cjs"

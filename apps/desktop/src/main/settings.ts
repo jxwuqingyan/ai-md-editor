@@ -7,7 +7,12 @@
 import { app } from 'electron';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { DEFAULT_SETTINGS, type AppSettings, type WindowBounds } from '@ai-md-editor/shared';
+import {
+  DEFAULT_SETTINGS,
+  type AppSettings,
+  type SessionSnapshot,
+  type WindowBounds
+} from '@ai-md-editor/shared';
 
 /** 内存中的当前设置 */
 let cache: AppSettings = { ...DEFAULT_SETTINGS };
@@ -18,6 +23,19 @@ let writeTimer: NodeJS.Timeout | null = null;
 /** 设置文件路径 */
 function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json');
+}
+
+/** 校验会话快照：只保留非空字符串路径，最多 40 个（避免设置文件无限膨胀） */
+function normalizeSession(raw: unknown): SessionSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const input = raw as Partial<SessionSnapshot>;
+  const paths = Array.isArray(input.paths)
+    ? input.paths.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, 40)
+    : [];
+  if (paths.length === 0) return null;
+  const activePath =
+    typeof input.activePath === 'string' && paths.includes(input.activePath) ? input.activePath : paths[0];
+  return { paths, activePath };
 }
 
 /** 校验并规整读取到的设置（避免旧版本/损坏文件带入非法值） */
@@ -43,7 +61,10 @@ function normalize(raw: unknown): AppSettings {
       typeof input.zoomPercent === 'number' && input.zoomPercent >= 50 && input.zoomPercent <= 300
         ? input.zoomPercent
         : DEFAULT_SETTINGS.zoomPercent,
-    windowBounds: validBounds
+    windowBounds: validBounds,
+    restoreSession:
+      typeof input.restoreSession === 'boolean' ? input.restoreSession : DEFAULT_SETTINGS.restoreSession,
+    lastSession: normalizeSession(input.lastSession)
   };
 }
 
@@ -58,9 +79,15 @@ export function loadSettings(): AppSettings {
   return cache;
 }
 
-/** 当前设置（浅拷贝，避免调用方误改内部状态） */
+/** 当前设置（深拷贝，避免调用方误改内部状态） */
 export function getSettings(): AppSettings {
-  return { ...cache, windowBounds: cache.windowBounds ? { ...cache.windowBounds } : null };
+  return {
+    ...cache,
+    windowBounds: cache.windowBounds ? { ...cache.windowBounds } : null,
+    lastSession: cache.lastSession
+      ? { paths: [...cache.lastSession.paths], activePath: cache.lastSession.activePath }
+      : null
+  };
 }
 
 /** 立即落盘（内部使用） */

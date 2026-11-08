@@ -3,14 +3,35 @@
  * 提供跨进程共用的 IPC 通道名、请求/响应类型，供主进程、preload、渲染层三方共用。
  */
 
+import type { TextEncoding } from './text';
+
+export {
+  TEXT_ENCODING_LABELS,
+  baseNameOf,
+  decodeBytes,
+  dirNameOf,
+  encodeText,
+  isRelativeImagePath,
+  stripMarkdown,
+  toFileUrl,
+  writeEncoding,
+  type TextEncoding
+} from './text';
+
 /** IPC 通道名统一枚举，避免魔法字符串 */
 export const IpcChannel = {
   /** 打开文件对话框（返回文件路径与内容） */
   OpenFile: 'file:open',
   /** 保存文件对话框（另存为） */
   SaveFileAs: 'file:save-as',
-  /** 读取指定路径的文件内容 */
+  /** 读取指定路径的文件内容与编码 */
   ReadFile: 'file:read',
+  /** 静默读取文件（会话恢复用：文件不存在时不弹窗、不写入最近文件） */
+  ReadPathQuiet: 'file:read-quiet',
+  /** 监听文件的外部修改 */
+  WatchFile: 'fs:watch',
+  /** 取消监听文件的外部修改 */
+  UnwatchFile: 'fs:unwatch',
   /** 写入内容到指定路径 */
   WriteFile: 'file:write',
   /** 保存粘贴的图片到文档同级 img/ 目录（返回相对路径） */
@@ -121,7 +142,7 @@ export interface RecentFile {
 
 /** 打开文件的结果 */
 export interface OpenFileResult {
-  /** 是否取消（用户点了取消） */
+  /** 是否取消（用户点了取消，或文件无法读取） */
   canceled: boolean;
   /** 文件绝对路径（取消时为 null） */
   path: string | null;
@@ -129,6 +150,16 @@ export interface OpenFileResult {
   name: string | null;
   /** 文件内容（取消时为 null） */
   content: string | null;
+  /** 读入时识别到的编码（取消时为 null） */
+  encoding: TextEncoding | null;
+}
+
+/** 读取文件内容的结果 */
+export interface ReadFileResult {
+  /** 文件内容 */
+  content: string;
+  /** 读入时识别到的编码 */
+  encoding: TextEncoding;
 }
 
 /** 保存文件的结果 */
@@ -201,6 +232,14 @@ export interface WindowBounds {
   height: number;
 }
 
+/** 上次会话：重启后要恢复的标签 */
+export interface SessionSnapshot {
+  /** 已保存文档的绝对路径（按标签顺序） */
+  paths: string[];
+  /** 上次的活动标签路径 */
+  activePath: string | null;
+}
+
 /**
  * 持久化到 userData/settings.json 的应用设置。
  * 只存「下次启动仍然希望保持」的偏好，不存临时状态。
@@ -220,6 +259,10 @@ export interface AppSettings {
   zoomPercent: number;
   /** 上次窗口尺寸与位置（null 表示用默认值） */
   windowBounds: WindowBounds | null;
+  /** 启动时恢复上次打开的文档 */
+  restoreSession: boolean;
+  /** 上次会话的标签路径（restoreSession 为 false 时忽略） */
+  lastSession: SessionSnapshot | null;
 }
 
 /** 默认设置 */
@@ -230,7 +273,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   tabbarVisible: true,
   toolbarVisible: true,
   zoomPercent: 100,
-  windowBounds: null
+  windowBounds: null,
+  restoreSession: true,
+  lastSession: null
 };
 
 /** 路径类型查询结果 */
@@ -256,6 +301,32 @@ export const MenuActionChannel = 'menu:action';
 
 /** 渲染进程 → 主进程的菜单状态同步通道 */
 export const MenuStateChannel = 'menu:state';
+
+/** 主进程 → 渲染进程：文件被外部程序修改 */
+export const FileChangedChannel = 'file:changed';
+
+/** 主进程 → 渲染进程：关闭窗口前询问未保存文档 */
+export const UnsavedAskChannel = 'app:unsaved-ask';
+
+/** 渲染进程 → 主进程：未保存文档汇总 */
+export const UnsavedReplyChannel = 'app:unsaved-reply';
+
+/** 主进程 → 渲染进程：退出前把所有有路径的改动写盘 */
+export const FlushBeforeCloseChannel = 'app:flush-before-close';
+
+/** 关闭窗口前的未保存文档汇总 */
+export interface UnsavedSummary {
+  /** 未落盘（无磁盘路径）且有改动的文档数：关掉就真的丢了 */
+  untitledCount: number;
+  /** 有路径但尚未写入磁盘的文档数：退出前会补写一次 */
+  dirtyCount: number;
+}
+
+/** 文件外部修改事件 */
+export interface FileChangedMessage {
+  /** 被修改文件的绝对路径 */
+  path: string;
+}
 
 /** 菜单动作携带的可选参数（如最近文件路径、插入的 Markdown 片段） */
 export interface MenuActionMessage {
