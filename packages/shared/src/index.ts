@@ -81,7 +81,11 @@ export const IpcChannel = {
   /** 查询窗口是否全屏 */
   IsFullScreen: 'app:is-fullscreen',
   /** 最小化当前窗口 */
-  MinimizeWindow: 'app:minimize-window'
+  MinimizeWindow: 'app:minimize-window',
+  /** 在目录里新建 Markdown 文件（自动避让重名） */
+  CreateFile: 'fs:create-file',
+  /** 在目录内搜索所有 Markdown 文件内容 */
+  SearchFolder: 'search:folder'
 } as const;
 
 /** 导出类型 */
@@ -126,6 +130,64 @@ export interface ReadDirResult {
   ok: boolean;
   /** 目录条目（按 目录在前、名称排序） */
   entries: FsEntry[];
+  /** 错误信息（成功为 null） */
+  error: string | null;
+}
+
+/** 目录内新建文件的结果 */
+export interface CreateFileResult {
+  /** 是否成功 */
+  ok: boolean;
+  /** 新文件的绝对路径（失败为 null） */
+  path: string | null;
+  /** 错误信息（成功为 null） */
+  error: string | null;
+}
+
+/** 文件夹搜索请求 */
+export interface SearchFolderInput {
+  /** 搜索根目录 */
+  root: string;
+  /** 查询文本（正则模式下为表达式） */
+  query: string;
+  /** 区分大小写 */
+  caseSensitive: boolean;
+  /** 全单词匹配 */
+  wholeWord: boolean;
+  /** 正则表达式模式 */
+  regex: boolean;
+}
+
+/** 单条搜索匹配 */
+export interface SearchMatch {
+  /** 1 起的行号 */
+  line: number;
+  /** 匹配起始列（0 起，按字符数） */
+  column: number;
+  /** 匹配文本长度 */
+  length: number;
+  /** 该行原文（已裁剪首尾空白） */
+  text: string;
+}
+
+/** 单个文件的搜索结果 */
+export interface SearchFileResult {
+  /** 文件绝对路径 */
+  path: string;
+  /** 文件名 */
+  name: string;
+  /** 文件内匹配行 */
+  matches: SearchMatch[];
+}
+
+/** 文件夹搜索结果 */
+export interface SearchFolderResult {
+  /** 是否成功 */
+  ok: boolean;
+  /** 有匹配的文件 */
+  files: SearchFileResult[];
+  /** 结果是否被截断（超出上限） */
+  truncated: boolean;
   /** 错误信息（成功为 null） */
   error: string | null;
 }
@@ -468,7 +530,6 @@ export const MenuActions = {
   InsertFootnote: 'format:insert-footnote',
   InsertCallout: 'format:insert-callout',
   InsertToc: 'format:insert-toc',
-  InsertFrontMatter: 'format:insert-front-matter',
   FormatHorizontalRule: 'format:horizontal-rule',
 
   // ===== 格式 =====

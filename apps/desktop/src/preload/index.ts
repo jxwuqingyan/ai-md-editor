@@ -7,6 +7,9 @@ import type {
   SaveImageResult,
   RecentFile,
   ReadDirResult,
+  CreateFileResult,
+  SearchFolderInput,
+  SearchFolderResult,
   ExportInput,
   ExportResult,
   RenameFileInput,
@@ -86,6 +89,14 @@ const api = {
   /** 读取目录列表（文件树用）：返回子目录与 Markdown 文件条目 */
   readDir: (dirPath: string): Promise<ReadDirResult> =>
     ipcRenderer.invoke(IpcChannel.ReadDir, dirPath),
+
+  /** 在目录里新建 Markdown 文件（自动避让重名），返回新文件路径 */
+  createFile: (dirPath: string): Promise<CreateFileResult> =>
+    ipcRenderer.invoke(IpcChannel.CreateFile, dirPath),
+
+  /** 在目录内搜索所有 Markdown 文件内容 */
+  searchFolder: (input: SearchFolderInput): Promise<SearchFolderResult> =>
+    ipcRenderer.invoke(IpcChannel.SearchFolder, input),
 
   /** 弹出文件夹选择对话框（文件树打开目录用） */
   chooseFolder: (): Promise<{ canceled: boolean; path: string | null }> =>

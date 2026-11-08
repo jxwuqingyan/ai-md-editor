@@ -167,7 +167,6 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.InsertFootnote]: () => deps.format('snippet', '正文[^1]\n\n[^1]: 脚注内容'),
     [MenuActions.InsertCallout]: (payload) => deps.format('snippet', `\n> [!${payload ?? 'NOTE'}]\n> 内容\n`),
     [MenuActions.InsertToc]: () => deps.format('snippet', '\n[TOC]\n'),
-    [MenuActions.InsertFrontMatter]: () => deps.format('snippetAtStart', '---\ntitle: 未命名\ndate: \n---\n'),
     [MenuActions.FormatHorizontalRule]: () => deps.format('hr'),
 
     // ===== 格式 =====

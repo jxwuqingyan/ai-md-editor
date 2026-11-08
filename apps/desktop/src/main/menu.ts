@@ -291,8 +291,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('水平分割线', MenuActions.FormatHorizontalRule, {
           accelerator: key('Ctrl+Command+-', 'Ctrl+Alt+-')
         }),
-        item('内容目录', MenuActions.InsertToc),
-        item('YAML Front Matter', MenuActions.InsertFrontMatter)
+        item('内容目录', MenuActions.InsertToc)
       ]
     },
 

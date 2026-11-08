@@ -203,6 +203,9 @@ export default function App(): JSX.Element {
   });
   const [renameOpen, setRenameOpen] = useState(false);
 
+  // 文件树刷新信号：⋮ 菜单「刷新」与「新建文件」时递增，驱动 FileTree 重读根目录
+  const [treeRefreshToken, setTreeRefreshToken] = useState(0);
+
   // 从活动标签内容提取大纲（实时跟随编辑）。
   // remark 解析要遍历整篇文档，用延迟值把渲染降为低优先级：
   // 连续输入时只解析最后一次，长文档不再每敲一个字就卡一下。
@@ -301,6 +304,111 @@ export default function App(): JSX.Element {
   /** 插入链接 / 图片占位 */
   const handleInsertLink = useCallback(() => applyFormat('snippet', '[链接文字](url)'), [applyFormat]);
   const handleInsertImage = useCallback(() => applyFormat('snippet', '![图片](url)'), [applyFormat]);
+
+  // ===== 侧栏文件树操作（⋮ 菜单） =====
+
+  /** 刷新文件树 */
+  const handleRefreshTree = useCallback(() => setTreeRefreshToken((v) => v + 1), []);
+
+  /** 在目录里新建 Markdown 文件并打开 */
+  const handleCreateFile = useCallback(async () => {
+    if (!treeRoot) {
+      showNotice('请先打开一个文件夹');
+      return;
+    }
+    const result = await window.api.createFile(treeRoot);
+    if (!result.ok || !result.path) {
+      showNotice(`新建文件失败：${result.error ?? '未知错误'}`);
+      return;
+    }
+    setTreeRefreshToken((v) => v + 1);
+    const segments = result.path.split(/[\\/]/);
+    await openPath(result.path, segments[segments.length - 1]);
+  }, [treeRoot, openPath, showNotice]);
+
+  /** 在文件管理器中显示当前目录（macOS Finder / Windows 资源管理器） */
+  const handleRevealFolder = useCallback(() => {
+    const target = treeRoot ?? docDir ?? activeTab?.path ?? null;
+    if (target) void window.api.revealInFolder(target);
+    else showNotice('没有可显示的目录');
+  }, [treeRoot, docDir, activeTab?.path, showNotice]);
+
+  // ===== 侧栏搜索跳转 =====
+
+  /** 待执行的搜索跳转：文件打开并渲染完成后再定位到匹配行 */
+  const pendingJumpRef = useRef<{
+    path: string;
+    line: number;
+    column: number;
+    length: number;
+    text: string;
+    deadline: number;
+  } | null>(null);
+
+  /** 在当前文档里定位到匹配位置 */
+  const jumpToSearchMatch = useCallback(
+    (line: number, column: number, length: number, text: string): boolean => {
+      if (viewModeRef.current === 'source') {
+        const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
+        const active = tabsRef.current.find((tab) => tab.id === activeIdRef.current);
+        if (ta && active) {
+          const lineStart = active.content
+            .split('\n')
+            .slice(0, line - 1)
+            .reduce((sum, part) => sum + part.length + 1, 0);
+          ta.focus();
+          ta.setSelectionRange(lineStart + column, lineStart + column + length);
+          return true;
+        }
+        return false;
+      }
+      const editor = editorRef.current;
+      if (!editor) return false;
+      // WYSIWYG 的纯文本与 Markdown 原文有差异，直接在纯文本里找匹配片段
+      const hit = text.slice(column, column + length);
+      const plain = editor.getPlainText();
+      const index = plain.indexOf(hit);
+      if (index < 0) return true; // 纯文本里找不到（如代码块匹配）就不再重试
+      editor.selectTextRange(index, index + hit.length);
+      return true;
+    },
+    [viewModeRef, tabsRef, activeIdRef, editorRef]
+  );
+
+  /** 点击搜索结果：已在当前文档则直接跳，否则先打开文件再跳 */
+  const handleOpenMatch = useCallback(
+    (path: string, name: string, line: number, column: number, length: number, text: string) => {
+      const active = tabsRef.current.find((tab) => tab.id === activeIdRef.current);
+      if (active?.path === path) {
+        jumpToSearchMatch(line, column, length, text);
+        return;
+      }
+      pendingJumpRef.current = { path, line, column, length, text, deadline: Date.now() + 2000 };
+      void openPath(path, name);
+    },
+    [tabsRef, activeIdRef, jumpToSearchMatch, openPath]
+  );
+
+  // 文件打开/编辑器就绪后执行挂起的搜索跳转（WYSIWYG 内容异步渲染，最多重试到 deadline）
+  useEffect(() => {
+    const pending = pendingJumpRef.current;
+    if (!pending || activeTab?.path !== pending.path) return;
+    if (jumpToSearchMatch(pending.line, pending.column, pending.length, pending.text)) {
+      pendingJumpRef.current = null;
+      return;
+    }
+    const timer = window.setTimeout(function attempt() {
+      const current = pendingJumpRef.current;
+      if (!current) return;
+      if (jumpToSearchMatch(current.line, current.column, current.length, current.text)) {
+        pendingJumpRef.current = null;
+        return;
+      }
+      if (Date.now() < current.deadline) window.setTimeout(attempt, 200);
+      else pendingJumpRef.current = null; // 超时放弃
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [activeTab?.path, editorVersion, jumpToSearchMatch]);
 
   // 图片粘贴：保存到文档同级 img/ 并插入相对路径
   useEffect(() => {
@@ -496,6 +604,11 @@ export default function App(): JSX.Element {
           activePath={activeTab?.path ?? null}
           onOpenFile={(path, name) => void openPath(path, name)}
           onChooseFolder={() => void chooseFolder()}
+          onCreateFile={() => void handleCreateFile()}
+          onRevealFolder={handleRevealFolder}
+          onRefresh={handleRefreshTree}
+          refreshToken={treeRefreshToken}
+          onOpenMatch={handleOpenMatch}
         />
 
         {/* 编辑区 */}

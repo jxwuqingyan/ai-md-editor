@@ -14,6 +14,8 @@
  * - 编码识别（GBK 读入、保存转 UTF-8）、外部修改提示与重新加载
  * - 关闭前的未保存汇总与立即写盘、会话恢复
  * - 文件树键盘导航（条目为按钮 + 方向键移动焦点）
+ * - 主题按钮单击切换、段落菜单无 YAML 项、文件树 ⋮ 菜单（新建文件落盘）
+ * - 侧栏搜索：区分大小写 / 全单词 / 正则表达式开关与点击结果跳转
  *
  * 运行：npm test（test/run-e2e.cjs 会自动剔除 ELECTRON_RUN_AS_NODE / NODE_OPTIONS 注入）
  * 单独跑：npm run test:e2e --workspace @ai-md-editor/desktop
@@ -821,6 +823,140 @@ async function runTests() {
     label: '会话恢复窗口关闭'
   }).catch(() => undefined);
   check('会话恢复窗口可正常关闭', BrowserWindow.getAllWindows().length === beforeRestore);
+
+  // ===== 15. 主题一键切换 / YAML 菜单项移除 / 文件树 ⋮ 菜单 / 侧栏搜索 =====
+
+  // 前面的编码测试打开过别的目录的文档，先把文件树根目录切回测试根目录
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [root] });
+  await exec(`document.querySelector('.filetree-open-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.tree-dir'))`), {
+    label: '重新打开测试根目录'
+  });
+
+  // 主题按钮单击直接在浅色/深色之间切换
+  const themeBefore = await exec(`document.documentElement.getAttribute('data-theme')`);
+  await exec(`document.querySelector('.tabbar-actions button').click()`);
+  const themeAfterOnce = await waitFor(
+    () => exec(`document.documentElement.getAttribute('data-theme')`).then((v) => (v !== themeBefore ? v : null)),
+    { label: '主题单击切换' }
+  ).catch(() => null);
+  check('主题按钮单击即切换主题', themeAfterOnce !== null, `${themeBefore} -> ${themeAfterOnce}`);
+  await exec(`document.querySelector('.tabbar-actions button').click()`);
+  const themeBack = await waitFor(
+    () => exec(`document.documentElement.getAttribute('data-theme')`).then((v) => (v === themeBefore ? v : null)),
+    { label: '主题再切回来' }
+  ).catch(() => null);
+  check('主题按钮再次单击切回原主题', themeBack === themeBefore, `theme=${themeBack}`);
+
+  // 段落菜单不再包含 YAML Front Matter
+  const appMenu = Menu.getApplicationMenu();
+  const yamlItems = [];
+  const walkMenu = (items) => {
+    for (const menuItem of items) {
+      if (menuItem.label && /yaml/i.test(menuItem.label)) yamlItems.push(menuItem.label);
+      if (menuItem.submenu) walkMenu(menuItem.submenu.items);
+    }
+  };
+  if (appMenu) walkMenu(appMenu.items);
+  check('段落菜单已移除 YAML Front Matter', yamlItems.length === 0, JSON.stringify(yamlItems));
+
+  // 文件树 ⋮ 菜单：展开后包含 5 项，新建文件会落盘并打开
+  await exec(`document.querySelector('.filetree-more-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), { label: '⋮ 菜单弹出' });
+  const menuItems = await exec(`[...document.querySelectorAll('.filetree-menu-item')].map((el) => el.textContent)`);
+  const menuOk =
+    menuItems.includes('新建文件') &&
+    menuItems.includes('搜索') &&
+    menuItems.some((label) => /Finder|资源管理器/.test(label)) &&
+    menuItems.includes('打开文件夹…') &&
+    menuItems.includes('刷新');
+  check('⋮ 菜单包含五项操作', menuOk === true, JSON.stringify(menuItems));
+  const revealLabel = menuItems.find((label) => /Finder|资源管理器/.test(label));
+  check('显示项按平台命名', /Finder|资源管理器/.test(String(revealLabel)) && !/YAML/.test(String(revealLabel)), revealLabel);
+  await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '新建文件').click()`);
+  const newFileOnDisk = await waitFor(
+    () => (existsSync(join(root, '未命名.md')) || existsSync(join(root, '未命名-2.md')) ? true : null),
+    { label: '新建文件落盘', timeout: 10000 }
+  ).catch(() => null);
+  const newFileTab = await exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`);
+  check('新建文件已落盘并打开', newFileOnDisk === true && String(newFileTab).startsWith('未命名'), `tab=${newFileTab} disk=${newFileOnDisk}`);
+
+  // 侧栏搜索：区分大小写 / 全单词 / 正则表达式三个开关都生效
+  writeFileSync(
+    join(root, 'searchable.md'),
+    '# 搜索样例\n\nMAIL 里含 AI 但不是独立单词\n\n这里说的是 AI 智能体\n\nApple 是大写开头\n\nbanana 是水果\n',
+    'utf-8'
+  );
+  await exec(`document.querySelector('.sidebar-search-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.search-input'))`), { label: '搜索面板打开' });
+  const typeSearch = (value) =>
+    exec(`(() => {
+      const input = document.querySelector('.search-input');
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(value)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    })()`);
+  // 默认不区分大小写：apple 能同时命中 Apple
+  await typeSearch('apple');
+  const caseInsensitiveHit = await waitFor(
+    () =>
+      exec(`document.querySelector('.search-hit')?.textContent ?? ''`).then((hit) => (hit === 'Apple' ? hit : null)),
+    { label: '不区分大小写命中 Apple', timeout: 8000 }
+  ).catch(() => null);
+  check('默认不区分大小写', caseInsensitiveHit === 'Apple', String(caseInsensitiveHit));
+  // 打开「区分大小写」：apple 不再命中 Apple
+  await exec(`document.querySelector('.search-option').click()`);
+  const caseSensitiveProbe = await waitFor(
+    () =>
+      exec(
+        `(() => {
+          const n = document.querySelectorAll('.search-match').length;
+          const status = document.querySelector('.search-status')?.textContent ?? '';
+          const cls = document.querySelector('.search-option')?.className ?? '';
+          const q = document.querySelector('.search-input')?.value ?? '';
+          return n + '|' + status + '|' + cls + '|' + q;
+        })()`
+      ).then((s) => (s.startsWith('0|') ? s : null)),
+    { label: '区分大小写后无匹配', timeout: 8000 }
+  ).catch(() => 'timeout');
+  check('区分大小写开关生效', typeof caseSensitiveProbe === 'string' && caseSensitiveProbe.startsWith('0|'), String(caseSensitiveProbe));
+  await exec(`document.querySelector('.search-option').click()`);
+  // 全单词：AI 不命中 MAIL，只命中两处独立单词
+  await typeSearch('AI');
+  await exec(`[...document.querySelectorAll('.search-option')][1].click()`);
+  const wholeWordHits = await waitFor(
+    () =>
+      exec(`[...document.querySelectorAll('.search-hit')].map((el) => el.textContent).join(',')`).then((hits) =>
+        hits === 'AI,AI' ? hits : null
+      ),
+    { label: '全单词只命中独立的 AI', timeout: 8000 }
+  ).catch(() => null);
+  check('全单词开关生效（AI 不命中 MAIL）', wholeWordHits === 'AI,AI', String(wholeWordHits));
+  await exec(`[...document.querySelectorAll('.search-option')][1].click()`);
+  // 正则：b[an]+a? 之类；用 b[ao]na 匹配 banana
+  await typeSearch('b[ao]na');
+  await exec(`[...document.querySelectorAll('.search-option')][2].click()`);
+  const regexHit = await waitFor(
+    () => exec(`document.querySelector('.search-hit')?.textContent ?? ''`).then((hit) =>
+      /^b[ao]na$/.test(hit) ? hit : null
+    ),
+    { label: '正则匹配 banana', timeout: 8000 }
+  ).catch(() => null);
+  check('正则表达式开关生效', regexHit !== null, String(regexHit));
+  // 点击匹配行：打开对应文件
+  const matchFileName = await exec(
+    `document.querySelector('.search-file-name')?.childNodes[0]?.textContent?.trim() ?? ''`
+  );
+  await exec(`document.querySelector('.search-match').click()`);
+  const jumpedTab = await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`).then((name) =>
+      name === matchFileName ? name : null
+    ),
+    { label: '搜索结果打开文件', timeout: 15000 }
+  ).catch(() => null);
+  check('点击搜索结果打开对应文件', jumpedTab !== null, `file=${matchFileName} tab=${jumpedTab}`);
+  await exec(`document.querySelector('.search-close')?.click()`);
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

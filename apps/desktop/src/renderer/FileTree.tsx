@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { FsEntry } from '@ai-md-editor/shared';
 
 /** 文件树组件的属性 */
@@ -11,6 +11,16 @@ interface FileTreeProps {
   onOpenFile: (path: string, name: string) => void;
   /** 请求选择文件夹（弹出系统对话框） */
   onChooseFolder: () => void;
+  /** 在目录里新建文件（⋮ 菜单） */
+  onCreateFile: () => void;
+  /** 在文件管理器中显示当前目录（⋮ 菜单） */
+  onRevealFolder: () => void;
+  /** 打开侧栏搜索面板（⋮ 菜单） */
+  onOpenSearch: () => void;
+  /** 刷新文件树（⋮ 菜单） */
+  onRefresh: () => void;
+  /** 刷新信号：数值变化时重新加载根目录（⋮ 菜单「刷新」用） */
+  refreshToken: number;
 }
 
 /** 树节点：目录条目 + 展开状态 + 已加载子项 */
@@ -20,12 +30,17 @@ interface DirNode {
   children: FsEntry[];
 }
 
+/** Windows 显示「资源管理器」，macOS 显示「Finder」 */
+function isWindows(): boolean {
+  return typeof navigator !== 'undefined' && /Win/i.test(navigator.platform);
+}
+
 /**
  * 文件树组件（左侧文件管理器）。
  * - 显示当前打开文档所在目录的子目录与 Markdown 文件
  * - 目录可展开/折叠（懒加载子级）
  * - 点击文件触发打开
- * - 底部固定「打开文件夹」入口（显示当前目录名，点击可切换）
+ * - 底部固定「打开文件夹」按钮 + ⋮ 操作菜单（新建文件/搜索/显示/打开/刷新）
  *
  * 无障碍：每个条目都是真正的 <button>（Enter/Space 天然可用），
  * 容器统一处理方向键导航，键盘用户可以完整浏览整棵树。
@@ -34,11 +49,21 @@ export default function FileTree({
   rootDir,
   activePath,
   onOpenFile,
-  onChooseFolder
+  onChooseFolder,
+  onCreateFile,
+  onRevealFolder,
+  onOpenSearch,
+  onRefresh,
+  refreshToken
 }: FileTreeProps): JSX.Element {
   // 已展开目录的状态表（path → 节点信息），刷新用计数器驱动
   const [dirs, setDirs] = useState<Map<string, DirNode>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
+  // ⋮ 菜单开关
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // 上一次的刷新信号（跳过首次挂载）
+  const lastRefreshToken = useRef(refreshToken);
 
   /** 展开目录：读取其子项 */
   const expandDir = useCallback(
@@ -77,6 +102,38 @@ export default function FileTree({
     }
   }, [rootDir, expandDir]);
 
+  // 「刷新」信号变化时重新读取根目录（保留展开状态，只更新列表）
+  useEffect(() => {
+    if (lastRefreshToken.current === refreshToken) return;
+    lastRefreshToken.current = refreshToken;
+    if (rootDir) void expandDir(rootDir);
+  }, [refreshToken, rootDir, expandDir]);
+
+  // ⋮ 菜单点击外部或 Esc 关闭
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onPointerDown = (event: MouseEvent): void => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKeydown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeydown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeydown);
+    };
+  }, [menuOpen]);
+
+  /** 执行 ⋮ 菜单动作并关闭菜单 */
+  const runMenuAction = (action: () => void): void => {
+    setMenuOpen(false);
+    action();
+  };
+
   /**
    * 自动定位当前文档：逐级展开父目录，并把高亮项滚动到可见区域。
    * 「显示 → 在文件树中显示」和普通打开文件都走这条路径。
@@ -111,7 +168,7 @@ export default function FileTree({
    * - →：展开目录（已展开则进入第一个子项）
    * - ←：折叠目录（已折叠则回到父目录）
    */
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
     const keys = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'];
     if (!keys.includes(event.key)) return;
     const root = containerRef.current;
@@ -198,13 +255,39 @@ export default function FileTree({
     );
   };
 
+  /** ⋮ 菜单（仅打开目录后显示） */
+  const renderMenu = (): JSX.Element | null => {
+    if (!menuOpen) return null;
+    return (
+      <div className="filetree-menu" role="menu">
+        <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onCreateFile)}>
+          新建文件
+        </button>
+        <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onOpenSearch)}>
+          搜索
+        </button>
+        <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onRevealFolder)}>
+          {isWindows() ? '在资源管理器中显示' : '在 Finder 中显示'}
+        </button>
+        <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onChooseFolder)}>
+          打开文件夹…
+        </button>
+        <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onRefresh)}>
+          刷新
+        </button>
+      </div>
+    );
+  };
+
   if (!rootDir) {
     return (
       <div className="filetree">
         <div className="filetree-empty">打开文件夹以浏览文件</div>
-        <button className="filetree-open-btn" onClick={onChooseFolder} title="打开文件夹">
-          打开文件夹…
-        </button>
+        <div className="filetree-footer">
+          <button className="filetree-open-btn" onClick={onChooseFolder} title="打开文件夹">
+            打开文件夹…
+          </button>
+        </div>
       </div>
     );
   }
@@ -216,9 +299,27 @@ export default function FileTree({
       <div className="filetree-body" ref={containerRef} onKeyDown={handleKeyDown} role="tree">
         {dirs.get(rootDir)?.children.map((child) => renderEntry(child, 0))}
       </div>
-      <button className="filetree-open-btn" onClick={onChooseFolder} title={`切换文件夹：${rootDir}`}>
-        {rootName}
-      </button>
+      <div className="filetree-footer" ref={menuRef}>
+        <button className="filetree-open-btn" onClick={onChooseFolder} title={`切换文件夹：${rootDir}`}>
+          {rootName}
+        </button>
+        <button
+          type="button"
+          className="filetree-more-btn"
+          aria-label="文件树操作"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          title="更多操作"
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+            <circle cx="8" cy="3" r="1.4" fill="currentColor" />
+            <circle cx="8" cy="8" r="1.4" fill="currentColor" />
+            <circle cx="8" cy="13" r="1.4" fill="currentColor" />
+          </svg>
+        </button>
+        {renderMenu()}
+      </div>
     </div>
   );
 }

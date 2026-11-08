@@ -16,6 +16,7 @@ import {
 } from '@ai-md-editor/shared';
 import { applySourceFormat, sourceTableContext } from '../src/renderer/sourceActions';
 import { extractMath, restoreMath } from '../src/main/mathExport';
+import { buildLineMatcher } from '../src/main/searcher';
 
 let total = 0;
 let failed = 0;
@@ -184,6 +185,43 @@ ok(
   badTex.includes('katex-error'),
   badTex.slice(0, 80)
 );
+
+// ===== 侧栏搜索的行匹配器 =====
+const makeInput = (overrides: Partial<Parameters<typeof buildLineMatcher>[0]> = {}) => ({
+  root: '',
+  query: 'AI',
+  caseSensitive: false,
+  wholeWord: false,
+  regex: false,
+  ...overrides
+});
+
+const plain = buildLineMatcher(makeInput())?.('MAIL 里含 AI 智能体') ?? [];
+equal('默认不区分大小写且字面量匹配', plain.length, 2);
+
+const caseSensitive = buildLineMatcher(makeInput({ caseSensitive: true }))?.('mail 里含 AI 智能体') ?? [];
+equal('区分大小写只命中大写 AI', caseSensitive.length, 1);
+
+const wholeWord = buildLineMatcher(makeInput({ wholeWord: true }))?.('MAIL AI') ?? [];
+equal('全单词不命中 MAIL 里的 AI', wholeWord.length, 1);
+ok(
+  '全单词命中的列指向独立单词',
+  wholeWord[0]?.column === 5 && wholeWord[0]?.length === 2,
+  JSON.stringify(wholeWord)
+);
+
+const literal = buildLineMatcher(makeInput({ query: 'a.b' }))?.('axb a.b') ?? [];
+equal('普通文本把 . 当字面量', literal.length, 1);
+
+const regexMode = buildLineMatcher(makeInput({ query: 'b[ao]na', regex: true }))?.('banana') ?? [];
+ok(
+  '正则模式命中 banana 里的 bana',
+  regexMode[0]?.column === 0 && regexMode[0]?.length === 4,
+  JSON.stringify(regexMode)
+);
+
+const invalidRegex = buildLineMatcher(makeInput({ query: '[', regex: true }));
+equal('非法正则返回 null', invalidRegex, null);
 
 // ===== 结果 =====
 console.log(`\n单元测试：${total - failed}/${total} 通过`);

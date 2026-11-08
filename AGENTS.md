@@ -181,6 +181,9 @@ ai-md-editor/
 | 33 | 原生菜单重建前比较 `MenuViewState` 签名，未变化直接跳过；`useMenuBridge` 的分发表只构造一次并用代理读取最新回调 |
 | 34 | 导出公式渲染：`extractMath` 先把 `$...$` / `$$...$$` 换成占位符再交给 marked（防止 TeX 里的 `*`/`_` 被当 Markdown），渲染后用 KaTeX 还原；代码段用掩码保护；`katex.min.css` 与 woff2 字体 data URI 内联（仅含公式的文档才嵌入）；Word 保留 TeX 原文 |
 | 35 | 侧栏是纵向 flex：树区/大纲区自身滚动（`flex:1; min-height:0; overflow-y:auto`），`.sidebar` 本身 `overflow:hidden`；「打开文件夹」固定在底部，不要移回顶部 |
+| 36 | 主题按钮是**单击直接切换**浅色/深色（不做下拉选择），写回 `settings.themeId` 并同步 `data-theme` |
+| 37 | 侧栏搜索在主进程执行（`main/searcher.ts`）：渲染层只发 `search:folder` IPC；扫描跳过 node_modules/.git/隐藏目录/img，单文件 2MB、结果 50 文件/每文件 20 行上限；行匹配器是纯函数（`buildLineMatcher`，可单测），全单词用第 1 个捕获组修正列与长度 |
+| 38 | 文件树 ⋮ 菜单依赖 `rootDir`（未打开目录不显示）；「刷新」走 `refreshToken` 计数信号驱动 FileTree 重读根目录，不整树重置 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -207,6 +210,7 @@ ai-md-editor/
 | 打开文件校验 | `apps/desktop/src/main/ipc.ts` `readTextFile` | 先 `stat`：> 20 MB 或含 NUL 字节（二进制）直接拒绝并弹窗说明；不要静默返回「已取消」 |
 | 拖拽取路径 | `apps/desktop/src/preload/index.ts` | `getPathForFile(file)` = `webUtils.getPathForFile`；渲染层据此区分 图片 / 文件夹 / 文档 |
 | 导出公式 | `main/mathExport.ts` + `main/export.ts` | 提取/还原纯函数（可单测）；块级公式先于行内提取；`throwOnError:false` 下非法 TeX 渲染成 `katex-error` 标记而非抛异常 |
+| 侧栏搜索 | `main/searcher.ts` + `renderer/SidebarSearch.tsx` | 主进程扫描返回按文件分组的匹配（行/列/长度）；面板 300ms 防抖自动搜索；点击结果经 App 的挂起跳转定位（源码模式设光标，WYSIWYG 用 `selectTextRange`） |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
 
@@ -245,6 +249,7 @@ ai-md-editor/
 | GBK 文档保存后变乱码 | 用 `TextEncoder` 原样写回 GBK 是不可能的（只支持 UTF-8） | 保存统一转 UTF-8，并把标签编码与状态栏同步更新为 UTF-8 |
 | 导出 PDF 公式显示成 `$...$` 原文 | marked 不认识 TeX，`$...$` 原样输出且 TeX 里的 `*`/`_` 还会被当 Markdown 改写 | 导出前用 `extractMath` 换占位符，marked 后用 KaTeX 还原；代码段掩码保护；CSS+字体 data URI 内联（`main/export.ts`） |
 | 冒烟脚本里 `require.resolve('katex/...')` 报找不到 | `require.resolve` 相对**模块文件位置**解析，/tmp 下的脚本解析不到项目 node_modules（真实主进程产物在项目内，不受影响） | 冒烟脚本用 `NODE_PATH=<项目>/node_modules` 或放到项目目录内运行 |
+| E2E 后段搜索/⋮ 菜单断言莫名失败 | 编码测试打开过别的目录的文档，`treeRoot` 被切到 tmpdir，搜索扫不到测试目录 | 测试前重新 stub `dialog.showOpenDialog` 返回测试根目录并点击 `.filetree-open-btn`；断言「落盘」要用 `waitFor` 轮询而不是单击后立即 `existsSync` |
 | 编辑器内行内公式上标顶进上一行 | KaTeX 默认 1.21em，行内公式的上标/根号高度超过 1.75 行距的行框 | `.katex` 压到 1.05em，含公式的行用 `:has([data-type='math_inline'])` 放大行距（`global.css`） |
 | 入口 chunk 3 MB，冷启动慢 | 入口静态 `import` 了编辑器包（含 Milkdown/Shiki/Mermaid/KaTeX），连 `NO_TABLE_CONTEXT` 这种小常量都会把整包拉进来 | 编辑器改为 `await import(...)`；渲染层常量放 `constants.ts`，只从编辑器包导入**类型** |
 | 纯函数单测在 Windows CI 跑不起来 | 直接用 Node 跑 `.ts` 依赖运行器/版本 | `test/run-unit.cjs` 用 esbuild（随 vite 安装）打包成 CJS 再执行 |

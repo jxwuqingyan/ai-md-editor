@@ -8,6 +8,7 @@ import { dialog, ipcMain, BrowserWindow, clipboard, shell } from 'electron';
 import { readFile, writeFile, mkdir, readdir, rename, stat } from 'node:fs/promises';
 import { join, basename, dirname, extname } from 'node:path';
 import { marked } from 'marked';
+import { searchFolder } from './searcher';
 import type {
   OpenFileResult,
   ReadFileResult,
@@ -17,6 +18,8 @@ import type {
   RecentFile,
   FsEntry,
   ReadDirResult,
+  CreateFileResult,
+  SearchFolderInput,
   ExportInput,
   ExportResult,
   RenameFileInput,
@@ -309,11 +312,33 @@ async function handleReadDir(_win: BrowserWindow | null, dirPath: string): Promi
 }
 
 /**
+ * 在目录里新建 Markdown 文件（文件树 ⋮ 菜单的「新建文件」）。
+ * 命名「未命名.md」，与现有文件重名时追加序号（未命名-2.md、未命名-3.md…）。
+ */
+async function handleCreateFile(_win: BrowserWindow | null, dirPath: string): Promise<CreateFileResult> {
+  try {
+    const base = '未命名';
+    let candidate = join(dirPath, `${base}.md`);
+    for (let n = 2; n <= 99; n += 1) {
+      try {
+        await stat(candidate);
+        candidate = join(dirPath, `${base}-${n}.md`); // 已存在则换下一个名字
+      } catch {
+        break; // 不存在，可用
+      }
+    }
+    await writeFile(candidate, '', 'utf-8');
+    return { ok: true, path: candidate, error: null };
+  } catch (err) {
+    return { ok: false, path: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * 弹出文件夹选择对话框（文件树打开目录用）。
  */
 async function handleChooseFolder(win: BrowserWindow | null): Promise<{ canceled: boolean; path: string | null }> {
-  const options = { properties: ['openDirectory' as const] };
-  const result = win
+  const options = { properties: ['openDirectory' as const] };  const result = win
     ? await dialog.showOpenDialog(win, options)
     : await dialog.showOpenDialog(options);
   if (result.canceled || result.filePaths.length === 0) {
@@ -490,6 +515,10 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.ReadDir, (event, dirPath: string) =>
     handleReadDir(BrowserWindow.fromWebContents(event.sender), dirPath)
   );
+  ipcMain.handle(IpcChannel.CreateFile, (event, dirPath: string) =>
+    handleCreateFile(BrowserWindow.fromWebContents(event.sender), dirPath)
+  );
+  ipcMain.handle(IpcChannel.SearchFolder, (_event, input: SearchFolderInput) => searchFolder(input));
   ipcMain.handle(IpcChannel.ChooseFolder, (event) =>
     handleChooseFolder(BrowserWindow.fromWebContents(event.sender))
   );
