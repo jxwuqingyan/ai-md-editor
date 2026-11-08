@@ -82,4 +82,9 @@ export interface CreateEditorOptions {
    * 只在「是否在表格 / 是否在表头」真正变化时触发，避免每次按键都刷新菜单。
    */
   onTableContext?: (context: TableContext) => void;
+  /**
+   * 斜杠菜单「图片」条目确认后的回调：由渲染层打开系统文件选择器，
+   * 选中的图片复制到文档同级 img/ 目录并插入相对路径引用。
+   */
+  onPickImage?: () => void;
 }

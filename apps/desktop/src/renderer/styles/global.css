@@ -2012,3 +2012,77 @@ button:focus-visible {
   font-variant-numeric: tabular-nums;
   user-select: none;
 }
+
+/* ===== 链接二级表单（文本 + 链接地址 + 确定，语雀式） ===== */
+.slash-form {
+  position: fixed;
+  z-index: 1210;
+  width: 240px;
+  background: var(--bg-panel, #fff);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.06);
+  padding: 10px 12px 12px;
+  font-family: var(--font-sans);
+}
+
+.slash-form-title {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.slash-form-field {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.slash-form-label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  margin-bottom: 3px;
+  user-select: none;
+}
+
+.slash-form-input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border, #dcdcdc);
+  border-radius: 6px;
+  background: var(--bg-panel, #fff);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.slash-form-input:focus {
+  border-color: var(--accent, #4a7dff);
+}
+
+.slash-form-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.slash-form-submit {
+  margin-top: 2px;
+  height: 26px;
+  padding: 0 14px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent, #4a7dff);
+  color: #fff;
+  font-size: 12px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+}
+
+.slash-form-submit:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

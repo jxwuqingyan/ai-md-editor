@@ -713,6 +713,7 @@ export default function App(): JSX.Element {
                   onChange={handleChange}
                   onReady={handleReady}
                   onTableContext={updateTableContext}
+                  onPickImage={chooseImage}
                 />
               ) : (
                 <textarea

@@ -9,6 +9,7 @@
  * 继续输入可过滤（匹配中文名或拼音缩写别名），↑↓ 选择、Enter 确认、Esc 关闭；
  * 确认时先删掉「/过滤词」，再统一走 format()（与工具栏 / 原生菜单同一条命令链路），
  * 保证撤销历史、表格上下文等行为完全一致。
+ * 二级面板：表格 → 行列网格；链接 → 文本/地址表单；图片 → 交还渲染层打开文件选择器。
  *
  * 触发规则刻意保守：光标必须停在文本块内、无选区、不在行内代码里，
  * 且「/」的前一个字符不能是字母数字、冒号或斜杠——避免输入网址（https://）、
@@ -119,7 +120,7 @@ const ITEMS: SlashItem[] = [
     action: 'snippet',
     payload: '![图片](url)',
     kind: 'insert',
-    hint: '相对路径'
+    hint: '本地文件'
   },
   {
     id: 'link',
@@ -206,10 +207,16 @@ function esc(text: string): string {
 /** 插件选项：确认条目后统一走这条格式化入口（实例的 format 实现） */
 export interface SlashMenuOptions {
   format: (action: FormatAction, payload?: number | string) => void;
+  /** 「图片」条目确认后打开系统文件选择器（由实例注入；缺省时退回插入占位语法） */
+  pickImage?: () => void;
 }
 
 /** 表格条目 id（二级行列网格挂在它上面） */
 const TABLE_ID = 'insertTable';
+/** 链接条目 id（二级表单挂在它上面） */
+const LINK_ID = 'link';
+/** 图片条目 id（确认后交还渲染层打开文件选择器） */
+const IMAGE_ID = 'image';
 /** 二级网格的单元格规模：最多可选 8 列 × 6 行 */
 const SUB_MAX_COLS = 8;
 const SUB_MAX_ROWS = 6;
@@ -222,9 +229,13 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
   let panel: HTMLDivElement | null = null;
   /** 表格二级行列网格面板 */
   let subPanel: HTMLDivElement | null = null;
+  /** 链接二级表单面板（文本 + 链接地址） */
+  let formPanel: HTMLDivElement | null = null;
   let isOpen = false;
   /** 二级网格是否展开 */
   let subOpen = false;
+  /** 链接表单是否展开（展开时焦点在输入框上，编辑器失焦不算关菜单信号） */
+  let formOpen = false;
   /** 二级网格当前选中的行数 / 列数 */
   let subRows = 3;
   let subCols = 3;
@@ -241,9 +252,9 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     panel.setAttribute('aria-label', '快速插入菜单');
     // 按下不抢焦点：否则编辑器 blur 会先把菜单关掉
     panel.addEventListener('mousedown', (event) => event.preventDefault());
-    // 悬停表格条目时展开二级网格，悬停其他条目时收回
+    // 悬停表格条目时展开二级网格，悬停其他条目时收回；表单展开期间不抢戏
     panel.addEventListener('mouseover', (event) => {
-      if (!isOpen) return;
+      if (!isOpen || formOpen) return;
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-slash-id],[data-slash-index]');
       if (!target) return;
       if (target.dataset['slashId'] === TABLE_ID || visible[Number(target.dataset['slashIndex'])]?.id === TABLE_ID) {
@@ -264,8 +275,20 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       if (!item) return;
       if (item.id === TABLE_ID) {
         // 表格不直接插入：第一次点展开二级网格，再点按当前选中行列插入
+        closeForm();
         if (subOpen) applyTable(view);
         else openSub();
+        return;
+      }
+      if (item.id === LINK_ID) {
+        // 链接不直接插入：展开二级表单填文本与地址
+        closeSub();
+        if (!formOpen) openForm();
+        return;
+      }
+      if (item.id === IMAGE_ID) {
+        // 图片不直接插入：打开系统文件选择器
+        applyItemImage(view);
         return;
       }
       closeSub();
@@ -282,6 +305,7 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
   const hidePanel = (): void => {
     if (panel) panel.style.display = 'none';
     closeSub();
+    closeForm();
     isOpen = false;
   };
 
@@ -354,6 +378,7 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
   };
 
   const openSub = (): void => {
+    closeForm();
     subOpen = true;
     subRows = 3;
     subCols = 3;
@@ -375,6 +400,127 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     if (cursor >= from) view.dispatch(view.state.tr.delete(from, cursor));
     options.format('insertTable', `${subCols}x${subRows}`);
     saveRecent(TABLE_ID);
+  };
+
+  // —— 链接二级表单（语雀式：填「文本」与「链接地址」后插入） ——
+
+  const ensureFormPanel = (): HTMLDivElement => {
+    if (formPanel) return formPanel;
+    formPanel = document.createElement('div');
+    formPanel.className = 'slash-form';
+    formPanel.setAttribute('role', 'form');
+    formPanel.setAttribute('aria-label', '插入链接');
+    // 与表格网格不同：输入框必须能拿焦点，只挡面板空白处的 mousedown
+    formPanel.addEventListener('mousedown', (event) => {
+      const target = event.target as HTMLElement;
+      if (!(target instanceof HTMLInputElement) && !(target instanceof HTMLButtonElement)) {
+        event.preventDefault();
+      }
+    });
+    formPanel.addEventListener('click', (event) => {
+      if ((event.target as HTMLElement).closest('.slash-form-submit')) submitLink();
+    });
+    // 焦点在输入框上时键盘事件只到这里：Enter 确认、Esc 收回表单
+    formPanel.addEventListener('keydown', (event) => {
+      if (event.isComposing || event.key === 'Process') return;
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        submitLink();
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        closeForm();
+        viewRef?.focus();
+      }
+    });
+    formPanel.addEventListener('input', syncFormSubmit);
+    // 与主面板挂同一宿主（.app），保证主题变量可达
+    const host = document.querySelector('.app');
+    (host instanceof HTMLElement ? host : document.body).appendChild(formPanel);
+    return formPanel;
+  };
+
+  /** 地址为空时禁用确定按钮 */
+  const syncFormSubmit = (): void => {
+    if (!formPanel) return;
+    const url = formPanel.querySelector<HTMLInputElement>('[data-form="url"]');
+    const submit = formPanel.querySelector<HTMLButtonElement>('.slash-form-submit');
+    if (submit) submit.disabled = !url?.value.trim();
+  };
+
+  /** 把表单定位到链接条目右侧；放不下时翻到左侧 */
+  const positionForm = (): void => {
+    if (!formPanel || !panel || formPanel.style.display === 'none') return;
+    const index = visible.findIndex((item) => item.id === LINK_ID);
+    const anchor =
+      (index >= 0 ? panel.querySelector<HTMLElement>(`[data-slash-index="${index}"]`) : null) ??
+      panel.querySelector<HTMLElement>('[data-slash-index]');
+    if (!anchor) return;
+    const a = anchor.getBoundingClientRect();
+    const rect = formPanel.getBoundingClientRect();
+    const margin = 8;
+    let left = a.right + 6;
+    if (left + rect.width + margin > window.innerWidth) left = a.left - rect.width - 6;
+    if (left < margin) left = margin;
+    let top = Math.min(a.top, window.innerHeight - rect.height - margin);
+    if (top < margin) top = margin;
+    formPanel.style.left = `${Math.round(left)}px`;
+    formPanel.style.top = `${Math.round(top)}px`;
+  };
+
+  /** 展开链接表单（同时收回表格网格） */
+  const openForm = (): void => {
+    closeSub();
+    formOpen = true;
+    const node = ensureFormPanel();
+    node.innerHTML =
+      '<div class="slash-form-title">链接</div>' +
+      '<label class="slash-form-field"><span class="slash-form-label">文本</span>' +
+      '<input class="slash-form-input" data-form="text" placeholder="链接文本"></label>' +
+      '<label class="slash-form-field"><span class="slash-form-label">链接</span>' +
+      '<input class="slash-form-input" data-form="url" placeholder="链接地址"></label>' +
+      '<button type="button" class="slash-form-submit" disabled>确定</button>';
+    node.style.display = '';
+    positionForm();
+    node.querySelector<HTMLInputElement>('[data-form="text"]')?.focus();
+  };
+
+  const closeForm = (): void => {
+    formOpen = false;
+    if (formPanel) formPanel.style.display = 'none';
+  };
+
+  /** 确认链接：删掉「/过滤词」→ 插入 [文本](地址) → 关闭全部面板并还焦点给编辑器 */
+  const submitLink = (): void => {
+    const view = viewRef;
+    if (!view || !trigger || !formPanel) return;
+    const urlInput = formPanel.querySelector<HTMLInputElement>('[data-form="url"]');
+    const textInput = formPanel.querySelector<HTMLInputElement>('[data-form="text"]');
+    const url = urlInput?.value.trim() ?? '';
+    if (!url) return;
+    const label = textInput?.value.trim() || url;
+    const cursor = view.state.selection.from;
+    const from = trigger.from;
+    trigger = null;
+    hidePanel();
+    if (cursor >= from) view.dispatch(view.state.tr.delete(from, cursor));
+    // 地址含空格或括号时用尖括号包裹，避免 Markdown 解析在半截断开
+    const safeUrl = /[\s()]/.test(url) ? `<${url}>` : url;
+    options.format('snippet', `[${label}](${safeUrl})`);
+    saveRecent(LINK_ID);
+    view.focus();
+  };
+
+  /** 确认图片：删掉「/过滤词」→ 交还渲染层打开文件选择器（缺省时退回占位语法） */
+  const applyItemImage = (view: EditorView): void => {
+    if (!trigger) return;
+    const cursor = view.state.selection.from;
+    const from = trigger.from;
+    trigger = null;
+    hidePanel();
+    if (cursor >= from) view.dispatch(view.state.tr.delete(from, cursor));
+    if (options.pickImage) options.pickImage();
+    else options.format('snippet', '![图片](url)');
+    saveRecent(IMAGE_ID);
   };
 
   /** 把面板定位到「/」下方，越界时收进窗口 / 向上翻转 */
@@ -451,11 +597,12 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     positionPanel(view);
     // 键盘移动高亮后保证可见
     node.querySelector('.slash-active')?.scrollIntoView({ block: 'nearest' });
-    // 主面板重渲染（过滤变化 / 键盘移动）后同步二级网格：表格不在可见项里就收回
+    // 主面板重渲染（过滤变化 / 键盘移动）后同步二级面板：表格不在可见项里就收回网格
     if (subOpen) {
       if (visible.some((item) => item.id === TABLE_ID)) renderSub();
       else closeSub();
     }
+    if (formOpen) positionForm();
   };
 
   /** 插入区 / 过滤态的单行条目（图标带圆角方块底座；表格带 › 二级箭头） */
@@ -463,7 +610,7 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     const icon = item.icon.startsWith('<svg')
       ? `<span class="slash-icon">${item.icon}</span>`
       : `<span class="slash-glyph">${esc(item.icon)}</span>`;
-    const tail = item.id === TABLE_ID
+    const tail = item.id === TABLE_ID || item.id === LINK_ID
       ? '<span class="slash-item-arrow">›</span>'
       : item.hint
         ? `<span class="slash-item-hint">${esc(item.hint)}</span>`
@@ -497,6 +644,7 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     if (filterChanged) {
       activeIndex = 0;
       closeSub();
+      closeForm();
     }
     renderPanel(view);
   };
@@ -511,15 +659,26 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
         view: (view) => {
           viewRef = view;
           const onBlur = (): void => {
-            if (isOpen) hidePanel();
+            // 表单展开时焦点转移到输入框属正常流程，不作为关闭信号
+            if (isOpen && !formOpen) hidePanel();
+          };
+          // 表单展开期间编辑器已失焦，靠全局捕获点击关闭：点到面板外一律整体收起
+          const onDocMouseDown = (event: MouseEvent): void => {
+            if (!formOpen) return;
+            const target = event.target as Node | null;
+            if (target && formPanel?.contains(target)) return;
+            if (target && panel?.contains(target)) return;
+            hidePanel();
           };
           const onScroll = (): void => {
             if (isOpen && trigger) {
               positionPanel(view);
               if (subOpen) positionSub();
+              if (formOpen) positionForm();
             }
           };
           view.dom.addEventListener('blur', onBlur);
+          document.addEventListener('mousedown', onDocMouseDown, true);
           // 编辑器内滚动（捕获：内层容器滚动也会触发）时跟随「/」的位置
           view.dom.addEventListener('scroll', onScroll, true);
           return {
@@ -536,8 +695,13 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
                 subPanel.remove();
                 subPanel = null;
               }
+              if (formPanel) {
+                formPanel.remove();
+                formPanel = null;
+              }
               viewRef = null;
               view.dom.removeEventListener('blur', onBlur);
+              document.removeEventListener('mousedown', onDocMouseDown, true);
               view.dom.removeEventListener('scroll', onScroll, true);
             }
           };
@@ -547,6 +711,14 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
             if (!isOpen || !trigger) return false;
             // 中文输入法组合期间不拦截（Enter 上屏、方向键选候选）
             if (event.isComposing || event.key === 'Process') return false;
+            // 表单展开时焦点在输入框上，这里收不到键盘事件；保险起见只放行 Esc
+            if (formOpen) {
+              if (event.key === 'Escape') {
+                closeForm();
+                return true;
+              }
+              return false;
+            }
             // 二级网格展开时：方向键调整行列，Enter 插入，Esc 先收回网格
             if (subOpen) {
               switch (event.key) {
@@ -590,6 +762,17 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
                 // 高亮在表格上时 Enter 先展开二级网格（再按确认插入）
                 if (item && item.id === TABLE_ID) {
                   openSub();
+                  return true;
+                }
+                // 高亮在链接上时 Enter 展开二级表单
+                if (item && item.id === LINK_ID) {
+                  closeSub();
+                  openForm();
+                  return true;
+                }
+                // 高亮在图片上时 Enter 打开文件选择器
+                if (item && item.id === IMAGE_ID) {
+                  applyItemImage(view);
                   return true;
                 }
                 if (item) applyItem(view, item);

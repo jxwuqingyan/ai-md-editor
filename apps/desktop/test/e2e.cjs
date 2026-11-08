@@ -1273,13 +1273,23 @@ async function runTests() {
   const listCount = await exec(`document.querySelectorAll('.slash-list .slash-item').length`);
   check('斜杠菜单默认条目齐全', gridCount === 13 && listCount === 4, `grid=${gridCount} list=${listCount}`);
 
-  // 输入「图」过滤到图片一项，点击插入图片语法
+  // 输入「图」过滤到图片一项。「图片」条目现在会打开系统文件选择器（原生对话框无法自动化）：
+  // 尝试把 IPC 桩掉再点击验证整条链路；桩不上（contextBridge 只读等）就 Esc 跳过点击。
   win.webContents.insertText('图');
   await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到图片一项' });
-  await exec(`document.querySelector('.slash-menu .slash-item').click()`);
-  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror img'))`), { label: '图片语法已插入' });
-  const afterImage = await exec(`document.querySelector('.ProseMirror p')?.textContent ?? ''`);
-  check('确认后斜杠与过滤词被清除', !afterImage.includes('/') && !afterImage.includes('图'), afterImage);
+  const stubbed = await exec(
+    `(() => { try { window.api.chooseImage = async () => ({ relativePath: 'img/slash-e2e.png', error: null }); return String(window.api.chooseImage).includes('slash-e2e'); } catch { return false; } })()`
+  );
+  if (stubbed) {
+    await exec(`document.querySelector('.slash-menu .slash-item').click()`);
+    await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror img'))`), { label: '图片语法已插入' });
+    const afterImage = await exec(`document.querySelector('.ProseMirror p')?.textContent ?? ''`);
+    check('确认后斜杠与过滤词被清除', !afterImage.includes('/') && !afterImage.includes('图'), afterImage);
+  } else {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+    check('图片条目走文件选择器（桩不可用，跳过原生对话框点击）', true);
+  }
 
   // 键盘路径：输入「/格」过滤到表格一项，Enter 展开二级行列网格，再按行列调整后确认
   await clickSelector('.ProseMirror p', 0);
@@ -1335,7 +1345,113 @@ async function runTests() {
   );
   check('点击格子按 2 行 × 5 列插入表格', table2Rows === 2, `rows=${table2Rows}`);
 
-  // 再次输入「/」应出现「最近使用」（图片 + 表格），Esc 关闭菜单
+  // ===== 10.3 链接二级表单：填「文本」与「链接地址」后插入 [文本](地址) =====
+  writeFileSync(join(root, '链接.md'), '# 链接\n\n一段正文\n', 'utf-8');
+  await exec(`document.querySelector('.filetree-more-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), {
+    label: '⋮ 菜单弹出（链接用例）'
+  });
+  await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '刷新').click()`);
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.tree-name')].some((el) => el.textContent === '链接.md')`),
+    { label: '文件树出现链接样例', timeout: 8000 }
+  );
+  await exec(
+    `[...document.querySelectorAll('.tree-item.tree-file')].find((el) => el.textContent === '链接.md').click()`
+  );
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '链接.md'`), {
+    label: '打开链接样例',
+    timeout: 15000
+  });
+  await ensureWysiwygMode();
+
+  // 鼠标路径：过滤「/链」点击展开表单，填完点「确定」
+  await clickSelector('.ProseMirror p', 0);
+  await focusEditor();
+  win.webContents.insertText('/链');
+  await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到链接一项' });
+  await exec(`document.querySelector('.slash-menu .slash-item').click()`);
+  await waitFor(
+    () => exec(`Boolean(document.querySelector('.slash-form')) && document.querySelector('.slash-form').style.display !== 'none'`),
+    { label: '链接表单展开' }
+  );
+  await exec(`(() => {
+    const setValue = (selector, value) => {
+      const input = document.querySelector(selector);
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    setValue('[data-form="text"]', '点击这里');
+    setValue('[data-form="url"]', 'https://example.com/docs');
+    return true;
+  })()`);
+  await exec(`document.querySelector('.slash-form-submit').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror a'))`), { label: '链接已插入' });
+  const linkHref = await exec(`document.querySelector('.ProseMirror a')?.getAttribute('href') ?? ''`);
+  const linkText = await exec(`document.querySelector('.ProseMirror a')?.textContent ?? ''`);
+  check('链接文本与地址正确', linkHref === 'https://example.com/docs' && linkText === '点击这里', `href=${linkHref} text=${linkText}`);
+  const afterLink = await exec(`document.querySelector('.ProseMirror p')?.textContent ?? ''`);
+  check('链接确认后斜杠与过滤词被清除', !afterLink.includes('/') && !afterLink.includes('链'), afterLink);
+
+  // 键盘路径：点段落末尾 → 输入「/链」→ Enter 展开表单（焦点落「文本」框）→
+  // Tab 切到地址框 → Enter 确认
+  const endPoint = await exec(`(() => {
+    const p = [...document.querySelectorAll('.ProseMirror > p')].pop();
+    if (!p) return null;
+    const r = p.getBoundingClientRect();
+    return { x: Math.round(Math.max(r.left + 8, r.right - 12)), y: Math.round(r.top + r.height / 2) };
+  })()`);
+  if (!endPoint) throw new Error('找不到顶层段落');
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: endPoint.x, y: endPoint.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: endPoint.x, y: endPoint.y, button: 'left', clickCount: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await focusEditor();
+  win.webContents.insertText('/链');
+  await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '再次过滤到链接一项' });
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+  await waitFor(
+    () => exec(`Boolean(document.querySelector('.slash-form')) && document.querySelector('.slash-form').style.display !== 'none'`),
+    { label: '键盘展开链接表单' }
+  );
+  await waitFor(() => exec(`document.activeElement?.getAttribute('data-form') === 'text'`), {
+    label: '焦点落在文本输入框'
+  });
+  win.webContents.insertText('键盘链接');
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' });
+  await waitFor(() => exec(`document.activeElement?.getAttribute('data-form') === 'url'`), { label: 'Tab 切到地址框' });
+  win.webContents.insertText('https://kbd.example.com');
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.ProseMirror a')].some((a) => a.getAttribute('href') === 'https://kbd.example.com')`),
+    { label: '键盘路径链接已插入' }
+  );
+  check('键盘路径链接确认成功', true);
+
+  // ===== 10.4 最近使用：表格与链接确认后记入 localStorage，新文档置顶展示 =====
+  // 单独开新文档验证：前面的表格用例会把首个段落吞进单元格，
+  // 单元格里「/」前一字符是数字（列 1）按设计不触发，锚点不可靠。
+  writeFileSync(join(root, '最近.md'), '# 最近\n\n一段正文\n', 'utf-8');
+  await exec(`document.querySelector('.filetree-more-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), {
+    label: '⋮ 菜单弹出（最近使用用例）'
+  });
+  await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '刷新').click()`);
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.tree-name')].some((el) => el.textContent === '最近.md')`),
+    { label: '文件树出现最近样例', timeout: 8000 }
+  );
+  await exec(
+    `[...document.querySelectorAll('.tree-item.tree-file')].find((el) => el.textContent === '最近.md').click()`
+  );
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '最近.md'`), {
+    label: '打开最近样例',
+    timeout: 15000
+  });
+  await ensureWysiwygMode();
   await clickSelector('.ProseMirror p', 0);
   await focusEditor();
   win.webContents.insertText('/');
@@ -1359,7 +1475,7 @@ async function runTests() {
     }
   );
   const chipCount = await exec(`document.querySelectorAll('.slash-chip').length`);
-  check('最近使用记录图片与表格', chipCount >= 2, `chips=${chipCount}`);
+  check('最近使用记录表格与链接', chipCount >= 2, `chips=${chipCount}`);
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
   await waitFor(() => exec(`!document.querySelector('.slash-menu') || document.querySelector('.slash-menu').style.display === 'none'`), {
@@ -1367,7 +1483,7 @@ async function runTests() {
   });
   check('斜杠菜单 Esc 可关闭', true);
 
-  // ===== 10.3 任务列表：复选框渲染与点击勾选（视觉由 CSS 自绘，交互走 taskListPlugin） =====
+  // ===== 10.5 任务列表：复选框渲染与点击勾选（视觉由 CSS 自绘，交互走 taskListPlugin） =====
   writeFileSync(join(root, '清单.md'), '# 清单\n\n- [ ] 待办一\n- [x] 已办\n- 普通项\n', 'utf-8');
   await exec(`document.querySelector('.filetree-more-btn').click()`);
   await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), {

@@ -11,6 +11,8 @@ interface MarkdownEditorProps {
   onReady?: (instance: EditorInstance) => void;
   /** 光标进出表格时回调（原生菜单置灰用） */
   onTableContext?: (context: TableContext) => void;
+  /** 斜杠菜单「图片」条目确认后的回调：打开系统文件选择器并插入图片 */
+  onPickImage?: () => void;
 }
 
 /**
@@ -31,7 +33,8 @@ export default function MarkdownEditor({
   initialValue,
   onChange,
   onReady,
-  onTableContext
+  onTableContext,
+  onPickImage
 }: MarkdownEditorProps): JSX.Element {
   // 编辑器挂载容器
   const containerRef = useRef<HTMLDivElement>(null);
@@ -46,6 +49,9 @@ export default function MarkdownEditor({
   onChangeRef.current = onChange;
   const onTableContextRef = useRef(onTableContext);
   onTableContextRef.current = onTableContext;
+  // 斜杠菜单的图片回调同样经 ref 转发，避免闭包过期
+  const onPickImageRef = useRef(onPickImage);
+  onPickImageRef.current = onPickImage;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -64,6 +70,9 @@ export default function MarkdownEditor({
         },
         onTableContext: (context) => {
           onTableContextRef.current?.(context);
+        },
+        onPickImage: () => {
+          onPickImageRef.current?.();
         }
       });
     })()

@@ -85,7 +85,7 @@ export async function createEditor(
   container: HTMLElement,
   options: CreateEditorOptions = {}
 ): Promise<EditorInstance> {
-  const { defaultValue = '', onChange, onTableContext } = options;
+  const { defaultValue = '', onChange, onTableContext, onPickImage } = options;
 
   // 缓存最新的 Markdown 文本（由 markdownUpdated 回调更新）
   let currentMarkdown = defaultValue;
@@ -128,7 +128,12 @@ export async function createEditor(
     // 相对图片路径 → 绝对 file:// 地址（只改 DOM，不改 Markdown 文本）
     .use(imageSourcePlugin(() => imageState.dir))
     // 斜杠快速插入菜单（确认后统一走 format，与工具栏/菜单同链路；实例就绪后经 formatRef 接线）
-    .use(slashMenuPlugin({ format: (action, payload) => formatRef.current(action, payload) }))
+    .use(
+      slashMenuPlugin({
+        format: (action, payload) => formatRef.current(action, payload),
+        pickImage: () => onPickImage?.()
+      })
+    )
     // 任务列表：点击左侧方框切换完成状态（复选框视觉由 CSS 绘制）
     .use(taskListPlugin)
     .use(highlight)

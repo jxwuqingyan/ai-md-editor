@@ -114,6 +114,7 @@ async function run() {
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
   await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table'))`), { label: '表格插入' });
+
   // 再来一次：图片
   const p2 = await exec(`(() => {
     const p = document.querySelectorAll('.ProseMirror p')[0];
@@ -137,6 +138,32 @@ async function run() {
   );
   console.log('shot3 前 300ms 后 =', JSON.stringify(dump3b));
   await shot('slash-3-recents.png');
+
+  // 链接二级表单：先关掉菜单，重新过滤「/链」点击展开，填入文本与地址后截图并确认
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await clickPoint(p2.x, p2.y);
+  await exec(`document.querySelector('.ProseMirror').focus()`);
+  win.webContents.insertText('/链');
+  await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到链接' });
+  await exec(`document.querySelector('.slash-menu .slash-item').click()`);
+  await waitFor(() => exec(`document.querySelector('.slash-form')?.style.display !== 'none'`), { label: '链接表单展开' });
+  await exec(`(() => {
+    const set = (selector, value) => {
+      const input = document.querySelector(selector);
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    set('[data-form="text"]', '官方文档');
+    set('[data-form="url"]', 'https://example.com');
+    return true;
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await shot('slash-7-link-form.png');
+  await exec(`document.querySelector('.slash-form-submit').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror a'))`), { label: '链接插入' });
 
   // 深色主题
   await exec(`document.querySelector('.ProseMirror').focus()`);

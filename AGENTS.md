@@ -196,6 +196,9 @@ ai-md-editor/
 | 47 | E2E 用 `sendInputEvent` 注入方向键时 keyCode 必须用 Chromium 键名 `Down`/`Up`/`Left`/`Right`——写 `ArrowDown` 会被静默忽略（无报错、无效果），排查注入「没生效」先查键名 |
 | 48 | 任务列表不启用 Milkdown 的 Vue 列表组件（`@milkdown/components/list-item-block`），复选框由 CSS 依据 `li[data-item-type="task"]` / `[data-checked]` 自绘，点击勾选在 `packages/editor/src/task.ts` 插件里做（mousedown 落在 li 左 padding 区才拦截）；任务项里 Enter 须重置新条目 `checked=false`（splitListItem 会原样复制勾选态），空条目 Enter 清 checked 退出任务态 |
 | 49 | E2E 里 `getBoundingClientRect` 返回 CSS 像素而 `sendInputEvent` 走 DIP 坐标，窗口 zoomFactor 非 1 时坐标注入按比例错位——任何改过 zoomPercent 的用例结束必须恢复 100%，否则后续窄目标点击（复选框、格子）稳定失败且宽目标（段落）带病通过 |
+| 50 | 斜杠菜单的链接二级表单是唯一允许焦点离开编辑器的浮层：面板 mousedown 只对**非输入框**元素 preventDefault；表单展开期（`formOpen`）编辑器 blur 不作为关闭信号，改靠 document 捕获阶段的 mousedown 关闭（点面板外整体收起）。其余浮层（菜单 / 网格）仍整体 preventDefault |
+| 51 | 斜杠菜单「图片」条目走 `onPickImage` 回调（`SlashMenuOptions` ← `CreateEditorOptions` ← `MarkdownEditor` ref 转发 ← 渲染层 `chooseImage`）：原生文件对话框无法自动化，E2E 尝试给 `window.api.chooseImage` 打桩，contextBridge 对象只读导致桩不上时**跳过点击**而不是硬等（原生对话框会卡死测试进程） |
+| 52 | E2E 斜杠用例的锚点段落会被块级插入（表格片段）吞进单元格：后续用例若继续点首个 `p`，光标落在「列 1」单元格里，「/」前一字符是数字按设计不触发菜单——「最近使用」等用例要**单独开新文档**，别在插过表格的文档里复用首段锚点 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
