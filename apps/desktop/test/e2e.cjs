@@ -1227,6 +1227,92 @@ async function runTests() {
     String(exportedHtml).match(/<title>[^<]*<\/title>/)?.[0] ?? ''
   );
 
+  // ===== 10.2 斜杠菜单：输入「/」弹出快速插入，过滤 / 点击 / 键盘确认 / 最近使用 =====
+  // 前面的用例可能让窗口失焦：鼠标注入不一定会带回焦点，blur 会把菜单关掉，
+  // 每次键入前都显式把焦点还给编辑器。
+  const focusEditor = () =>
+    exec(
+      `(() => { const el = document.querySelector('.ProseMirror'); if (!el) return false; el.focus(); return true; })()`
+    );
+
+  writeFileSync(join(root, '斜杠.md'), '# 斜杠\n\n第一段正文\n', 'utf-8');
+  await exec(`document.querySelector('.filetree-more-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), {
+    label: '⋮ 菜单弹出（斜杠用例）'
+  });
+  await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '刷新').click()`);
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.tree-name')].some((el) => el.textContent === '斜杠.md')`),
+    { label: '文件树出现斜杠样例', timeout: 8000 }
+  );
+  await exec(
+    `[...document.querySelectorAll('.tree-item.tree-file')].find((el) => el.textContent === '斜杠.md').click()`
+  );
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '斜杠.md'`), {
+    label: '打开斜杠样例',
+    timeout: 15000
+  });
+  await ensureWysiwygMode();
+
+  // 光标放进正文段落，输入「/」→ 菜单弹出且条目齐全（13 格式 + 4 插入）
+  await clickSelector('.ProseMirror p', 0);
+  await focusEditor();
+  win.webContents.insertText('/');
+  await waitFor(() => exec(`Boolean(document.querySelector('.slash-menu'))`), { label: '斜杠菜单弹出' });
+  const gridCount = await exec(`document.querySelectorAll('.slash-grid-item').length`);
+  const listCount = await exec(`document.querySelectorAll('.slash-list .slash-item').length`);
+  check('斜杠菜单默认条目齐全', gridCount === 13 && listCount === 4, `grid=${gridCount} list=${listCount}`);
+
+  // 输入「图」过滤到图片一项，点击插入图片语法
+  win.webContents.insertText('图');
+  await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到图片一项' });
+  await exec(`document.querySelector('.slash-menu .slash-item').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror img'))`), { label: '图片语法已插入' });
+  const afterImage = await exec(`document.querySelector('.ProseMirror p')?.textContent ?? ''`);
+  check('确认后斜杠与过滤词被清除', !afterImage.includes('/') && !afterImage.includes('图'), afterImage);
+
+  // 键盘路径：输入「/格」过滤到表格一项，Enter 确认插入表格
+  await clickSelector('.ProseMirror p', 0);
+  await focusEditor();
+  win.webContents.insertText('/格');
+  await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到表格一项' });
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table td'))`), { label: '表格已插入' });
+  check('Enter 确认插入表格', true);
+
+  // 再次输入「/」应出现「最近使用」（图片 + 表格），Esc 关闭菜单
+  await clickSelector('.ProseMirror p', 0);
+  await focusEditor();
+  win.webContents.insertText('/');
+  await waitFor(() => exec(`Boolean(document.querySelector('.slash-chip'))`), { label: '最近使用出现' }).catch(
+    async (err) => {
+      const dbg = await exec(
+        `(() => {
+          const menu = document.querySelector('.slash-menu');
+          return {
+            menuExists: Boolean(menu),
+            display: menu ? menu.style.display : null,
+            section: menu ? menu.textContent.slice(0, 60) : null,
+            chips: document.querySelectorAll('.slash-chip').length,
+            recents: localStorage.getItem('mdnote-slash-recents'),
+            active: document.activeElement ? document.activeElement.className : null,
+            paragraphs: document.querySelectorAll('.ProseMirror p').length
+          };
+        })()`
+      );
+      throw new Error(`${err.message}｜诊断：${JSON.stringify(dbg)}`);
+    }
+  );
+  const chipCount = await exec(`document.querySelectorAll('.slash-chip').length`);
+  check('最近使用记录图片与表格', chipCount >= 2, `chips=${chipCount}`);
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+  await waitFor(() => exec(`!document.querySelector('.slash-menu') || document.querySelector('.slash-menu').style.display === 'none'`), {
+    label: 'Esc 关闭菜单'
+  });
+  check('斜杠菜单 Esc 可关闭', true);
+
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();

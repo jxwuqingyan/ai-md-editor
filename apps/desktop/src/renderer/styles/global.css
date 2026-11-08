@@ -1751,3 +1751,120 @@ button:focus-visible {
 .app-error-actions button:hover {
   background: var(--bg-hover);
 }
+
+/* ===== 斜杠快速插入菜单（编辑器输入「/」弹出，fixed 定位挂在 body 上） ===== */
+.slash-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 296px;
+  max-width: 340px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
+  padding: 6px;
+  font-family: var(--font-sans);
+}
+
+.slash-section {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+
+/* 最近使用胶囊 */
+.slash-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 4px 6px;
+}
+
+.slash-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.slash-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 格式网格：图标按钮 */
+.slash-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  padding: 0 2px 4px;
+}
+
+.slash-grid-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.slash-glyph {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.slash-icon svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* 插入列表：图标 + 名称 + 说明 */
+.slash-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border: none;
+  background: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-align: left;
+  font-family: var(--font-sans);
+  transition: background 120ms ease;
+}
+
+.slash-item-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.slash-grid-item:hover,
+.slash-grid-item.slash-active,
+.slash-item:hover,
+.slash-item.slash-active {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}

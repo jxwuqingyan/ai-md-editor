@@ -49,6 +49,7 @@ import { configureStringify } from './stringify';
 import { calloutPlugin, tocPlugin } from './decorations';
 import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
+import { slashMenuPlugin } from './slash';
 import { applyImageSources, imageSourcePlugin } from './images';
 import {
   applyTaskState,
@@ -118,6 +119,8 @@ export async function createEditor(
     .use(selectionContextPlugin((context) => onTableContext?.(context)))
     // 相对图片路径 → 绝对 file:// 地址（只改 DOM，不改 Markdown 文本）
     .use(imageSourcePlugin(() => imageState.dir))
+    // 斜杠快速插入菜单（确认后统一走 format，与工具栏/菜单同链路；实例就绪后经 formatRef 接线）
+    .use(slashMenuPlugin({ format: (action, payload) => formatRef.current(action, payload) }))
     .use(highlight)
     .use(math)
     .use(diagram)
@@ -171,7 +174,12 @@ export async function createEditor(
     });
   };
 
-  return {
+  /** 斜杠菜单的格式化入口（实例创建后接上 format，实现见返回对象的 format 方法） */
+  const formatRef: { current: (action: FormatAction, payload?: number | string) => void } = {
+    current: () => {}
+  };
+
+  const instance: EditorInstance = {
     getMarkdown(): string {
       return currentMarkdown;
     },
@@ -439,4 +447,8 @@ export async function createEditor(
       void editor.destroy();
     }
   };
+
+  // 实例就绪：把统一格式化入口接给斜杠菜单插件
+  formatRef.current = (action, payload) => instance.format(action, payload);
+  return instance;
 }
