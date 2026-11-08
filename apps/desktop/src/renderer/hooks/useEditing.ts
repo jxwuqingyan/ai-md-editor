@@ -142,6 +142,27 @@ export function useEditing({
     [applyFormat]
   );
 
+  /** 把图片语法插入到光标处（WYSIWYG 与源码模式各走一条路径） */
+  const insertImageMarkdown = useCallback(
+    (imageMarkdown: string) => {
+      if (viewModeRef.current === 'wysiwyg' && editorRef.current) {
+        editorRef.current.insertAtCursor(imageMarkdown);
+        return;
+      }
+      const ta = sourceTextarea();
+      const current = activeTab();
+      if (!ta || !current) return;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      setActiveContent(current.content.slice(0, start) + imageMarkdown + current.content.slice(end));
+      requestAnimationFrame(() => {
+        ta.focus();
+        ta.setSelectionRange(start + imageMarkdown.length, start + imageMarkdown.length);
+      });
+    },
+    [viewModeRef, editorRef, sourceTextarea, activeTab, setActiveContent]
+  );
+
   /** 处理图片粘贴：保存到文档同级 img/ 目录，插入 markdown 图片语法 */
   const handlePaste = useCallback(
     async (event: ClipboardEvent) => {
@@ -168,26 +189,32 @@ export function useEditing({
           onError?.(`图片保存失败：${result.error ?? '未知错误'}`);
           return;
         }
-        const imageMarkdown = `![图片](${result.relativePath})`;
-        if (viewModeRef.current === 'wysiwyg' && editorRef.current) {
-          editorRef.current.insertAtCursor(imageMarkdown);
-        } else {
-          const ta = sourceTextarea();
-          const current = activeTab();
-          if (ta && current) {
-            const start = ta.selectionStart;
-            const end = ta.selectionEnd;
-            setActiveContent(current.content.slice(0, start) + imageMarkdown + current.content.slice(end));
-            requestAnimationFrame(() => {
-              ta.focus();
-              ta.setSelectionRange(start + imageMarkdown.length, start + imageMarkdown.length);
-            });
-          }
-        }
+        insertImageMarkdown(`![图片](${result.relativePath})`);
         break;
       }
     },
-    [readOnlyRef, activeTab, viewModeRef, editorRef, sourceTextarea, setActiveContent, ensureDocPath, onError]
+    [readOnlyRef, activeTab, viewModeRef, editorRef, sourceTextarea, setActiveContent, ensureDocPath, onError, insertImageMarkdown]
+  );
+
+  /** 拖拽进来的图片文件：复制到文档同级 img/ 目录并逐个插入 */
+  const insertImagesFromPaths = useCallback(
+    async (paths: string[]) => {
+      if (readOnlyRef.current || paths.length === 0) return;
+      const docPath = await ensureDocPath();
+      if (!docPath) {
+        onError?.('文档尚未保存，已取消插入图片');
+        return;
+      }
+      for (const sourcePath of paths) {
+        const result = await window.api.saveImageFromPath({ docPath, sourcePath });
+        if (!result.relativePath) {
+          onError?.(`图片插入失败：${result.error ?? '未知错误'}`);
+          continue;
+        }
+        insertImageMarkdown(`![图片](${result.relativePath})`);
+      }
+    },
+    [readOnlyRef, ensureDocPath, onError, insertImageMarkdown]
   );
 
   /** 从本地文件选择图片并插入相对路径（保存到文档同级 img/ 目录） */
@@ -239,6 +266,7 @@ export function useEditing({
     undoRedo,
     insertText,
     handlePaste,
+    insertImagesFromPaths,
     chooseImage,
     pastePlain,
     copyAs,

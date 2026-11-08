@@ -65,7 +65,7 @@ ai-md-editor/
 │       │   ├── menuHandlers.ts   # 原生菜单动作分发表（纯函数）
 │       │   ├── sourceActions.ts  # 源码模式格式化（纯函数，含表格增删行列）
 │       │   └── Dialogs.tsx       # 查找/快速打开/重命名/字数统计/大纲浮层
-│       ├── test/             # 自动化测试（e2e.cjs / menuAccelerators.cjs）
+│       ├── test/             # 自动化测试（run-e2e.cjs / e2e.cjs / menuAccelerators.cjs）
 │       ├── build/            # 应用图标（icon.svg/png/icns）
 │       └── electron-builder.json  # 打包配置（官方识别文件名）
 ├── packages/
@@ -163,6 +163,8 @@ ai-md-editor/
 | 19 | 表格必须保留表头：删除表头行 = 移除旧表头 + 首个数据行升级为表头；**必须整表重建后一次替换**，不能分「删表头 + 提升新表头」两步（两步会让文档短暂非法，后续坐标错位） |
 | 20 | 缩放用 `setZoomFactor` + 固定档位（50%…300%），当前百分比随 `MenuViewState.zoomPercent` 同步到菜单与状态栏；不要用 `setZoomLevel` 的浮点步进（会出现 110%、132% 之类怪比例） |
 | 21 | 自动化测试直接加载构建产物（`out/main/index.js`）跑真实主进程，经 `menu:action` 通道派发动作；修改菜单/表格/缩放行为后必须跑 `npm test` |
+| 22 | 用户偏好持久化到 `userData/settings.json`（主题 / 侧栏 / 标签栏 / 工具栏 / 缩放 / 窗口尺寸），主进程 `settings.ts` 读写、300ms 防抖、退出前强制落盘；渲染层启动后拉取应用，读取前不得回写默认值 |
+| 23 | 拖拽取文件真实路径必须走 preload 暴露的 `webUtils.getPathForFile`：Electron 32+ 的 `File` 已不再带 `path` 属性 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -178,6 +180,8 @@ ai-md-editor/
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
 | 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |
+| 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验 |
+| 拖拽取路径 | `apps/desktop/src/preload/index.ts` | `getPathForFile(file)` = `webUtils.getPathForFile`；渲染层据此区分 图片 / 文件夹 / 文档 |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
 
@@ -194,12 +198,17 @@ ai-md-editor/
 | 表格菜单项不按上下文置灰 | 光标上下文从未同步到主进程 | 编辑器插件 + 源码模式行判断 → `MenuViewState.inTable` / `inTableHeader` |
 | 插入图片失败 / 图片落到奇怪位置 | 渲染层传「文档目录」，未保存文档传空串，主进程 `join('.', 'img')` 写到进程 cwd（打包后不可写） | 传文档绝对路径，主进程 `dirname` 计算；无路径先另存为 |
 | 粘贴的图片在编辑器里不显示 | `<img src="img/x.png">` 按渲染页基址解析到应用目录 | 插件把 `src` 换成绝对 `file://`，文本仍是相对路径；CSP `img-src` 放行 `file:` |
+| 拖拽文件毫无反应 | 旧代码读 `File.path`，Electron 32+ 已移除该属性 | 改用 preload 的 `webUtils.getPathForFile` |
+| 偏好每次启动都丢失 | 设置只存在渲染层内存 | 主进程 `settings.json` 持久化，启动读取、变更防抖写盘 |
+| `npm test` 报 `bad option: --no-sandbox` | 宿主终端注入 `ELECTRON_RUN_AS_NODE=1` / `NODE_OPTIONS`，Electron 退化成 Node，把开关当 Node 参数 | 由 `test/run-e2e.cjs` 派生子进程时剔除这两个变量，不要写进 npm script 的 `env -u`（不跨平台） |
+| E2E 缩放/表格断言莫名错位 | 固定 profile 里 Chromium 记住了上次运行的页面缩放，点击坐标随之偏移 | 每次运行前清空测试专用 `userData`；渲染层启动时无条件 `setZoom(settings.zoomPercent)` 纠正漂移 |
+| 图片文件名混入路径片段 | 用 `路径.split('.').pop()` 取后缀，目录名含点或文件无后缀时会拿到非法值 | `extname` + 扩展名白名单，非法值统一回退 `.png` |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 
 1. **测试**：每完成一个功能，都必须做一遍测试（类型检查 `tsc --noEmit` + 构建 `npm run build` + 功能验证）。受沙箱限制无法跑 GUI 时，明确告知用户需在系统终端验证的具体步骤。
    - 改到菜单 / 表格 / 缩放 / 剪贴板 / 文件树行为时，跑 `npm test`（`test/menuAccelerators.cjs` 静态校验快捷键 + `test/e2e.cjs` 真实 Electron 端到端）。
-   - 受限沙箱（无 GUI 会话）里需摘掉注入的环境变量：`env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS npm test`。
+   - E2E 由 `test/run-e2e.cjs` 启动，会自动剔除宿主注入的 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS`；无需再手动 `env -u`，普通终端与无 GUI 会话都直接跑 `npm test`。
 2. **文档同步**：开发功能的同时，同步更新 `README.md`（项目说明）、`AGENTS.md`（协作规范）与 `docs/` 下的设计与方案文档，不得等到最后一次性补。文档中如与实际实现不符（依赖未引入、主题数量、包管理器等），一并订正。
 3. **提交前检查**（每次 `git commit` 前逐条确认）：
    - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号四处一致（见第 9 节）。

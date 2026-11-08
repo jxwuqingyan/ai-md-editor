@@ -40,6 +40,7 @@ export default function App(): JSX.Element {
     tabsRef,
     activeIdRef,
     treeRoot,
+    setTreeRoot,
     handleChange,
     setActiveContent,
     newTab,
@@ -128,6 +129,7 @@ export default function App(): JSX.Element {
     applyFormat,
     undoRedo,
     handlePaste,
+    insertImagesFromPaths,
     chooseImage,
     pastePlain,
     copyAs,
@@ -281,25 +283,46 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('paste', onPaste);
   }, [handlePaste]);
 
-  // 拖拽打开：把 .md 文件拖到窗口内打开
+  // 拖拽：图片 → 复制进 img/ 并插入；文件夹 → 设为文件树根；其它文件 → 打开
   useEffect(() => {
+    const isImagePath = (path: string): boolean => /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(path);
+
     const onDragOver = (event: DragEvent): void => {
       if (event.dataTransfer?.types.includes('Files')) event.preventDefault();
     };
+
     const onDrop = (event: DragEvent): void => {
       const files = event.dataTransfer?.files;
       if (!files || files.length === 0) return;
       event.preventDefault();
-      const filePath = (files[0] as File & { path?: string }).path;
-      if (filePath) void openPath(filePath);
+      // Electron 32+ 的 File 没有 path 属性，必须经 preload 的 webUtils 取真实路径
+      const paths = Array.from(files)
+        .map((file) => window.api.getPathForFile(file))
+        .filter((path): path is string => Boolean(path));
+      if (paths.length === 0) return;
+
+      void (async () => {
+        const info = await window.api.statPath(paths[0]);
+        if (info.isDirectory) {
+          setTreeRoot(paths[0]);
+          return;
+        }
+        const images = paths.filter(isImagePath);
+        if (images.length > 0) {
+          await insertImagesFromPaths(images);
+          return;
+        }
+        await openPath(paths[0]);
+      })();
     };
+
     window.addEventListener('dragover', onDragOver);
     window.addEventListener('drop', onDrop);
     return () => {
       window.removeEventListener('dragover', onDragOver);
       window.removeEventListener('drop', onDrop);
     };
-  }, [openPath]);
+  }, [openPath, insertImagesFromPaths, setTreeRoot]);
 
   // 监听主进程的 open-file 事件（拖到 Dock 图标 / Finder 打开方式）
   useEffect(() => window.api.onOpenFile((filePath) => void openPath(filePath)), [openPath]);

@@ -5,8 +5,8 @@
  */
 
 import { dialog, ipcMain, BrowserWindow, clipboard, shell } from 'electron';
-import { readFile, writeFile, mkdir, readdir, rename } from 'node:fs/promises';
-import { join, basename, dirname } from 'node:path';
+import { readFile, writeFile, mkdir, readdir, rename, stat } from 'node:fs/promises';
+import { join, basename, dirname, extname } from 'node:path';
 import { marked } from 'marked';
 import type {
   OpenFileResult,
@@ -22,10 +22,14 @@ import type {
   RenameFileResult,
   ClipboardWriteInput,
   ZoomAction,
-  MenuViewState
+  MenuViewState,
+  AppSettings,
+  StatPathResult,
+  SaveImageFromPathInput
 } from '@ai-md-editor/shared';
 import { IpcChannel, MenuStateChannel } from '@ai-md-editor/shared';
 import { getRecent, addRecent } from './recent';
+import { getSettings, updateSettings } from './settings';
 import { exportFile } from './export';
 import { updateMenuState, refreshRecentMenu } from './menu';
 import { createWindow } from './window';
@@ -109,6 +113,20 @@ async function handleWriteFile(
 /** 图片目录名：固定放在 Markdown 文件同级，随文档一起拷贝即可带走图片 */
 const IMAGE_DIR = 'img';
 
+/** 允许写入的图片扩展名白名单 */
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp']);
+
+/**
+ * 提取安全的图片扩展名。
+ * 入参可能是 'png'、'.png' 或整条磁盘路径；目录名中的点、无扩展名的文件、
+ * 非图片后缀都会被挡掉并回退到 png，避免路径片段混进生成的文件名。
+ */
+function normalizeImageExtension(value: string): string {
+  const raw = String(value ?? '');
+  const ext = (raw.includes('.') ? extname(raw).slice(1) : raw).toLowerCase();
+  return IMAGE_EXTENSIONS.has(ext) ? ext : 'png';
+}
+
 /**
  * 把图片二进制写到 Markdown 文件同级的 img/ 目录，返回相对路径。
  * 相对路径保证文档 + img 目录整体拷走后仍能正确引用。
@@ -128,7 +146,7 @@ async function saveImageToDocDir(data: Uint8Array, extension: string, docPath: s
     .replace(/[-:T]/g, '')
     .slice(0, 14);
   const random = Math.random().toString(36).slice(2, 8);
-  const filename = `${timestamp}-${random}.${extension}`;
+  const filename = `${timestamp}-${random}.${normalizeImageExtension(extension)}`;
   await writeFile(join(dir, filename), Buffer.from(data));
   return `${IMAGE_DIR}/${filename}`;
 }
@@ -142,7 +160,11 @@ async function handleSaveImage(
   input: SaveImageInput
 ): Promise<SaveImageResult> {
   try {
-    const relativePath = await saveImageToDocDir(input.data, input.extension, input.docPath);
+    const relativePath = await saveImageToDocDir(
+      input.data,
+      normalizeImageExtension(input.extension),
+      input.docPath
+    );
     return { relativePath, error: null };
   } catch (err) {
     return { relativePath: null, error: err instanceof Error ? err.message : String(err) };
@@ -165,7 +187,7 @@ async function handleChooseImage(
   try {
     const filePath = result.filePaths[0];
     const data = await readFile(filePath);
-    const extension = (filePath.split('.').pop() ?? 'png').toLowerCase();
+    const extension = normalizeImageExtension(filePath);
     const relativePath = await saveImageToDocDir(new Uint8Array(data), extension, docPath);
     return { relativePath, error: null };
   } catch (err) {
@@ -323,6 +345,43 @@ function handleZoom(win: BrowserWindow | null, action: ZoomAction): number {
 }
 
 /**
+ * 直接设定缩放百分比（恢复上次缩放用），会吸附到最近的档位。
+ * @returns 实际生效的百分比
+ */
+function handleSetZoom(win: BrowserWindow | null, percent: number): number {
+  if (!win) return 100;
+  const clamped = Math.max(50, Math.min(300, Number(percent) || 100));
+  const factor = clamped / 100;
+  const nearest = ZOOM_STEPS.reduce((best, step) =>
+    Math.abs(step - factor) < Math.abs(best - factor) ? step : best
+  );
+  win.webContents.setZoomFactor(nearest);
+  return Math.round(nearest * 100);
+}
+
+/** 查询路径类型（拖拽时区分文件夹 / 文件） */
+async function handleStatPath(targetPath: string): Promise<StatPathResult> {
+  try {
+    const info = await stat(targetPath);
+    return { exists: true, isDirectory: info.isDirectory(), isFile: info.isFile() };
+  } catch {
+    return { exists: false, isDirectory: false, isFile: false };
+  }
+}
+
+/** 把磁盘上的图片文件复制到文档同级 img/ 目录（拖拽插入用） */
+async function handleSaveImageFromPath(input: SaveImageFromPathInput): Promise<SaveImageResult> {
+  try {
+    const data = await readFile(input.sourcePath);
+    const extension = normalizeImageExtension(input.sourcePath);
+    const relativePath = await saveImageToDocDir(new Uint8Array(data), extension, input.docPath);
+    return { relativePath, error: null };
+  } catch (err) {
+    return { relativePath: null, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * 注册所有 IPC handler。
  * 每个 handler 通过 event.sender 获取发起请求的窗口，作为对话框的父窗口。
  */
@@ -376,6 +435,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.ClipboardReadText, () => clipboard.readText());
   ipcMain.handle(IpcChannel.Zoom, (event, action: ZoomAction): number =>
     handleZoom(BrowserWindow.fromWebContents(event.sender), action)
+  );
+  ipcMain.handle(IpcChannel.SetZoom, (event, percent: number): number =>
+    handleSetZoom(BrowserWindow.fromWebContents(event.sender), percent)
+  );
+  ipcMain.handle(IpcChannel.SettingsGet, (): AppSettings => getSettings());
+  ipcMain.handle(IpcChannel.SettingsUpdate, (_event, patch: Partial<AppSettings>): AppSettings =>
+    updateSettings(patch ?? {})
+  );
+  ipcMain.handle(IpcChannel.StatPath, (_event, targetPath: string) => handleStatPath(targetPath));
+  ipcMain.handle(IpcChannel.SaveImageFromPath, (_event, input: SaveImageFromPathInput) =>
+    handleSaveImageFromPath(input)
   );
   ipcMain.handle(IpcChannel.AlwaysOnTop, (event, enabled: boolean) => {
     BrowserWindow.fromWebContents(event.sender)?.setAlwaysOnTop(enabled);

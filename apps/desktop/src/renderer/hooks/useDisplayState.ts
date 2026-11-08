@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { themes, tokensToCssVars, type ThemeId } from '@ai-md-editor/theme';
 import { NO_TABLE_CONTEXT, type TableContext } from '@ai-md-editor/editor';
-import type { MenuViewState } from '@ai-md-editor/shared';
+import { DEFAULT_SETTINGS, type MenuViewState } from '@ai-md-editor/shared';
 
 /** useDisplayState 的入参 */
 interface UseDisplayStateOptions {
@@ -40,6 +40,9 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
   // ===== 光标表格上下文（表格菜单项置灰用） =====
   const [tableContext, setTableContext] = useState<TableContext>(NO_TABLE_CONTEXT);
 
+  // 设置是否已从磁盘读回（读回之前不要把默认值写回去，否则会覆盖用户偏好）
+  const [settingsReady, setSettingsReady] = useState(false);
+
   // 供事件回调使用的即时值，避免闭包过期
   const viewModeRef = useRef(viewMode);
   viewModeRef.current = viewMode;
@@ -50,6 +53,41 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
 
   const tokens = themes[themeId];
   const cssVars = useMemo(() => tokensToCssVars(tokens), [tokens]);
+
+  // 启动时应用持久化设置（主题 / 侧栏 / 标签栏 / 工具栏 / 缩放）
+  useEffect(() => {
+    void window.api
+      .getSettings()
+      // 读取失败时也放开落盘，但用默认值，避免界面卡在未初始化状态
+      .catch(() => ({ ...DEFAULT_SETTINGS }))
+      .then((settings) => {
+        setThemeId(settings.themeId);
+        setSidebarOpen(settings.sidebarOpen);
+        setSidebarPanel(settings.sidebarPanel);
+        setTabbarVisible(settings.tabbarVisible);
+        setToolbarVisible(settings.toolbarVisible);
+        setSettingsReady(true);
+        // 无条件同步一次：Chromium 会自行记忆页面缩放，若与设置文件不一致会出现
+        // 「状态栏 100%、实际 125%」的漂移，也会让鼠标坐标与布局不对齐。
+        void window.api.setZoom(settings.zoomPercent).then(setZoomPercent);
+      });
+  }, []);
+
+  // 设置变化时落盘（防抖；窗口尺寸由主进程单独记录）
+  useEffect(() => {
+    if (!settingsReady) return;
+    const timer = setTimeout(() => {
+      void window.api.updateSettings({
+        themeId,
+        sidebarOpen,
+        sidebarPanel,
+        tabbarVisible,
+        toolbarVisible,
+        zoomPercent
+      });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [settingsReady, themeId, sidebarOpen, sidebarPanel, tabbarVisible, toolbarVisible, zoomPercent]);
 
   // 应用主题到 <html>，保证全局 CSS 变量生效
   useEffect(() => {

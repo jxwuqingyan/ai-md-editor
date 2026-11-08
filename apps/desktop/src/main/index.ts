@@ -2,6 +2,7 @@ import { app, BrowserWindow } from 'electron';
 import { registerIpcHandlers } from './ipc';
 import { setupApplicationMenu } from './menu';
 import { loadRecent } from './recent';
+import { flushSettings, loadSettings } from './settings';
 import { createWindow, openFileInRenderer } from './window';
 
 // 设置应用显示名（macOS 菜单栏 / 关于面板 / 默认窗口标题）
@@ -12,6 +13,8 @@ app.setName('MarkdownNote');
  * macOS 特有：点击 dock 图标且无窗口时重新创建窗口。
  */
 app.whenReady().then(async () => {
+  // 先读设置：窗口尺寸、主题、缩放等都依赖它
+  loadSettings();
   // 加载最近文件列表（启动时）
   await loadRecent();
 
@@ -41,6 +44,11 @@ app.on('second-instance', (_event, argv) => {
   if (filePath) {
     openFileInRenderer(filePath);
   }
+});
+
+// 退出前把防抖中的设置立即落盘
+app.on('will-quit', () => {
+  flushSettings();
 });
 
 // 非 macOS：所有窗口关闭后退出应用

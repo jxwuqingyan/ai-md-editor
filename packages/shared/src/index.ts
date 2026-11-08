@@ -41,6 +41,16 @@ export const IpcChannel = {
   ClipboardReadText: 'clipboard:read-text',
   /** 界面缩放 */
   Zoom: 'app:zoom',
+  /** 直接设置缩放百分比（用于恢复上次的缩放） */
+  SetZoom: 'app:set-zoom',
+  /** 读取持久化设置 */
+  SettingsGet: 'settings:get',
+  /** 更新持久化设置（部分字段） */
+  SettingsUpdate: 'settings:update',
+  /** 查询路径类型（拖拽文件夹/文件时判断） */
+  StatPath: 'fs:stat',
+  /** 把磁盘上的图片复制到文档同级 img/ 目录 */
+  SaveImageFromPath: 'image:from-path',
   /** 窗口置顶 */
   AlwaysOnTop: 'app:always-on-top',
   /** 新建独立窗口 */
@@ -198,6 +208,64 @@ export interface ClipboardWriteInput {
 
 /** 缩放动作 */
 export type ZoomAction = 'in' | 'out' | 'reset';
+
+/** 窗口尺寸与位置（持久化用） */
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 持久化到 userData/settings.json 的应用设置。
+ * 只存「下次启动仍然希望保持」的偏好，不存临时状态。
+ */
+export interface AppSettings {
+  /** 主题 */
+  themeId: 'light' | 'dark';
+  /** 侧栏展开 */
+  sidebarOpen: boolean;
+  /** 侧栏当前面板 */
+  sidebarPanel: 'files' | 'outline';
+  /** 标签栏可见 */
+  tabbarVisible: boolean;
+  /** 底部工具栏可见 */
+  toolbarVisible: boolean;
+  /** 界面缩放百分比（50~300） */
+  zoomPercent: number;
+  /** 上次窗口尺寸与位置（null 表示用默认值） */
+  windowBounds: WindowBounds | null;
+}
+
+/** 默认设置 */
+export const DEFAULT_SETTINGS: AppSettings = {
+  themeId: 'light',
+  sidebarOpen: true,
+  sidebarPanel: 'files',
+  tabbarVisible: true,
+  toolbarVisible: true,
+  zoomPercent: 100,
+  windowBounds: null
+};
+
+/** 路径类型查询结果 */
+export interface StatPathResult {
+  /** 路径存在 */
+  exists: boolean;
+  /** 是目录 */
+  isDirectory: boolean;
+  /** 是文件 */
+  isFile: boolean;
+}
+
+/** 从磁盘复制图片到文档 img/ 目录的入参 */
+export interface SaveImageFromPathInput {
+  /** 目标 Markdown 文件绝对路径 */
+  docPath: string;
+  /** 源图片绝对路径 */
+  sourcePath: string;
+}
 
 /** 主进程 → 渲染进程的菜单动作事件通道 */
 export const MenuActionChannel = 'menu:action';

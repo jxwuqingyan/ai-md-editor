@@ -9,18 +9,41 @@
  * - 全屏 / 最小化
  * - 深层目录下「在文件树中显示」逐级展开
  * - 图片存到文档同级 img/ 目录、Markdown 保持相对路径、编辑器内正常显示、粘贴链路
+ * - 设置持久化（主题 / 工具栏 / 缩放重启后恢复）与窗口尺寸记忆
  * - 源码模式撤销栈的连续键入合并
  *
- * 运行（必须关掉内嵌 Node 模式与 NODE_OPTIONS 注入）：
- *   env -u ELECTRON_RUN_AS_NODE -u NODE_OPTIONS \
- *     ./node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
- *     --no-sandbox --disable-gpu apps/desktop/test/e2e.cjs
- * 或用 npm 脚本：npm run test:e2e
+ * 运行：npm test（test/run-e2e.cjs 会自动剔除 ELECTRON_RUN_AS_NODE / NODE_OPTIONS 注入）
+ * 单独跑：npm run test:e2e --workspace @ai-md-editor/desktop
  */
 const { app, BrowserWindow, Menu, clipboard, dialog } = require('electron');
-const { mkdirSync, writeFileSync, existsSync } = require('node:fs');
+const { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } = require('node:fs');
 const { join } = require('node:path');
 const { tmpdir } = require('node:os');
+
+// 独立的 userData 目录：既不污染真实配置，也能预置设置验证「启动恢复」。
+// 每次跑前清空：Chromium 会把页面缩放记在 profile 的 Preferences 里，
+// 残留的 125% 会让「放大到 110%」错位，也会让鼠标点击坐标因缩放而偏移。
+const PROFILE_DIR = join(tmpdir(), 'md-note-e2e-profile');
+rmSync(PROFILE_DIR, { recursive: true, force: true });
+mkdirSync(PROFILE_DIR, { recursive: true });
+app.setPath('userData', PROFILE_DIR);
+writeFileSync(
+  join(PROFILE_DIR, 'settings.json'),
+  `${JSON.stringify(
+    {
+      themeId: 'light',
+      sidebarOpen: true,
+      sidebarPanel: 'files',
+      tabbarVisible: true,
+      toolbarVisible: true,
+      zoomPercent: 100,
+      windowBounds: null
+    },
+    null,
+    2
+  )}\n`,
+  'utf-8'
+);
 
 // 启动真实主进程（注册 IPC / 原生菜单 / 创建窗口）
 require('../out/main/index.js');
@@ -61,6 +84,11 @@ function getWindow() {
 function exec(code) {
   const win = getWindow();
   if (!win) throw new Error('窗口不存在');
+  return win.webContents.executeJavaScript(code, true);
+}
+
+/** 在指定窗口里执行脚本 */
+function execIn(win, code) {
   return win.webContents.executeJavaScript(code, true);
 }
 
@@ -481,6 +509,33 @@ async function runTests() {
     pastedNames.length === 2 && pastedName !== 'img/a.png' && existsSync(join(root, pastedName)),
     `${pastedName}（事件项=${pasteResult}，图片数量=${pastedNames.length}）`
   );
+  // 拖拽能力依赖的两个 IPC：路径类型判断、磁盘图片复制
+  const dirStat = await exec(`window.api.statPath(${JSON.stringify(root)})`);
+  const fileStat = await exec(`window.api.statPath(${JSON.stringify(imgDoc)})`);
+  check('statPath 能区分文件夹与文件', dirStat.isDirectory === true && fileStat.isFile === true, JSON.stringify({ dirStat, fileStat }));
+
+  const copied = await exec(
+    `window.api.saveImageFromPath({ docPath: ${JSON.stringify(imgDoc)}, sourcePath: ${JSON.stringify(join(imgDir, 'a.png'))} })`
+  );
+  check(
+    '拖拽图片：复制到同级 img/ 目录',
+    Boolean(copied.relativePath && copied.relativePath.startsWith('img/')) && existsSync(join(root, copied.relativePath)),
+    `${copied.relativePath}`
+  );
+
+  // 非图片后缀不能混进生成的文件名，必须回退到 .png
+  const oddImage = join(root, 'photo.weirdext');
+  writeFileSync(oddImage, 'fake-image-binary');
+  const fallback = await exec(
+    `window.api.saveImageFromPath({ docPath: ${JSON.stringify(imgDoc)}, sourcePath: ${JSON.stringify(oddImage)} })`
+  );
+  check(
+    '未知扩展名的图片回退为 png',
+    Boolean(fallback.relativePath && /^img\/[^/]+\.png$/.test(fallback.relativePath)) &&
+      existsSync(join(root, fallback.relativePath)),
+    `${fallback.relativePath}`
+  );
+
   // 切到另一个文档再切回来，图片应仍然按当前文档目录重新解析
   await ensureWysiwygMode();
   win.webContents.send('open-file', deepFile);
@@ -500,7 +555,56 @@ async function runTests() {
     String(imgAfterSwitch)
   );
 
-  // ===== 10. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
+  // ===== 10. 设置持久化：偏好与窗口尺寸写入 userData，新窗口读取后恢复 =====
+  // 通过菜单切换侧栏，验证界面变化会落盘
+  menuAction('view:toggle-sidebar');
+  await new Promise((resolve) => setTimeout(resolve, 900));
+  let savedSettings = JSON.parse(readFileSync(join(PROFILE_DIR, 'settings.json'), 'utf-8'));
+  check('侧栏开关变化写入设置文件', savedSettings.sidebarOpen === false, `sidebarOpen=${savedSettings.sidebarOpen}`);
+  menuAction('view:toggle-sidebar');
+  await new Promise((resolve) => setTimeout(resolve, 900));
+
+  // 窗口尺寸同样被记住
+  win.setBounds({ x: 60, y: 60, width: 1000, height: 700 });
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  savedSettings = JSON.parse(readFileSync(join(PROFILE_DIR, 'settings.json'), 'utf-8'));
+  check(
+    '窗口尺寸写入设置文件',
+    savedSettings.windowBounds && savedSettings.windowBounds.width === 1000 && savedSettings.windowBounds.height === 700,
+    JSON.stringify(savedSettings.windowBounds)
+  );
+
+  // 写入一份「非默认」偏好，再开新窗口，验证渲染层启动时会读取并应用
+  await exec(`window.api.updateSettings({ themeId: 'dark', toolbarVisible: false, zoomPercent: 125 })`);
+  const before = BrowserWindow.getAllWindows().length;
+  menuAction('file:new-window');
+  const second = await waitFor(
+    () => BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed() && candidate !== win) ?? null,
+    { label: '新窗口创建', timeout: 20000 }
+  );
+  await waitFor(() => execIn(second, `Boolean(document.querySelector('.app'))`), { label: '新窗口渲染', timeout: 20000 });
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  const restored = await execIn(
+    second,
+    `JSON.stringify({
+      theme: document.documentElement.getAttribute('data-theme'),
+      toolbar: Boolean(document.querySelector('.toolbar')),
+      status: document.querySelector('.statusbar').textContent
+    })`
+  );
+  const restoredState = JSON.parse(restored);
+  check('新窗口恢复深色主题', restoredState.theme === 'dark', restoredState.theme);
+  check('新窗口恢复工具栏隐藏', restoredState.toolbar === false, `toolbar=${restoredState.toolbar}`);
+  check(
+    '新窗口恢复缩放 125%',
+    Math.abs(second.webContents.getZoomFactor() - 1.25) < 0.01 && String(restoredState.status).includes('125%'),
+    `zoomFactor=${second.webContents.getZoomFactor()} status=${restoredState.status}`
+  );
+  second.close();
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  check('新窗口可正常关闭', BrowserWindow.getAllWindows().length === before, `windows=${BrowserWindow.getAllWindows().length}`);
+
+  // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();
   win.focus();

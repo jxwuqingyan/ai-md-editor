@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type {
   OpenFileResult,
   SaveFileResult,
@@ -14,7 +14,10 @@ import type {
   ZoomAction,
   MenuAction,
   MenuViewState,
-  MenuActionMessage
+  MenuActionMessage,
+  AppSettings,
+  StatPathResult,
+  SaveImageFromPathInput
 } from '@ai-md-editor/shared';
 import { IpcChannel, MenuActionChannel, MenuStateChannel } from '@ai-md-editor/shared';
 
@@ -89,6 +92,30 @@ const api = {
 
   /** 界面缩放，返回新的缩放百分比（如 110） */
   zoom: (action: ZoomAction): Promise<number> => ipcRenderer.invoke(IpcChannel.Zoom, action),
+
+  /** 直接设置缩放百分比（恢复上次缩放），返回实际生效值 */
+  setZoom: (percent: number): Promise<number> => ipcRenderer.invoke(IpcChannel.SetZoom, percent),
+
+  /** 读取持久化设置 */
+  getSettings: (): Promise<AppSettings> => ipcRenderer.invoke(IpcChannel.SettingsGet),
+
+  /** 更新持久化设置（部分字段） */
+  updateSettings: (patch: Partial<AppSettings>): Promise<AppSettings> =>
+    ipcRenderer.invoke(IpcChannel.SettingsUpdate, patch),
+
+  /** 查询路径类型（拖拽时判断文件夹 / 文件） */
+  statPath: (targetPath: string): Promise<StatPathResult> =>
+    ipcRenderer.invoke(IpcChannel.StatPath, targetPath),
+
+  /** 把磁盘上的图片复制到文档同级 img/ 目录（拖拽插入） */
+  saveImageFromPath: (input: SaveImageFromPathInput): Promise<SaveImageResult> =>
+    ipcRenderer.invoke(IpcChannel.SaveImageFromPath, input),
+
+  /**
+   * 取拖拽进来的文件的真实磁盘路径。
+   * Electron 32+ 的 File 不再带 path 属性，必须用 webUtils 转换。
+   */
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 
   /** 窗口置顶 */
   setAlwaysOnTop: (enabled: boolean): Promise<void> =>
