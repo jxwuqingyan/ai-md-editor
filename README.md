@@ -23,7 +23,8 @@
 - **编码兼容**：自动识别 UTF-8（含 BOM）/ UTF-16 / GBK，GBK 文档不再乱码；保存统一转 UTF-8 并同步状态栏编码
 - **外部修改感知**：文档被其它程序改动时状态栏提示，没有未保存改动时可一键「重新加载」
 - **快速启动**：编辑器内核按需动态加载，入口脚本从 3.18 MB 降到 0.59 MB，加载期间有占位提示
-- **导出**：一键导出 PDF / HTML / Word（单文件内联样式；导出时自动去掉 Front Matter，`[TOC]` 展开为带锚点的目录）
+- **导出**：一键导出 PDF / HTML / Word（单文件内联样式；导出时自动去掉 Front Matter，`[TOC]` 展开为带锚点的目录；
+  数学公式渲染成 KaTeX 并内联字体，PDF/HTML 离线可看，Word 保留 TeX 原文）
 - **文件操作**：打开、保存、另存为、自动保存（1.5s 防抖，覆盖所有已落盘标签，不只当前标签）、最近文件、拖拽打开；打开前校验体积（20 MB 上限）与二进制内容，避免误开大文件卡死
 - **大纲导航**：基于 remark AST 实时提取标题，支持 ATX/Setext 标题与重复标题精确跳转
 - **图片插入**：粘贴 / 拖入 / 从本地选择三种方式，图片自动存到文档同级 `img/` 目录并在编辑器内直接显示；Markdown 写相对路径，文档与 `img/` 目录一起拷贝即可带走图片
@@ -101,9 +102,10 @@ npm run test:menu-runtime --workspace @ai-md-editor/desktop
 npm run test:e2e --workspace @ai-md-editor/desktop
 ```
 
-- `test/unit.ts`（由 `test/run-unit.cjs` 用 esbuild 打包执行）：纯函数单测 25 项——
+- `test/unit.ts`（由 `test/run-unit.cjs` 用 esbuild 打包执行）：纯函数单测 34 项——
   编码识别（UTF-8 / BOM / UTF-16 / GBK）、`file://` 地址生成、Markdown 简化、
-  源码模式表格上下文与格式化。纯 Node，无需 GUI，Windows CI 也能跑
+  源码模式表格上下文与格式化、导出用公式提取/还原（代码掩码、货币文本不误判、渲染失败兜底）。
+  纯 Node，无需 GUI，Windows CI 也能跑
 - `test/menuAccelerators.cjs`：校验 macOS / Windows 两套快捷键的写法与唯一性，以及平台关键键位是否齐全（纯 Node，无需 GUI）
 - `test/menuRuntime.cjs`：加载构建产物构造真实原生菜单，断言当前平台的关键快捷键（含隐藏项）已注册，
   并逐项点击菜单验证「一点击 = 一条 `menu:action`、动作与源码声明一致」

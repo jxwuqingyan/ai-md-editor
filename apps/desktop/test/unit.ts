@@ -15,6 +15,7 @@ import {
   toFileUrl
 } from '@ai-md-editor/shared';
 import { applySourceFormat, sourceTableContext } from '../src/renderer/sourceActions';
+import { extractMath, restoreMath } from '../src/main/mathExport';
 
 let total = 0;
 let failed = 0;
@@ -130,6 +131,59 @@ const cleared = applySourceFormat('paragraph', undefined, {
   selectionEnd: 4
 });
 equal('段落去掉标题前缀', cleared.content, 'abc');
+
+// ===== 导出用数学公式提取/还原 =====
+const math1 = extractMath('行内 $a^2+b^2$ 与块级 $$\\int_0^1 x dx$$ 混排');
+// 块级公式先于行内公式提取，所以索引在前
+equal(
+  '提取行内+块级公式',
+  math1.items,
+  [
+    { tex: '\\int_0^1 x dx', display: true },
+    { tex: 'a^2+b^2', display: false }
+  ]
+);
+ok(
+  '正文只剩占位符',
+  math1.text === '行内 %%MATH1%% 与块级 %%MATH0%% 混排',
+  JSON.stringify(math1.text)
+);
+
+const math2 = extractMath('代码 `$not_math$` 与围栏：\n```js\nconst x = "$a$";\n```\n结束');
+equal('代码里的 $ 不算公式', math2.items, []);
+ok(
+  '代码段原样还原',
+  math2.text.includes('`$not_math$`') && math2.text.includes('const x = "$a$";'),
+  JSON.stringify(math2.text)
+);
+
+const math3 = extractMath('价格 $5, $10 与 $x$');
+equal(
+  '货币文本不误判（首尾空白约束）',
+  math3.items,
+  [{ tex: 'x', display: false }]
+);
+
+const math4 = extractMath('$$\nE = mc^2\n$$');
+equal('块级公式允许跨行', math4.items, [{ tex: 'E = mc^2', display: true }]);
+
+const restored = restoreMath('<p>%%MATH0%%</p>', [{ tex: 'a^2', display: false }]);
+ok(
+  '占位符还原为 KaTeX HTML',
+  restored.includes('class="katex"') && !restored.includes('%%MATH0%%'),
+  restored.slice(0, 80)
+);
+
+const fallback = restoreMath('<p>%%MATH0%%</p>', []);
+equal('无对应条目时占位符原样保留', fallback, '<p>%%MATH0%%</p>');
+
+const badTex = restoreMath('%%MATH0%%', [{ tex: '\\notacommand{', display: false }]);
+// throwOnError:false 时 KaTeX 不抛异常，而是渲染成醒目的 katex-error 标记
+ok(
+  '非法 TeX 渲染为错误标记（不中断导出）',
+  badTex.includes('katex-error'),
+  badTex.slice(0, 80)
+);
 
 // ===== 结果 =====
 console.log(`\n单元测试：${total - failed}/${total} 通过`);

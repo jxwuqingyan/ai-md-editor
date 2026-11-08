@@ -179,6 +179,8 @@ ai-md-editor/
 | 31 | 编辑器内核必须动态 `import`：入口 chunk 只留壳与文档状态（当前 ~0.59 MB），编辑器作为独立 chunk 按需加载；渲染层不要从 `@ai-md-editor/editor` 直接导入**值**（`NO_TABLE_CONTEXT` 放在 `renderer/constants.ts`） |
 | 32 | 外部修改监听由渲染层按「当前活动文档」登记（`fs:watch` / `fs:unwatch`）；主进程自身写盘前 `markSelfWrite`，1.5s 宽限期内忽略事件，否则会出现「自己保存后提示文件被修改」 |
 | 33 | 原生菜单重建前比较 `MenuViewState` 签名，未变化直接跳过；`useMenuBridge` 的分发表只构造一次并用代理读取最新回调 |
+| 34 | 导出公式渲染：`extractMath` 先把 `$...$` / `$$...$$` 换成占位符再交给 marked（防止 TeX 里的 `*`/`_` 被当 Markdown），渲染后用 KaTeX 还原；代码段用掩码保护；`katex.min.css` 与 woff2 字体 data URI 内联（仅含公式的文档才嵌入）；Word 保留 TeX 原文 |
+| 35 | 侧栏是纵向 flex：树区/大纲区自身滚动（`flex:1; min-height:0; overflow-y:auto`），`.sidebar` 本身 `overflow:hidden`；「打开文件夹」固定在底部，不要移回顶部 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -204,6 +206,7 @@ ai-md-editor/
 | 自动保存范围 | `renderer/hooks/useTabs.ts` | 防抖到点写入**所有**「有路径且 dirty」的标签，按内容快照清 dirty；只写当前标签会在切标签时丢稿 |
 | 打开文件校验 | `apps/desktop/src/main/ipc.ts` `readTextFile` | 先 `stat`：> 20 MB 或含 NUL 字节（二进制）直接拒绝并弹窗说明；不要静默返回「已取消」 |
 | 拖拽取路径 | `apps/desktop/src/preload/index.ts` | `getPathForFile(file)` = `webUtils.getPathForFile`；渲染层据此区分 图片 / 文件夹 / 文档 |
+| 导出公式 | `main/mathExport.ts` + `main/export.ts` | 提取/还原纯函数（可单测）；块级公式先于行内提取；`throwOnError:false` 下非法 TeX 渲染成 `katex-error` 标记而非抛异常 |
 
 > 变更上述决策需先与用户确认，不得擅自调整。
 
@@ -240,6 +243,9 @@ ai-md-editor/
 | 外部改动只提示一次，之后不再触发 | 编辑器保存是「写临时文件 + rename」，watcher 盯着旧 inode | 收到 `rename` 事件后关闭并重建 watcher |
 | 关闭窗口的 E2E 断言偶发失败 | 关闭前多了异步询问流程，固定 sleep 不够 | 用 `waitFor` 等窗口真正消失（本次已改）；不要在有 dirty 未命名标签时关窗（会弹系统对话框阻塞测试） |
 | GBK 文档保存后变乱码 | 用 `TextEncoder` 原样写回 GBK 是不可能的（只支持 UTF-8） | 保存统一转 UTF-8，并把标签编码与状态栏同步更新为 UTF-8 |
+| 导出 PDF 公式显示成 `$...$` 原文 | marked 不认识 TeX，`$...$` 原样输出且 TeX 里的 `*`/`_` 还会被当 Markdown 改写 | 导出前用 `extractMath` 换占位符，marked 后用 KaTeX 还原；代码段掩码保护；CSS+字体 data URI 内联（`main/export.ts`） |
+| 冒烟脚本里 `require.resolve('katex/...')` 报找不到 | `require.resolve` 相对**模块文件位置**解析，/tmp 下的脚本解析不到项目 node_modules（真实主进程产物在项目内，不受影响） | 冒烟脚本用 `NODE_PATH=<项目>/node_modules` 或放到项目目录内运行 |
+| 编辑器内行内公式上标顶进上一行 | KaTeX 默认 1.21em，行内公式的上标/根号高度超过 1.75 行距的行框 | `.katex` 压到 1.05em，含公式的行用 `:has([data-type='math_inline'])` 放大行距（`global.css`） |
 | 入口 chunk 3 MB，冷启动慢 | 入口静态 `import` 了编辑器包（含 Milkdown/Shiki/Mermaid/KaTeX），连 `NO_TABLE_CONTEXT` 这种小常量都会把整包拉进来 | 编辑器改为 `await import(...)`；渲染层常量放 `constants.ts`，只从编辑器包导入**类型** |
 | 纯函数单测在 Windows CI 跑不起来 | 直接用 Node 跑 `.ts` 依赖运行器/版本 | `test/run-unit.cjs` 用 esbuild（随 vite 安装）打包成 CJS 再执行 |
 | 只有竖线的普通段落被当成表格 | `findTableBlock` 只检查行首 `\|`，没要求 GFM 分隔行 | 第二行必须是合法分隔行（`isTableSeparator`），否则不算表格 |

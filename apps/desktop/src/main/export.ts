@@ -3,13 +3,37 @@
  * - HTML：marked 渲染成带内联样式的单文件
  * - Word：生成 Word 可打开的 HTML 格式（.doc）
  * - PDF：用隐藏 BrowserWindow 加载 HTML 后 printToPDF
+ * - 数学公式：$...$ / $$...$$ 用 KaTeX 渲染成 HTML，并把
+ *   katex.min.css 与 woff2 字体以 data URI 内联，导出文件自包含
  */
 import { BrowserWindow } from 'electron';
 import { writeFile, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { marked } from 'marked';
 import type { ExportFormat } from '@ai-md-editor/shared';
+import { extractMath, restoreMath, escapeHtml } from './mathExport';
+
+/** katex.min.css 缓存：woff2 字体全部内联为 data URI（约 1.5MB，仅含公式的文档才嵌入） */
+let katexCssCache: string | null = null;
+function getKatexCss(): string {
+  if (katexCssCache !== null) return katexCssCache;
+  try {
+    const cssPath = require.resolve('katex/dist/katex.min.css');
+    const fontDir = join(dirname(cssPath), 'fonts');
+    katexCssCache = readFileSync(cssPath, 'utf-8').replace(
+      /url\(fonts\/([^)]+\.woff2)\)/g,
+      (_match, file: string) => {
+        const data = readFileSync(join(fontDir, file));
+        return `url(data:font/woff2;base64,${data.toString('base64')})`;
+      }
+    );
+  } catch {
+    katexCssCache = '';
+  }
+  return katexCssCache;
+}
 
 /** 去掉文件头 YAML front matter（导出正文不该出现两条分隔线 + 元信息文本） */
 function stripFrontmatter(markdown: string): string {
@@ -34,9 +58,32 @@ function renderToc(html: string): string {
 }
 
 /** 导出文档的完整 HTML（内联样式，中文字体友好） */
-export function buildHtml(markdown: string, title: string): string {
-  // marked 渲染正文；gfm:true 支持表格/任务列表等
-  const parsed = marked.parse(stripFrontmatter(markdown), { gfm: true, breaks: false }) as string;
+export function buildHtml(
+  markdown: string,
+  title: string,
+  options: { math?: 'render' | 'text' } = {}
+): string {
+  const mathMode = options.math ?? 'render';
+  const source = stripFrontmatter(markdown);
+
+  let parsed: string;
+  let mathCss = '';
+  if (mathMode === 'render') {
+    // 公式先换成占位符再交给 marked，避免 TeX 里的 *、_ 等被当成 Markdown 语法
+    const { text, items } = extractMath(source);
+    const raw = marked.parse(text, { gfm: true, breaks: false }) as string;
+    parsed = restoreMath(raw, items);
+    if (items.length > 0) {
+      const katexCss = getKatexCss();
+      if (katexCss) {
+        // 放在 katex.min.css 之后覆盖默认 1.21em，防止上标溢出行框
+        mathCss = `<style>${katexCss}\n.katex { font-size: 1.05em; }</style>`;
+      }
+    }
+  } else {
+    // Word 不渲染 KaTeX：保留 TeX 原文
+    parsed = marked.parse(source, { gfm: true, breaks: false }) as string;
+  }
   const body = renderToc(parsed);
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -44,6 +91,7 @@ export function buildHtml(markdown: string, title: string): string {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>${escapeHtml(title)}</title>
+${mathCss}
 <style>
   body {
     font-family: -apple-system, 'SF Pro Text', 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -104,15 +152,6 @@ ${body}
 </html>`;
 }
 
-/** HTML 转义（标题等） */
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 /**
  * 导出 Markdown 为 HTML 文件。
  */
@@ -125,7 +164,8 @@ export async function exportHtml(markdown: string, filePath: string, title: stri
  * 导出 Markdown 为 Word（.doc，Word 能打开的 HTML 格式）。
  */
 export async function exportWord(markdown: string, filePath: string, title: string): Promise<void> {
-  const html = buildHtml(markdown, title);
+  // Word 无法渲染 KaTeX HTML，公式保留 TeX 原文
+  const html = buildHtml(markdown, title, { math: 'text' });
   // 加 Word 识别 META 头，确保以 .doc 打开时按 HTML 解析
   const wordHtml = html.replace(
     '</head>',

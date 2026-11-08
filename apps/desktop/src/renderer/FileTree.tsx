@@ -25,7 +25,7 @@ interface DirNode {
  * - 显示当前打开文档所在目录的子目录与 Markdown 文件
  * - 目录可展开/折叠（懒加载子级）
  * - 点击文件触发打开
- * - 顶部有「打开文件夹」入口与当前目录名
+ * - 底部固定「打开文件夹」入口（显示当前目录名，点击可切换）
  *
  * 无障碍：每个条目都是真正的 <button>（Enter/Space 天然可用），
  * 容器统一处理方向键导航，键盘用户可以完整浏览整棵树。
@@ -201,10 +201,10 @@ export default function FileTree({
   if (!rootDir) {
     return (
       <div className="filetree">
-        <button className="filetree-open-btn" onClick={onChooseFolder} title="打开文件夹">
-          打开文件夹
-        </button>
         <div className="filetree-empty">打开文件夹以浏览文件</div>
+        <button className="filetree-open-btn" onClick={onChooseFolder} title="打开文件夹">
+          打开文件夹…
+        </button>
       </div>
     );
   }
@@ -212,11 +212,13 @@ export default function FileTree({
   const rootName = rootDir.split(/[\\/]/).pop() ?? rootDir;
 
   return (
-    <div className="filetree" ref={containerRef} onKeyDown={handleKeyDown} role="tree">
-      <button className="filetree-open-btn" onClick={onChooseFolder} title="切换文件夹">
+    <div className="filetree">
+      <div className="filetree-body" ref={containerRef} onKeyDown={handleKeyDown} role="tree">
+        {dirs.get(rootDir)?.children.map((child) => renderEntry(child, 0))}
+      </div>
+      <button className="filetree-open-btn" onClick={onChooseFolder} title={`切换文件夹：${rootDir}`}>
         {rootName}
       </button>
-      {dirs.get(rootDir)?.children.map((child) => renderEntry(child, 0))}
     </div>
   );
 }
