@@ -1752,101 +1752,109 @@ button:focus-visible {
   background: var(--bg-hover);
 }
 
-/* ===== 斜杠快速插入菜单（编辑器输入「/」弹出，fixed 定位挂在 body 上） ===== */
+/* ===== 斜杠快速插入菜单（编辑器输入「/」弹出；挂在 .app 下以继承主题变量） ===== */
 .slash-menu {
   position: fixed;
   z-index: 1200;
-  min-width: 296px;
-  max-width: 340px;
-  max-height: 320px;
+  width: 348px;
+  max-height: 380px;
   overflow-y: auto;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.16);
-  padding: 6px;
+  background: var(--bg-panel, #fff);
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16), 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 8px;
   font-family: var(--font-sans);
 }
 
 .slash-section {
-  padding: 6px 8px 4px;
-  font-size: 11px;
+  padding: 8px 8px 6px;
+  font-size: 12px;
   color: var(--text-tertiary);
   user-select: none;
 }
 
-/* 最近使用胶囊 */
+/* 最近使用胶囊：语雀风格浅底圆角块，区块下加分隔线 */
 .slash-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 2px 4px 6px;
+  gap: 8px;
+  padding: 0 4px 10px;
+  margin: 0 4px;
+  border-bottom: 1px solid var(--border-subtle, #ececec);
 }
 
 .slash-chip {
-  border: 1px solid var(--border);
-  background: var(--bg-subtle);
-  border-radius: 999px;
-  padding: 3px 12px;
-  font-size: 12px;
+  border: none;
+  background: var(--bg-subtle, #f3f3f3);
+  border-radius: 6px;
+  padding: 5px 14px;
+  font-size: 13px;
   color: var(--text-primary);
   cursor: pointer;
   font-family: var(--font-sans);
-  transition: border-color 120ms ease, color 120ms ease;
+  transition: background 120ms ease, color 120ms ease;
 }
 
 .slash-chip:hover {
-  border-color: var(--accent);
+  background: var(--accent-subtle, #eef4ff);
   color: var(--accent);
 }
 
-/* 格式网格：图标按钮 */
+/* 格式网格：图标按钮（13 项 → 7+6 两行，不出孤行） */
 .slash-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 2px;
-  padding: 0 2px 4px;
+  padding: 2px 2px 4px;
 }
 
 .slash-grid-item {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 36px;
+  height: 40px;
   border: none;
   background: none;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   cursor: pointer;
   color: var(--text-secondary);
   transition: background 120ms ease, color 120ms ease;
 }
 
 .slash-glyph {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
   letter-spacing: -0.02em;
 }
 
 .slash-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   display: block;
 }
 
-/* 插入列表：图标 + 名称 + 说明 */
+/* 插入区：语雀风格两列，图标带圆角方块底座 */
 .slash-list {
   display: flex;
   flex-direction: column;
+}
+
+.slash-list-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 0 2px 4px;
 }
 
 .slash-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 7px 10px;
+  padding: 6px 8px;
   border: none;
   background: none;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   cursor: pointer;
   color: var(--text-primary);
   font-size: 13px;
@@ -1855,16 +1863,48 @@ button:focus-visible {
   transition: background 120ms ease;
 }
 
+.slash-icon-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  background: var(--bg-panel, #fff);
+}
+
+.slash-icon-box .slash-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.slash-item-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .slash-item-hint {
   margin-left: auto;
+  padding-left: 6px;
   font-size: 11px;
   color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .slash-grid-item:hover,
 .slash-grid-item.slash-active,
 .slash-item:hover,
 .slash-item.slash-active {
-  background: var(--accent-subtle);
+  background: var(--bg-hover, #f2f2f2);
+  color: var(--text-primary);
+}
+
+.slash-item:hover .slash-icon-box,
+.slash-item.slash-active .slash-icon-box {
   color: var(--accent);
+  border-color: var(--accent);
 }

@@ -191,7 +191,7 @@ ai-md-editor/
 | 42 | 搜索匹配同时带两个列号：`column` 是裁剪缩进后的展示列（高亮用），`rawColumn` 是原始行列（源码模式定位用）。缩进行如果按 `column` 定位光标，会偏到缩进之前；WYSIWYG 侧按行号估算位置后挑最近的片段，不能直接 `indexOf` |
 | 43 | 导出 HTML/PDF/Word 必须把文档内的本地图片内联为 data URI（`main/exportAssets.ts`）：`img/xxx.png` 是相对文档的路径，导出文件换目录就全裂；单图 8MB、总量 30MB 上限，读不到或超限保持原样 |
 | 44 | 主进程必须 `app.requestSingleInstanceLock()`，否则 `second-instance` 事件永远不触发，二次启动会另起进程、文件也开不到已有窗口 |
-| 45 | 斜杠菜单（`packages/editor/src/slash.ts`）是自包含 ProseMirror 插件：触发要求光标在文本块、无选区、不在代码块/行内代码，且「/」前一字符不是字母数字/冒号/斜杠（防网址、路径误弹）；确认时先删「/过滤词」再统一走 `format()`（实例经 `formatRef` 延迟接线，不能用 callCommand 直调——插件内拿不到 Milkdown 上下文）；面板 mousedown 必须 preventDefault，否则编辑器 blur 先把菜单关掉 |
+| 45 | 斜杠菜单（`packages/editor/src/slash.ts`）是自包含 ProseMirror 插件：触发要求光标在文本块、无选区、不在代码块/行内代码，且「/」前一字符不是字母数字/冒号/斜杠（防网址、路径误弹）；确认时先删「/过滤词」再统一走 `format()`（实例经 `formatRef` 延迟接线，不能用 callCommand 直调——插件内拿不到 Milkdown 上下文）；面板 mousedown 必须 preventDefault，否则编辑器 blur 先把菜单关掉；**面板必须挂在 `.app` 下**——主题 CSS 变量经 React style 注入在 `.app` 上，挂 body 下 `var(--bg-panel)` 解析失败会变透明底 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 

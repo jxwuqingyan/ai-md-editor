@@ -240,7 +240,11 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
         : visible[Number(target.dataset['slashIndex'])];
       if (item) applyItem(view, item);
     });
-    document.body.appendChild(panel);
+    // 必须挂在 .app（主题 CSS 变量的宿主）下而不是 body：
+    // 变量经 React style 注入在 .app 上，挂 body 下 var(--bg-panel) 全部解析失败，
+    // 面板会变成透明底、文字与正文穿透混在一起。
+    const host = document.querySelector('.app');
+    (host instanceof HTMLElement ? host : document.body).appendChild(panel);
     return panel;
   };
 
@@ -303,7 +307,7 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
         const active = item.id === activeId ? ' slash-active' : '';
         html += `<button type="button" class="slash-grid-item${active}" data-slash-index="${visible.indexOf(item)}" title="${esc(item.label)}">${icon}</button>`;
       });
-      html += '</div><div class="slash-section">插入</div><div class="slash-list">';
+      html += '</div><div class="slash-section">插入</div><div class="slash-list slash-list-grid">';
       insertItems.forEach((item) => {
         html += rowHtml(item, visible.indexOf(item), item.id === activeId);
       });
@@ -325,12 +329,12 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     node.querySelector('.slash-active')?.scrollIntoView({ block: 'nearest' });
   };
 
-  /** 插入区 / 过滤态的单行条目 */
+  /** 插入区 / 过滤态的单行条目（图标带圆角方块底座） */
   const rowHtml = (item: SlashItem, index: number, active: boolean): string => {
     const icon = item.icon.startsWith('<svg')
       ? `<span class="slash-icon">${item.icon}</span>`
       : `<span class="slash-glyph">${esc(item.icon)}</span>`;
-    return `<button type="button" class="slash-item${active ? ' slash-active' : ''}" data-slash-index="${index}">${icon}<span class="slash-item-label">${esc(item.label)}</span>${item.hint ? `<span class="slash-item-hint">${esc(item.hint)}</span>` : ''}</button>`;
+    return `<button type="button" class="slash-item${active ? ' slash-active' : ''}" data-slash-index="${index}"><span class="slash-icon-box">${icon}</span><span class="slash-item-label">${esc(item.label)}</span>${item.hint ? `<span class="slash-item-hint">${esc(item.hint)}</span>` : ''}</button>`;
   };
 
   /** 确认条目：删掉「/过滤词」→ 套用动作 → 记录最近使用 */
