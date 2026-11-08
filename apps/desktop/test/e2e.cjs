@@ -612,14 +612,21 @@ async function runTests() {
   menuAction('view:toggle-sidebar');
   await new Promise((resolve) => setTimeout(resolve, 900));
 
-  // 窗口尺寸同样被记住
+  // 窗口尺寸同样被记住。CI runner 的屏幕工作区可能比请求值小，系统会自动裁剪 bounds
+  // （实测 macOS runner 把 1000×700 裁成 1000×684），所以与窗口实际 bounds 比对。
   win.setBounds({ x: 60, y: 60, width: 1000, height: 700 });
   await new Promise((resolve) => setTimeout(resolve, 1200));
+  const actualBounds = win.getBounds();
   savedSettings = JSON.parse(readFileSync(join(PROFILE_DIR, 'settings.json'), 'utf-8'));
+  const savedBounds = savedSettings.windowBounds;
   check(
     '窗口尺寸写入设置文件',
-    savedSettings.windowBounds && savedSettings.windowBounds.width === 1000 && savedSettings.windowBounds.height === 700,
-    JSON.stringify(savedSettings.windowBounds)
+    Boolean(savedBounds) &&
+      savedBounds.width === actualBounds.width &&
+      savedBounds.height === actualBounds.height &&
+      Math.abs(savedBounds.width - 1000) <= 20 &&
+      Math.abs(savedBounds.height - 700) <= 40,
+    `saved=${JSON.stringify(savedBounds)} actual=${JSON.stringify(actualBounds)}`
   );
 
   // 写入一份「非默认」偏好，再开新窗口，验证渲染层启动时会读取并应用

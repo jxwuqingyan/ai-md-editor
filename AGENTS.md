@@ -212,6 +212,8 @@ ai-md-editor/
 | 用 `sendInputEvent` 测快捷键毫无反应 | 注入的按键只进渲染层输入管线，不经过原生菜单的 accelerator 分发（实测 Cmd+Z 不触发） | 改为 `MenuItem.click()` 验证派发链路；OS 级按键手感留给真机 |
 | CI 的 Windows job 命令报错 | PowerShell 把 `--workspace @ai-md-editor/desktop` 里的 `@` 当 splatting | workspace 名一律加双引号 |
 | 升版本后第三方依赖版本被误改 | 全局替换 lock 里的版本号，命中 `retry@0.12.0` 等同号第三方包 | 只精确改 lock 顶层 `version` 与两个 workspace 条目 |
+| CI 上「窗口尺寸写入设置文件」断言失败 | 硬编码请求值 `1000×700`，macOS runner 工作区较小会裁剪成 `1000×684` | 与 `win.getBounds()` 实际值比对，请求值只做容差检查 |
+| Intel job 打 dmg 偶发 `hdiutil detach` 失败（exit 16） | runner 上磁盘镜像卸载冲突，非代码问题，重试 5 次仍可能失败 | `gh run rerun --failed` 重跑失败 job，或等下次 push 重新触发 |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 
