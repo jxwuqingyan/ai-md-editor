@@ -21,6 +21,9 @@ const MAX_SCANNED = 5000;
 /** 跳过的目录名（依赖/版本库/隐藏目录，以及图片目录） */
 const SKIP_DIRS = new Set(['node_modules', '.git', 'img', 'assets']);
 
+/** 参与搜索的文本文件扩展名：必须与文件树（readDir）认的保持一致，否则树里有、搜不到 */
+const SEARCHABLE_FILE = /\.(md|markdown|txt)$/i;
+
 /** 扫描到的候选文件 */
 interface Candidate {
   path: string;
@@ -47,10 +50,25 @@ async function collectMarkdownFiles(root: string): Promise<Candidate[]> {
         if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) queue.push(fullPath);
         continue;
       }
-      if (entry.isFile() && /\.md$/i.test(entry.name)) out.push({ path: fullPath });
+      if (entry.isFile() && SEARCHABLE_FILE.test(entry.name)) out.push({ path: fullPath });
     }
   }
   return out;
+}
+
+/**
+ * 编译正则：优先带 u 标志（支持 `\p{Han}` 这类 Unicode 语法），
+ * 编译失败再退回不带 u（少数老式写法在 u 模式下非法）。都失败返回 null。
+ */
+function compileRegex(source: string, baseFlags: string): RegExp | null {
+  for (const extra of ['u', '']) {
+    try {
+      return new RegExp(source, `${baseFlags}${extra}`);
+    } catch {
+      // 换一组标志再试
+    }
+  }
+  return null;
 }
 
 /**
@@ -59,16 +77,11 @@ async function collectMarkdownFiles(root: string): Promise<Candidate[]> {
  * 非法正则返回 null。独立导出以便单元测试。
  */
 export function buildLineMatcher(input: SearchFolderInput): ((line: string) => SearchMatch[]) | null {
-  // 整词模式用到 \p{L}，必须带 u 标志
-  const flags = `g${input.caseSensitive ? '' : 'i'}${input.wholeWord ? 'u' : ''}`;
+  const baseFlags = `g${input.caseSensitive ? '' : 'i'}`;
   let source: string;
   if (input.regex) {
     source = input.query;
-    try {
-      new RegExp(source, flags); // 仅校验合法性
-    } catch {
-      return null; // 非法正则由调用方返回错误
-    }
+    if (!compileRegex(source, baseFlags)) return null; // 非法正则由调用方返回错误
   } else {
     source = input.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
@@ -77,12 +90,8 @@ export function buildLineMatcher(input: SearchFolderInput): ((line: string) => S
     // 核心包成第 1 个捕获组，匹配后用它修正列与长度（边界字符会一起被吞进整体匹配）
     source = `(?:^|[^\\p{L}\\p{N}_])(${source})(?=$|[^\\p{L}\\p{N}_])`;
   }
-  let re: RegExp;
-  try {
-    re = new RegExp(source, flags);
-  } catch {
-    return null; // 非法正则由调用方返回错误
-  }
+  const re = compileRegex(source, baseFlags);
+  if (!re) return null;
   return (line: string): SearchMatch[] => {
     const matches: SearchMatch[] = [];
     re.lastIndex = 0;
@@ -104,7 +113,7 @@ export function buildLineMatcher(input: SearchFolderInput): ((line: string) => S
         re.lastIndex += 1; // 空匹配防死循环
         continue;
       }
-      matches.push({ line: 0, column, length, text: line.trim() });
+      matches.push({ line: 0, column, rawColumn: column, length, text: line.trim() });
       if (matches.length >= 3) break; // 每行最多记 3 处，行文本相同无需更多
       if (m.index === re.lastIndex) re.lastIndex += 1;
     }
@@ -112,14 +121,14 @@ export function buildLineMatcher(input: SearchFolderInput): ((line: string) => S
   };
 }
 
-/** 行号补齐（匹配发生在裁剪前的原始行上） */
-function finalizeMatches(rawLineMatches: SearchMatch[], lineNo: number, rawLine: string): SearchMatch[] {
-  // 展示文本是裁剪首尾空白后的行，列号要相应前移
+/** 行号补齐（匹配发生在裁剪前的原始行上）。导出以便单测覆盖列号换算 */
+export function finalizeMatches(rawLineMatches: SearchMatch[], lineNo: number, rawLine: string): SearchMatch[] {
+  // 展示文本是裁剪首尾空白后的行：column 跟着前移，rawColumn 保留原样供源码模式定位
   const leading = rawLine.length - rawLine.trimStart().length;
   return rawLineMatches.map((m) => ({
     ...m,
     line: lineNo,
-    column: Math.max(0, m.column - leading),
+    column: Math.max(0, m.rawColumn - leading),
     text: rawLine.trim()
   }));
 }

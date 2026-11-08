@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { marked } from 'marked';
 import type { ExportFormat } from '@ai-md-editor/shared';
 import { extractMath, restoreMath, escapeHtml } from './mathExport';
+import { inlineLocalImages } from './exportAssets';
 
 /** katex.min.css 缓存：woff2 字体全部内联为 data URI（约 1.5MB，仅含公式的文档才嵌入） */
 let katexCssCache: string | null = null;
@@ -61,10 +62,12 @@ function renderToc(html: string): string {
 export function buildHtml(
   markdown: string,
   title: string,
-  options: { math?: 'render' | 'text' } = {}
+  options: { math?: 'render' | 'text'; docDir?: string | null } = {}
 ): string {
   const mathMode = options.math ?? 'render';
   const source = stripFrontmatter(markdown);
+  // 标题用文件名去掉扩展名，避免 PDF/HTML 标题出现「纪要.md」
+  const displayTitle = title.replace(/\.(md|markdown|txt)$/i, '');
 
   let parsed: string;
   let mathCss = '';
@@ -84,13 +87,13 @@ export function buildHtml(
     // Word 不渲染 KaTeX：保留 TeX 原文
     parsed = marked.parse(source, { gfm: true, breaks: false }) as string;
   }
-  const body = renderToc(parsed);
+  const body = inlineLocalImages(renderToc(parsed), options.docDir ?? null);
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${escapeHtml(title)}</title>
+<title>${escapeHtml(displayTitle)}</title>
 ${mathCss}
 <style>
   body {
@@ -155,17 +158,27 @@ ${body}
 /**
  * 导出 Markdown 为 HTML 文件。
  */
-export async function exportHtml(markdown: string, filePath: string, title: string): Promise<void> {
-  const html = buildHtml(markdown, title);
+export async function exportHtml(
+  markdown: string,
+  filePath: string,
+  title: string,
+  docDir: string | null = null
+): Promise<void> {
+  const html = buildHtml(markdown, title, { docDir });
   await writeFile(filePath, html, 'utf-8');
 }
 
 /**
  * 导出 Markdown 为 Word（.doc，Word 能打开的 HTML 格式）。
  */
-export async function exportWord(markdown: string, filePath: string, title: string): Promise<void> {
+export async function exportWord(
+  markdown: string,
+  filePath: string,
+  title: string,
+  docDir: string | null = null
+): Promise<void> {
   // Word 无法渲染 KaTeX HTML，公式保留 TeX 原文
-  const html = buildHtml(markdown, title, { math: 'text' });
+  const html = buildHtml(markdown, title, { math: 'text', docDir });
   // 加 Word 识别 META 头，确保以 .doc 打开时按 HTML 解析
   const wordHtml = html.replace(
     '</head>',
@@ -182,9 +195,10 @@ export async function exportWord(markdown: string, filePath: string, title: stri
 export async function exportPdf(
   markdown: string,
   filePath: string,
-  title: string
+  title: string,
+  docDir: string | null = null
 ): Promise<void> {
-  const html = buildHtml(markdown, title);
+  const html = buildHtml(markdown, title, { docDir });
   const tempHtml = join(
     tmpdir(),
     `markdownnote-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.html`
@@ -214,17 +228,18 @@ export async function exportFile(
   format: ExportFormat,
   markdown: string,
   filePath: string,
-  title: string
+  title: string,
+  docDir: string | null = null
 ): Promise<void> {
   switch (format) {
     case 'html':
-      await exportHtml(markdown, filePath, title);
+      await exportHtml(markdown, filePath, title, docDir);
       break;
     case 'pdf':
-      await exportPdf(markdown, filePath, title);
+      await exportPdf(markdown, filePath, title, docDir);
       break;
     case 'word':
-      await exportWord(markdown, filePath, title);
+      await exportWord(markdown, filePath, title, docDir);
       break;
   }
 }

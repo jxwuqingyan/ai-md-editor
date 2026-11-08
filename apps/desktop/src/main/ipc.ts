@@ -321,8 +321,12 @@ async function handleCreateFile(
   desiredName?: string
 ): Promise<CreateFileResult> {
   try {
-    // 用户输入的名称：去掉路径分隔符与非法字符，补 .md 后缀
-    const raw = (desiredName ?? '').trim().replace(/[/\\:*?"<>|]/g, '').replace(/^\.+/, '');
+    // 用户输入的名称：去掉路径分隔符、非法字符与结尾的点/空格（Windows 不允许），补 .md 后缀
+    const raw = (desiredName ?? '')
+      .trim()
+      .replace(/[/\\:*?"<>|]/g, '')
+      .replace(/^\.+/, '')
+      .replace(/[. ]+$/, '');
     const withExt = raw.length === 0 ? '未命名' : /\.(md|markdown|txt)$/i.test(raw) ? raw.replace(/\.(markdown|txt)$/i, '.md') : `${raw}.md`;
     const stem = withExt.replace(/\.md$/i, '');
     let candidate = join(dirPath, withExt);
@@ -382,7 +386,9 @@ async function handleExport(
     return { ok: false, path: null, error: '已取消' };
   }
   try {
-    await exportFile(input.format, input.markdown, result.filePath, input.defaultName);
+    // 文档所在目录用于把 img/ 相对路径图片内联，导出的文件换目录也能正常显示
+    const docDir = input.docPath ? dirname(input.docPath) : null;
+    await exportFile(input.format, input.markdown, result.filePath, input.defaultName, docDir);
     return { ok: true, path: result.filePath, error: null };
   } catch (err) {
     return { ok: false, path: null, error: err instanceof Error ? err.message : String(err) };

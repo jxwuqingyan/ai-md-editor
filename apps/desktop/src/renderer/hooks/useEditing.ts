@@ -170,30 +170,31 @@ export function useEditing({
       const items = event.clipboardData?.items;
       if (!items) return;
 
-      for (const item of items) {
-        if (!item.type.startsWith('image/')) continue;
+      // 一次粘贴可能带多张图片，全部保存并插入，不能只插第一张
+      const images = Array.from(items).filter((item) => item.type.startsWith('image/'));
+      if (images.length === 0) return;
+      event.preventDefault();
+
+      // 图片必须放在文档同级的 img/ 目录，新文档先落盘再继续
+      const docPath = await ensureDocPath();
+      if (!docPath) {
+        onError?.('文档尚未保存，已取消插入图片');
+        return;
+      }
+      for (const item of images) {
         const blob = item.getAsFile();
         if (!blob) continue;
-        event.preventDefault();
         const extension = item.type.split('/')[1] ?? 'png';
         const data = new Uint8Array(await blob.arrayBuffer());
-
-        // 图片必须放在文档同级的 img/ 目录，新文档先落盘再继续
-        const docPath = await ensureDocPath();
-        if (!docPath) {
-          onError?.('文档尚未保存，已取消插入图片');
-          return;
-        }
         const result = await window.api.saveImage({ data, extension, docPath });
         if (!result.relativePath) {
           onError?.(`图片保存失败：${result.error ?? '未知错误'}`);
-          return;
+          continue;
         }
         insertImageMarkdown(`![图片](${result.relativePath})`);
-        break;
       }
     },
-    [readOnlyRef, activeTab, viewModeRef, editorRef, sourceTextarea, setActiveContent, ensureDocPath, onError, insertImageMarkdown]
+    [readOnlyRef, ensureDocPath, onError, insertImageMarkdown]
   );
 
   /** 拖拽进来的图片文件：复制到文档同级 img/ 目录并逐个插入 */
@@ -254,10 +255,18 @@ export function useEditing({
     async (format: 'html' | 'pdf' | 'word') => {
       const tab = activeTab();
       if (!tab) return;
-      const result = await window.api.exportFile({ format, markdown: tab.content, defaultName: tab.name });
-      if (!result.ok && result.error !== '已取消') console.error('导出失败:', result.error);
+      const result = await window.api.exportFile({
+        format,
+        markdown: tab.content,
+        defaultName: tab.name,
+        docPath: tab.path
+      });
+      // 失败要让用户看见（PDF 打印链路有可能整体失败），不能只写控制台
+      if (!result.ok && result.error !== '已取消') {
+        onError?.(`导出失败：${result.error ?? '未知错误'}`);
+      }
     },
-    [activeTab]
+    [activeTab, onError]
   );
 
   return {

@@ -377,6 +377,7 @@ export default function App(): JSX.Element {
     path: string;
     line: number;
     column: number;
+    rawColumn: number;
     length: number;
     text: string;
     deadline: number;
@@ -384,7 +385,7 @@ export default function App(): JSX.Element {
 
   /** 在当前文档里定位到匹配位置 */
   const jumpToSearchMatch = useCallback(
-    (line: number, column: number, length: number, text: string): boolean => {
+    (line: number, column: number, length: number, text: string, rawColumn: number): boolean => {
       if (viewModeRef.current === 'source') {
         const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
         const active = tabsRef.current.find((tab) => tab.id === activeIdRef.current);
@@ -394,19 +395,41 @@ export default function App(): JSX.Element {
             .slice(0, line - 1)
             .reduce((sum, part) => sum + part.length + 1, 0);
           ta.focus();
-          ta.setSelectionRange(lineStart + column, lineStart + column + length);
+          // 源码模式按 Markdown 原文定位，必须用未裁剪的列号：
+          // 缩进的列表项/引用如果按展示列号定位，光标会偏到缩进之前
+          const start = lineStart + rawColumn;
+          ta.setSelectionRange(start, start + length);
           return true;
         }
         return false;
       }
       const editor = editorRef.current;
       if (!editor) return false;
-      // WYSIWYG 的纯文本与 Markdown 原文有差异，直接在纯文本里找匹配片段
+      // WYSIWYG 的纯文本与 Markdown 原文有差异，直接在纯文本里找匹配片段；
+      // 同一片段可能出现多次，用「按行号估算的大致位置」挑最接近的一处，避免永远跳第一处
       const hit = text.slice(column, column + length);
+      if (!hit) return true;
       const plain = editor.getPlainText();
-      const index = plain.indexOf(hit);
-      if (index < 0) return true; // 纯文本里找不到（如代码块匹配）就不再重试
-      editor.selectTextRange(index, index + hit.length);
+      const plainLines = plain.split('\n');
+      let estimate = column;
+      for (let i = 0; i < Math.min(line - 1, plainLines.length); i += 1) {
+        estimate += plainLines[i].length + 1;
+      }
+      let best = -1;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      let from = 0;
+      for (;;) {
+        const at = plain.indexOf(hit, from);
+        if (at < 0) break;
+        const distance = Math.abs(at - estimate);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = at;
+        }
+        from = at + 1;
+      }
+      if (best < 0) return true; // 纯文本里找不到（如代码块匹配）就不再重试
+      editor.selectTextRange(best, best + hit.length);
       return true;
     },
     [viewModeRef, tabsRef, activeIdRef, editorRef]
@@ -414,13 +437,21 @@ export default function App(): JSX.Element {
 
   /** 点击搜索结果：已在当前文档则直接跳，否则先打开文件再跳 */
   const handleOpenMatch = useCallback(
-    (path: string, name: string, line: number, column: number, length: number, text: string) => {
+    (
+      path: string,
+      name: string,
+      line: number,
+      column: number,
+      length: number,
+      text: string,
+      rawColumn: number
+    ) => {
       const active = tabsRef.current.find((tab) => tab.id === activeIdRef.current);
       if (active?.path === path) {
-        jumpToSearchMatch(line, column, length, text);
+        jumpToSearchMatch(line, column, length, text, rawColumn);
         return;
       }
-      pendingJumpRef.current = { path, line, column, length, text, deadline: Date.now() + 2000 };
+      pendingJumpRef.current = { path, line, column, rawColumn, length, text, deadline: Date.now() + 2000 };
       void openPath(path, name);
     },
     [tabsRef, activeIdRef, jumpToSearchMatch, openPath]
@@ -430,14 +461,14 @@ export default function App(): JSX.Element {
   useEffect(() => {
     const pending = pendingJumpRef.current;
     if (!pending || activeTab?.path !== pending.path) return;
-    if (jumpToSearchMatch(pending.line, pending.column, pending.length, pending.text)) {
+    if (jumpToSearchMatch(pending.line, pending.column, pending.length, pending.text, pending.rawColumn)) {
       pendingJumpRef.current = null;
       return;
     }
     const timer = window.setTimeout(function attempt() {
       const current = pendingJumpRef.current;
       if (!current) return;
-      if (jumpToSearchMatch(current.line, current.column, current.length, current.text)) {
+      if (jumpToSearchMatch(current.line, current.column, current.length, current.text, current.rawColumn)) {
         pendingJumpRef.current = null;
         return;
       }

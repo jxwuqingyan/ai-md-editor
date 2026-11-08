@@ -884,7 +884,7 @@ async function runTests() {
   const menuItems = await exec(`[...document.querySelectorAll('.filetree-menu-item')].map((el) => el.textContent)`);
   const menuOk =
     menuItems.includes('新建文件') &&
-    menuItems.includes('重命名当前文件…') &&
+    menuItems.includes('重命名当前文档…') &&
     menuItems.includes('搜索') &&
     menuItems.some((label) => /Finder|资源管理器/.test(label)) &&
     menuItems.includes('打开文件夹…') &&
@@ -1138,7 +1138,94 @@ async function runTests() {
     { label: '搜索结果打开文件', timeout: 15000 }
   ).catch(() => null);
   check('点击搜索结果打开对应文件', jumpedTab !== null, `file=${matchFileName} tab=${jumpedTab}`);
+
+  // 搜索必须覆盖 .txt / .markdown：文件树认这三种扩展名，搜索只认 .md 就会出现「树里有、搜不到」
+  writeFileSync(join(root, '扩展名.txt'), '跨扩展名关键词 出现在 txt\n', 'utf-8');
+  writeFileSync(join(root, '扩展名.markdown'), '# 附录\n\n跨扩展名关键词 出现在 markdown\n', 'utf-8');
+  await exec(`[...document.querySelectorAll('.search-option')][2].click()`); // 关掉正则，按字面量搜
+  await typeSearch('跨扩展名关键词');
+  const extHits = await waitFor(
+    () =>
+      exec(
+        `JSON.stringify([...document.querySelectorAll('.search-file-name')].map((el) => el.textContent))`
+      ).then((json) => {
+        const names = JSON.parse(String(json));
+        return names.some((n) => n.includes('扩展名.txt')) && names.some((n) => n.includes('扩展名.markdown'))
+          ? names
+          : null;
+      }),
+    { label: '搜索覆盖 txt / markdown', timeout: 8000 }
+  ).catch(() => null);
+  check('搜索覆盖 .txt 与 .markdown', Array.isArray(extHits), JSON.stringify(extHits));
+
+  // 缩进行跳转：源码模式必须按原始列号定位，否则光标会偏到缩进之前
+  writeFileSync(join(root, '缩进样例.md'), '# 缩进\n\n  - 缩进关键词在这里\n', 'utf-8');
+  await ensureSourceMode();
+  await typeSearch('缩进关键词');
+  // 等防抖搜索回包并确认结果就是这条新查询（否则会点到上一个关键词的旧结果）
+  await waitFor(
+    () =>
+      exec(
+        `[...document.querySelectorAll('.search-file-name')].some((el) => el.textContent.includes('缩进样例.md'))`
+      ),
+    { label: '缩进行搜索结果', timeout: 8000 }
+  );
+  await exec(`document.querySelector('.search-match').click()`);
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '缩进样例.md'`), {
+    label: '打开缩进样例',
+    timeout: 15000
+  });
+  const caretHit = await waitFor(
+    () =>
+      exec(`(() => {
+        const ta = document.querySelector('.source-editor');
+        if (!ta) return null;
+        const start = ta.selectionStart;
+        return ta.value.slice(start, start + 5) === '缩进关键词' ? start : null;
+      })()`),
+    { label: '源码模式定位到匹配处', timeout: 8000 }
+  ).catch(() => null);
+  check('源码模式按原始列号定位缩进行', caretHit !== null, `caret=${caretHit}`);
+  await ensureWysiwygMode();
   await exec(`document.querySelector('.search-close')?.click()`);
+
+  // ===== 10.1 导出：本地图片内联（换目录打开也不裂图）、标题不带 .md =====
+  mkdirSync(join(root, 'img'), { recursive: true });
+  // 只需要能被 base64 编码，不要求是合法 PNG
+  writeFileSync(join(root, 'img', 'export.png'), Buffer.from('89504e470d0a1a0a', 'hex'));
+  writeFileSync(join(root, '导出样例.md'), '# 导出\n\n![图](img/export.png)\n\n正文\n', 'utf-8');
+  // 新写的文件要先刷新文件树才在列表里，再从树里点开（与真实操作一致）
+  await exec(`document.querySelector('.filetree-more-btn').click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-menu'))`), { label: '⋮ 菜单弹出（导出用例）' });
+  await exec(`[...document.querySelectorAll('.filetree-menu-item')].find((el) => el.textContent === '刷新').click()`);
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.tree-name')].some((el) => el.textContent === '导出样例.md')`),
+    { label: '文件树出现导出样例', timeout: 8000 }
+  );
+  await exec(
+    `[...document.querySelectorAll('.tree-item.tree-file')].find((el) => el.textContent === '导出样例.md').click()`
+  );
+  await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '导出样例.md'`),
+    { label: '打开导出样例', timeout: 15000 }
+  );
+  const htmlOut = join(root, '导出样例.html');
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: htmlOut });
+  menuAction('file:export-html');
+  const exportedHtml = await waitFor(
+    () => (existsSync(htmlOut) ? readFileSync(htmlOut, 'utf-8') : null),
+    { label: '导出 HTML 落盘', timeout: 15000 }
+  ).catch(() => null);
+  check(
+    '导出 HTML 把本地图片内联为 data URI',
+    typeof exportedHtml === 'string' && exportedHtml.includes('src="data:image/png;base64,'),
+    String(exportedHtml).slice(0, 80)
+  );
+  check(
+    '导出标题去掉 .md 后缀',
+    typeof exportedHtml === 'string' && exportedHtml.includes('<title>导出样例</title>'),
+    String(exportedHtml).match(/<title>[^<]*<\/title>/)?.[0] ?? ''
+  );
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

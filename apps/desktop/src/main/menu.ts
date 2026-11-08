@@ -107,7 +107,8 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         sep,
         item('在文件管理器中显示', MenuActions.RevealInFolder, { enabled: s.hasPath }),
         item('在文件树中显示', MenuActions.ShowFiles, { enabled: s.hasPath }),
-        item('重新命名…', MenuActions.RenameFile, { enabled: s.hasPath }),
+        // 未落盘的文档也能改名（只改标签名），因此不按 hasPath 置灰
+        item('重新命名…', MenuActions.RenameFile),
         item('复制一份到…', MenuActions.DuplicateFile),
         item('从磁盘重新加载', MenuActions.ReloadFromDisk, { enabled: s.hasPath }),
         sep,

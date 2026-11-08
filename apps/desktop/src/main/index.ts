@@ -9,42 +9,55 @@ import { createWindow, openFileInRenderer } from './window';
 app.setName('MarkdownNote');
 
 /**
- * 应用就绪后创建窗口。
- * macOS 特有：点击 dock 图标且无窗口时重新创建窗口。
+ * 单实例锁：没有它 `second-instance` 事件永远不会触发，
+ * 再启动一次应用（或双击 .md 文件）会另起一个进程，文件也开不到已有窗口里。
  */
-app.whenReady().then(async () => {
-  // 先读设置：窗口尺寸、主题、缩放等都依赖它
-  loadSettings();
-  // 加载最近文件列表（启动时）
-  await loadRecent();
+const singleInstance = app.requestSingleInstanceLock();
 
-  // 注册文件操作相关 IPC handler
-  registerIpcHandlers();
-  // 安装原生应用菜单（macOS 位于屏幕顶部，不占窗口高度）
-  setupApplicationMenu();
+if (!singleInstance) {
+  app.quit();
+} else {
+  /**
+   * 应用就绪后创建窗口。
+   * macOS 特有：点击 dock 图标且无窗口时重新创建窗口。
+   */
+  app.whenReady().then(async () => {
+    // 先读设置：窗口尺寸、主题、缩放等都依赖它
+    loadSettings();
+    // 加载最近文件列表（启动时）
+    await loadRecent();
 
-  createWindow();
+    // 注册文件操作相关 IPC handler
+    registerIpcHandlers();
+    // 安装原生应用菜单（macOS 位于屏幕顶部，不占窗口高度）
+    setupApplicationMenu();
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
   });
-});
 
-// macOS：拖拽文件到 Dock 图标 / Finder「打开方式」时触发
-app.on('open-file', (event, filePath) => {
-  event.preventDefault();
-  openFileInRenderer(filePath);
-});
-
-// Windows/Linux：通过命令行参数打开文件
-app.on('second-instance', (_event, argv) => {
-  const filePath = argv.find((arg) => !arg.startsWith('-') && arg !== process.execPath);
-  if (filePath) {
+  // macOS：拖拽文件到 Dock 图标 / Finder「打开方式」时触发
+  app.on('open-file', (event, filePath) => {
+    event.preventDefault();
     openFileInRenderer(filePath);
-  }
-});
+  });
+
+  // Windows/Linux：已有实例时，把命令行里的文件交给它打开
+  app.on('second-instance', (_event, argv) => {
+    const target = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    if (target) {
+      if (target.isMinimized()) target.restore();
+      target.focus();
+    }
+    const filePath = argv.find((arg) => !arg.startsWith('-') && arg !== process.execPath && /\.[a-z0-9]+$/i.test(arg));
+    if (filePath) openFileInRenderer(filePath);
+  });
+}
 
 // 退出前把防抖中的设置立即落盘
 app.on('will-quit', () => {

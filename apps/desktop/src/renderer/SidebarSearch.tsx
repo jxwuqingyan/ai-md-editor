@@ -5,8 +5,16 @@ import type { SearchFileResult } from '@ai-md-editor/shared';
 interface SidebarSearchProps {
   /** 搜索根目录（null = 未打开文件夹） */
   rootDir: string | null;
-  /** 点击某条匹配：打开文件并跳到该行 */
-  onOpenMatch: (path: string, name: string, line: number, column: number, length: number, text: string) => void;
+  /** 点击某条匹配：打开文件并跳到该行（rawColumn 是原始行列号，缩进行也能定位准） */
+  onOpenMatch: (
+    path: string,
+    name: string,
+    line: number,
+    column: number,
+    length: number,
+    text: string,
+    rawColumn: number
+  ) => void;
   /** 关闭搜索面板 */
   onClose: () => void;
 }
@@ -26,6 +34,8 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
   const [error, setError] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // 请求序号：快速改关键词时，先发出去的请求可能后返回，不能让它覆盖新结果
+  const requestSeq = useRef(0);
 
   // 打开时聚焦输入框
   useEffect(() => {
@@ -34,6 +44,8 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
 
   // 查询条件变化：300ms 防抖自动搜索
   useEffect(() => {
+    requestSeq.current += 1;
+    const seq = requestSeq.current;
     if (!rootDir || query.trim().length === 0) {
       setResults([]);
       setError(null);
@@ -51,6 +63,8 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
           wholeWord,
           regex
         });
+        // 回包时确认自己仍是最新一次请求，否则丢弃（否则旧关键词的结果会盖掉新结果）
+        if (seq !== requestSeq.current) return;
         setSearching(false);
         if (!result.ok) {
           setError(result.error ?? '搜索失败');
@@ -160,7 +174,17 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
                 key={`${match.line}-${index}`}
                 className="search-match"
                 title={`第 ${match.line} 行`}
-                onClick={() => onOpenMatch(file.path, file.name, match.line, match.column, match.length, match.text)}
+                onClick={() =>
+                  onOpenMatch(
+                    file.path,
+                    file.name,
+                    match.line,
+                    match.column,
+                    match.length,
+                    match.text,
+                    match.rawColumn
+                  )
+                }
               >
                 <span className="search-line-no">{match.line}</span>
                 {renderLine(match.text, match.column, match.length, `${match.line}-${index}`)}

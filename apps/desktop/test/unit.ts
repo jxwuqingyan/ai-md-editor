@@ -16,7 +16,11 @@ import {
 } from '@ai-md-editor/shared';
 import { applySourceFormat, sourceTableContext } from '../src/renderer/sourceActions';
 import { extractMath, restoreMath } from '../src/main/mathExport';
-import { buildLineMatcher } from '../src/main/searcher';
+import { buildLineMatcher, finalizeMatches } from '../src/main/searcher';
+import { inlineLocalImages } from '../src/main/exportAssets';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 let total = 0;
 let failed = 0;
@@ -222,6 +226,43 @@ ok(
 
 const invalidRegex = buildLineMatcher(makeInput({ query: '[', regex: true }));
 equal('非法正则返回 null', invalidRegex, null);
+
+// 正则模式支持 Unicode 属性转义（需要 u 标志，不能直接判非法）
+const unicodeRegex = buildLineMatcher(makeInput({ query: '\\p{Script=Han}+', regex: true }))?.('abc 中文 def') ?? [];
+ok(
+  '正则支持 \\p{Script=Han}（自动带 u 标志）',
+  unicodeRegex.length === 1 && unicodeRegex[0]?.column === 4,
+  JSON.stringify(unicodeRegex)
+);
+
+// 缩进行：展示列号去掉缩进，rawColumn 保留原始位置（源码模式靠它精确定位）
+const indentedLine = '  - AI 笔记';
+const indented = finalizeMatches(
+  buildLineMatcher(makeInput({ query: 'AI' }))?.(indentedLine) ?? [],
+  3,
+  indentedLine
+);
+ok(
+  '缩进行同时给出展示列与原始列',
+  indented[0]?.column === 2 && indented[0]?.rawColumn === 4 && indented[0]?.text === '- AI 笔记',
+  JSON.stringify(indented)
+);
+
+// ===== 导出：本地图片内联 =====
+const assetDir = mkdtempSync(join(tmpdir(), 'mdnote-assets-'));
+mkdirSync(join(assetDir, 'img'), { recursive: true });
+writeFileSync(join(assetDir, 'img', 'a.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+const inlined = inlineLocalImages(
+  '<p><img src="img/a.png" alt="x"><img src="https://example.com/b.png"></p>',
+  assetDir
+);
+ok('导出时把本地图片内联为 data URI', inlined.includes('src="data:image/png;base64,'), inlined);
+ok('导出时保留远程图片地址', inlined.includes('src="https://example.com/b.png"'), inlined);
+equal(
+  '未落盘文档不改动图片地址',
+  inlineLocalImages('<img src="img/a.png">', null),
+  '<img src="img/a.png">'
+);
 
 // ===== 结果 =====
 console.log(`\n单元测试：${total - failed}/${total} 通过`);

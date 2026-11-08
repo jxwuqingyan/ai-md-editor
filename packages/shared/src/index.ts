@@ -99,6 +99,8 @@ export interface ExportInput {
   markdown: string;
   /** 默认文件名（不含扩展名） */
   defaultName: string;
+  /** 当前文档的磁盘路径（用于把 img/xxx.png 这类相对图片内联，避免导出后图片打不开） */
+  docPath?: string | null;
 }
 
 /** 导出结果 */
@@ -162,8 +164,10 @@ export interface SearchFolderInput {
 export interface SearchMatch {
   /** 1 起的行号 */
   line: number;
-  /** 匹配起始列（0 起，按字符数） */
+  /** 匹配起始列（0 起，按字符数，相对裁剪后的展示文本） */
   column: number;
+  /** 匹配起始列（相对未裁剪的原始行，供源码模式精确定位） */
+  rawColumn: number;
   /** 匹配文本长度 */
   length: number;
   /** 该行原文（已裁剪首尾空白） */

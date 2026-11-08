@@ -105,21 +105,23 @@ npm run test:menu-runtime --workspace @ai-md-editor/desktop
 npm run test:e2e --workspace @ai-md-editor/desktop
 ```
 
-- `test/unit.ts`（由 `test/run-unit.cjs` 用 esbuild 打包执行）：纯函数单测 41 项——
+- `test/unit.ts`（由 `test/run-unit.cjs` 用 esbuild 打包执行）：纯函数单测 46 项——
   编码识别（UTF-8 / BOM / UTF-16 / GBK）、`file://` 地址生成、Markdown 简化、
   源码模式表格上下文与格式化、导出用公式提取/还原（代码掩码、货币文本不误判、渲染失败兜底）、
-  侧栏搜索的行匹配器（大小写 / 全单词 / 正则）。
+  导出时本地图片内联（读不到/超限保留原样）、
+  侧栏搜索的行匹配器（大小写 / 全单词 / 正则 / Unicode 属性 / 缩进行的原始列号）。
   纯 Node，无需 GUI，Windows CI 也能跑
 - `test/menuAccelerators.cjs`：校验 macOS / Windows 两套快捷键的写法与唯一性，以及平台关键键位是否齐全（纯 Node，无需 GUI）
 - `test/menuRuntime.cjs`：加载构建产物构造真实原生菜单，断言当前平台的关键快捷键（含隐藏项）已注册，
   并逐项点击菜单验证「一点击 = 一条 `menu:action`、动作与源码声明一致」
 - `test/e2e.cjs`：启动真实主进程（`out/main/index.js`）+ preload + 渲染层，经原生菜单通道派发动作，
-  覆盖 78 项断言：表格上下文置灰（含程序化定位光标）、表头行删除语义、缩放、三种复制格式、打印、
+  覆盖 84 项断言：表格上下文置灰（含程序化定位光标）、表头行删除语义、缩放、三种复制格式、打印、
   全屏/最小化、深层目录文件树定位与键盘导航、源码撤销合并、图片相对路径与拖拽复制、
   偏好持久化与窗口尺寸记忆、后台标签自动保存、GBK 文档读取与转存 UTF-8、外部修改提示与重新加载、
   关闭前未保存汇总与立即写盘、会话恢复、主题单击切换、文件树 ⋮ 菜单、新建文件先命名与落盘、
   双击标签重命名（含重名不覆盖、文件树同步、输入法拼字中的回车不提交）、
-  侧栏搜索（大小写 / 全单词 / 正则开关、选项与输入框同行、点击跳转）、
+  侧栏搜索（大小写 / 全单词 / 正则开关、选项与输入框同行、点击跳转、跨扩展名、缩进行定位）、
+  导出 HTML（本地图片内联为 data URI、标题不带扩展名）、
   工具栏与编辑内容区不重叠。需先 `npm run build`（测试直接加载构建产物）。
 - `test/run-e2e.cjs`：通用 Electron 测试启动器（默认 `e2e.cjs`，可传脚本名复用），自动剔除宿主终端注入的
   `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` 并附加无 GUI 会话所需的开关。

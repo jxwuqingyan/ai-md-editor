@@ -37,8 +37,16 @@ interface SidebarProps {
   onRefresh: () => void;
   /** 刷新信号：数值变化时重新加载根目录 */
   refreshToken: number;
-  /** 点击搜索结果：打开文件并跳到匹配行 */
-  onOpenMatch: (path: string, name: string, line: number, column: number, length: number, text: string) => void;
+  /** 点击搜索结果：打开文件并跳到匹配行（rawColumn 为原始行列号） */
+  onOpenMatch: (
+    path: string,
+    name: string,
+    line: number,
+    column: number,
+    length: number,
+    text: string,
+    rawColumn: number
+  ) => void;
 }
 
 /** 左侧边栏 */

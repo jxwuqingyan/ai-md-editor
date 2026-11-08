@@ -79,8 +79,10 @@ export default function FileTree({
       setDirs((prev) => {
         const next = new Map(prev);
         const node = next.get(path);
+        // 目录名取路径最后一段：必须同时按 / 和 \ 拆，Windows 上只按 / 拆会得到整条路径
+        const segments = path.split(/[\\/]/);
         next.set(path, {
-          entry: node?.entry ?? { name: path.split('/').pop() ?? path, path, kind: 'dir' },
+          entry: node?.entry ?? { name: segments[segments.length - 1] ?? path, path, kind: 'dir' },
           expanded: true,
           children: result.entries
         });
@@ -278,11 +280,10 @@ export default function FileTree({
           type="button"
           className="filetree-menu-item"
           role="menuitem"
-          disabled={!activePath}
-          title={activePath ? '重命名当前打开的文件' : '当前文档还没有保存到磁盘'}
+          title="重命名当前文档（未保存的文档只改标签名）"
           onClick={() => runMenuAction(onRenameFile)}
         >
-          重命名当前文件…
+          重命名当前文档…
         </button>
         <button type="button" className="filetree-menu-item" role="menuitem" onClick={() => runMenuAction(onOpenSearch)}>
           搜索
