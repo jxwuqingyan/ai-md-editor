@@ -680,6 +680,24 @@ async function runTests() {
   }).catch(() => undefined);
   check('新窗口可正常关闭', BrowserWindow.getAllWindows().length === before, `windows=${BrowserWindow.getAllWindows().length}`);
 
+  // ===== 10.4 工具栏占位布局：固定在编辑区下方，不与内容滚动区重叠 =====
+  const layout = await exec(
+    `JSON.stringify((() => {
+      const toolbar = document.querySelector('.toolbar');
+      if (!toolbar) return null;
+      const bar = toolbar.getBoundingClientRect();
+      const scroll = document.querySelector('.editor-scroll').getBoundingClientRect();
+      const wrap = document.querySelector('.editor-wrap').getBoundingClientRect();
+      return { noOverlap: bar.top >= scroll.bottom - 1, insideWrap: bar.bottom <= wrap.bottom + 1, barTop: Math.round(bar.top) };
+    })())`
+  );
+  const layoutState = JSON.parse(layout);
+  check(
+    '工具栏不与编辑内容区重叠',
+    layoutState !== null && layoutState.noOverlap && layoutState.insideWrap,
+    JSON.stringify(layoutState)
+  );
+
   // ===== 10.5 自动保存：已切走的后台标签也要落盘 =====
   // 只保存「当前标签」时，敲完立刻切标签/新建标签会丢掉写盘（计时器被清且不再重排）
   const autoDir = join(tmpdir(), 'md-note-e2e-autosave');

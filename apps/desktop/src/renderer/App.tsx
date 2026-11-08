@@ -630,27 +630,30 @@ export default function App(): JSX.Element {
               onClose={closeFind}
             />
           )}
-          <div className="editor-inner">
-            {viewMode === 'wysiwyg' ? (
-              <MarkdownEditor
-                initialValue={activeTab?.content ?? ''}
-                onChange={handleChange}
-                onReady={handleReady}
-                onTableContext={updateTableContext}
-              />
-            ) : (
-              <textarea
-                className="source-editor"
-                value={activeTab?.content ?? ''}
-                onChange={(event) => {
-                  history.push(activeTab?.content ?? '');
-                  setActiveContent(event.target.value);
-                }}
-                placeholder="在此输入 Markdown 源码..."
-                spellCheck={false}
-                readOnly={readOnly}
-              />
-            )}
+          {/* 滚动容器：内容在其内部滚动，工具栏固定在下方，不与内容重叠 */}
+          <div className="editor-scroll">
+            <div className="editor-inner">
+              {viewMode === 'wysiwyg' ? (
+                <MarkdownEditor
+                  initialValue={activeTab?.content ?? ''}
+                  onChange={handleChange}
+                  onReady={handleReady}
+                  onTableContext={updateTableContext}
+                />
+              ) : (
+                <textarea
+                  className="source-editor"
+                  value={activeTab?.content ?? ''}
+                  onChange={(event) => {
+                    history.push(activeTab?.content ?? '');
+                    setActiveContent(event.target.value);
+                  }}
+                  placeholder="在此输入 Markdown 源码..."
+                  spellCheck={false}
+                  readOnly={readOnly}
+                />
+              )}
+            </div>
           </div>
           {toolbarVisible && !readOnly && (
             <Toolbar
