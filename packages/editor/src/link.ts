@@ -42,7 +42,11 @@ export function linkClickPlugin(options: LinkClickOptions) {
               if (anchor && !anchor.title) anchor.title = LINK_HINT;
               return false;
             },
-            click: (_view, event) => {
+            // ⌘/Ctrl + 点击打开链接必须拦在 mousedown：
+            // 放到 click 再 preventDefault 就晚了——macOS 上修饰键点击的默认行为
+            // 会先让 ProseMirror 建出 NodeSelection（整段出现 selectednode 描边框）、
+            // 选中链接文字，打开链接后残留一圈高亮框。
+            mousedown: (view, event) => {
               const anchor = (event.target as HTMLElement).closest<HTMLAnchorElement>('a');
               if (!anchor) return false;
               // macOS 用 ⌘（Ctrl+点击是右键），其他平台用 Ctrl

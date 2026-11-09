@@ -202,6 +202,7 @@ ai-md-editor/
 | 53 | **本地 electron-builder 打包会改写 `apps/desktop/package.json`**：剥掉全部 `scripts` 与 `devDependencies`（只留生产依赖），打包后必须 `git checkout -- apps/desktop/package.json` 恢复，否则 `npm run build` / `npm test` 直接报 Missing script |
 | 54 | 链接打开走「⌘/Ctrl + 点击」（`packages/editor/src/link.ts`）：普通单击保留光标定位；平台判定用 `navigator.userAgent`（沙箱渲染进程没有完整 process）；主进程 `shell:open-external` 只放行 http/https（渲染内容可被任意文档注入）；E2E 在主进程侧替换 `shell.openExternal` 收集调用即可断言（与 `dialog` stub 同理，别在 renderer 侧桩 contextBridge） |
 | 55 | E2E 断言 DOM 元素别假设「第一个匹配」等于「先插入的」：行内 snippet 插入会拆/并段落，多个同类元素的 DOM 顺序与插入顺序不保证一致，按文本 / href 等内容特征精确匹配目标 |
+| 56 | 编辑器内链接「⌘/Ctrl + 点击打开」必须拦在 **mousedown**：放到 click 再 preventDefault 就晚了——macOS 上修饰键点击的默认行为在 mousedown 阶段已让 ProseMirror 建出 NodeSelection（整段 `ProseMirror-selectednode` 描边框 + 文字选区，打开后残留）。另外 `getComputedStyle().outlineWidth` 在 `outline-style: none` 时也报非零值，截图诊断别把它当真边框来源 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 

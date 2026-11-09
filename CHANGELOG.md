@@ -2,6 +2,14 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.13 - 2026-11-09
+
+### 修复：⌘/Ctrl + 点击链接后残留高亮框
+
+- macOS 上按住 ⌘ 点击链接打开后，链接整段会残留一圈蓝色描边框、文字被选中（`ProseMirror-selectednode` 的 NodeSelection 描边 + 文字选区）。原因是拦截时机太晚：`click` 事件才 `preventDefault`，修饰键点击的默认行为在 `mousedown` 阶段就已经让 ProseMirror 建出 NodeSelection。
+- 修复：拦截提前到 `mousedown`——确认是修饰键 + 链接 + http/https 后立即 `preventDefault` 并打开，选区与描边框不再产生（`packages/editor/src/link.ts`）。
+- 新增截图诊断脚本 `test/shot-link-debug.cjs`（源码模式写链接 → 切 WYSIWYG → ⌘+点击 → 打印选区/描边元素 + 截图），修复前后对比验证框消失。
+
 ## 0.14.12 - 2026-11-09
 
 ### 新增：编辑器内打开链接（⌘/Ctrl + 点击）
