@@ -1987,14 +1987,14 @@ button:focus-visible {
 
 .slash-sub-grid {
   display: grid;
-  grid-template-columns: repeat(8, 14px);
-  grid-auto-rows: 14px;
-  gap: 2.5px;
+  grid-template-columns: repeat(8, 16px);
+  grid-auto-rows: 16px;
+  gap: 3px;
 }
 
 .slash-sub-cell {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   border: 1px solid var(--border, #dcdcdc);
   border-radius: 2.5px;
   background: var(--bg-panel, #fff);

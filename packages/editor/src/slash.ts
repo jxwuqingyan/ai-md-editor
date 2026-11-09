@@ -318,26 +318,56 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     subPanel.setAttribute('role', 'grid');
     subPanel.setAttribute('aria-label', '选择表格行列');
     subPanel.addEventListener('mousedown', (event) => event.preventDefault());
-    // 悬扫单元格：以悬停到的格子为右下角，高亮 subRows × subCols 区域
+    // 悬扫单元格：以悬停到的格子为右下角，高亮 subRows × subCols 区域（只切换 class，不重建 DOM）
     subPanel.addEventListener('mouseover', (event) => {
       const cell = (event.target as HTMLElement).closest<HTMLElement>('[data-sub-r]');
       if (!cell) return;
       subRows = Math.max(1, Number(cell.dataset['subR']));
       subCols = Math.max(1, Number(cell.dataset['subC']));
-      renderSub();
+      highlightSub();
     });
+    // 点击任意格子（或格子间的缝隙）都按当前选中的行列插入表格：
+    // 直接命中格子用格子自身数据；命中风隙/背景时回退到最近一次悬停的 subRows/subCols，
+    // 保证右下角等大尺寸「点一下即可插入」，不必再按回车。
     subPanel.addEventListener('click', (event) => {
       const view = viewRef;
+      if (!view) return;
       const cell = (event.target as HTMLElement).closest<HTMLElement>('[data-sub-r]');
-      if (!view || !cell) return;
-      subRows = Math.max(1, Number(cell.dataset['subR']));
-      subCols = Math.max(1, Number(cell.dataset['subC']));
+      if (cell) {
+        subRows = Math.max(1, Number(cell.dataset['subR']));
+        subCols = Math.max(1, Number(cell.dataset['subC']));
+      }
       applyTable(view);
     });
+    // 一次性构建 8×6 单元格网格（不再每次悬停重建 innerHTML，避免重建导致的点击失效与高亮滞后）
+    let cells = '';
+    for (let r = 1; r <= SUB_MAX_ROWS; r += 1) {
+      for (let c = 1; c <= SUB_MAX_COLS; c += 1) {
+        cells += `<i class="slash-sub-cell" data-sub-r="${r}" data-sub-c="${c}" role="gridcell" aria-label="${r}行${c}列"></i>`;
+      }
+    }
+    subPanel.innerHTML =
+      '<div class="slash-sub-title">表格</div>' +
+      `<div class="slash-sub-grid">${cells}</div>` +
+      '<div class="slash-sub-label">3 行 × 3 列</div>';
     // 与主面板挂同一宿主（.app），保证主题变量可达
     const host = document.querySelector('.app');
     (host instanceof HTMLElement ? host : document.body).appendChild(subPanel);
     return subPanel;
+  };
+
+  /** 仅切换高亮与尺寸文案（不重建 DOM，避免悬停/点击冲突） */
+  const highlightSub = (): void => {
+    if (!subPanel) return;
+    const grid = subPanel.querySelector('.slash-sub-grid');
+    if (!grid) return;
+    grid.querySelectorAll<HTMLElement>('[data-sub-r]').forEach((cell) => {
+      const r = Number(cell.dataset['subR']);
+      const c = Number(cell.dataset['subC']);
+      cell.classList.toggle('slash-sub-cell-on', r <= subRows && c <= subCols);
+    });
+    const label = subPanel.querySelector('.slash-sub-label');
+    if (label) label.textContent = `${subRows} 行 × ${subCols} 列`;
   };
 
   /** 把二级网格定位到表格条目右侧；放不下时翻到左侧 */
@@ -359,21 +389,11 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     subPanel.style.top = `${Math.round(top)}px`;
   };
 
-  /** 重建二级网格内容并显示 */
+  /** 显示二级网格并定位（网格只构建一次，这里仅切换可见 + 高亮 + 位置） */
   const renderSub = (): void => {
     const node = ensureSubPanel();
-    let cells = '';
-    for (let r = 1; r <= SUB_MAX_ROWS; r += 1) {
-      for (let c = 1; c <= SUB_MAX_COLS; c += 1) {
-        const on = r <= subRows && c <= subCols ? ' slash-sub-cell-on' : '';
-        cells += `<i class="slash-sub-cell${on}" data-sub-r="${r}" data-sub-c="${c}" role="gridcell" aria-label="${r}行${c}列"></i>`;
-      }
-    }
-    node.innerHTML =
-      `<div class="slash-sub-title">表格</div>` +
-      `<div class="slash-sub-grid">${cells}</div>` +
-      `<div class="slash-sub-label">${subRows} 行 × ${subCols} 列</div>`;
     node.style.display = '';
+    highlightSub();
     positionSub();
   };
 
@@ -642,9 +662,17 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     const filterChanged = !trigger || trigger.filter !== detected.filter;
     trigger = detected;
     if (filterChanged) {
-      activeIndex = 0;
       closeSub();
       closeForm();
+      // 无过滤（菜单刚从「/」弹出）时，默认高亮「最近使用」的第一项，回车即插入最近类别；
+      // 已输入过滤词时回到列表首项。
+      if (!detected.filter) {
+        const firstRecent = loadRecents()[0];
+        const idx = firstRecent ? ITEMS.findIndex((item) => item.id === firstRecent) : 0;
+        activeIndex = idx >= 0 ? idx : 0;
+      } else {
+        activeIndex = 0;
+      }
     }
     renderPanel(view);
   };
