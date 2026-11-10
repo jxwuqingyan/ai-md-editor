@@ -98,7 +98,17 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
   /** 内容变化回调：更新活动标签的 content + dirty */
   const handleChange = useCallback((markdown: string) => {
     const id = activeIdRef.current;
-    setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, content: markdown, dirty: true } : t)));
+    setTabs((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t;
+        // 编辑器为保证表格等非文本块末尾可输入会补一个空段落，序列化后
+        // 只多出尾部换行。这类变化不算用户编辑，避免打开文件就被误标脏。
+        if (t.content.replace(/\s+$/, '') === markdown.replace(/\s+$/, '')) {
+          return t.content === markdown ? t : { ...t, content: markdown };
+        }
+        return { ...t, content: markdown, dirty: true };
+      })
+    );
   }, []);
 
   /** 直接替换当前标签内容（源码格式化、查找替换、粘贴图片等用） */

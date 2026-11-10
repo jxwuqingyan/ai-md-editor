@@ -151,6 +151,7 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.TableAddCol]: () => deps.format('tableAddCol'),
     [MenuActions.TableDeleteRow]: () => deps.format('tableDeleteRow'),
     [MenuActions.TableDeleteCol]: () => deps.format('tableDeleteCol'),
+  [MenuActions.TableDelete]: () => deps.format('tableDelete'),
     [MenuActions.FormatCodeBlock]: () => deps.format('codeBlock'),
     [MenuActions.FormatQuote]: () => deps.format('quote'),
     [MenuActions.FormatBulletList]: () => deps.format('bulletList'),

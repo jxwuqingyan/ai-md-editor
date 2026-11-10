@@ -264,6 +264,33 @@ equal(
   '<img src="img/a.png">'
 );
 
+// ===== 源码模式：删除整个表格 =====
+const tailTable = '# 标题\n\n| 列 1 | 列 2 |\n| --- | --- |\n| a | b |\n\n正文';
+const tailTableCaret = tailTable.indexOf('| a | b |') + 2;
+const deletedTailTable = applySourceFormat('tableDelete', undefined, {
+  content: tailTable,
+  selectionStart: tailTableCaret,
+  selectionEnd: tailTableCaret
+});
+ok('源码模式删除整表后不再有表格分隔行', !deletedTailTable.content.includes('| --- |'), deletedTailTable.content);
+ok(
+  '源码模式删除整表后保留表格以外的正文',
+  deletedTailTable.content.includes('# 标题') && deletedTailTable.content.includes('正文'),
+  deletedTailTable.content
+);
+equal(
+  '光标不在表格内时删除整表保持原样',
+  applySourceFormat('tableDelete', undefined, { content: tailTable, selectionStart: 0, selectionEnd: 0 }).content,
+  tailTable
+);
+const onlyTable = '| A | B |\n| --- | --- |\n| 1 | 2 |';
+const deletedOnlyTable = applySourceFormat('tableDelete', undefined, {
+  content: onlyTable,
+  selectionStart: onlyTable.indexOf('| 1 | 2 |') + 2,
+  selectionEnd: onlyTable.indexOf('| 1 | 2 |') + 2
+});
+ok('文档末尾的表格同样能整表删除', !deletedOnlyTable.content.includes('| --- |'), deletedOnlyTable.content);
+
 // ===== 结果 =====
 console.log(`\n单元测试：${total - failed}/${total} 通过`);
 if (failed > 0) process.exitCode = 1;

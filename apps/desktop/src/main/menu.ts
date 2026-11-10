@@ -223,7 +223,10 @@ function buildTemplate(): MenuItemConstructorOptions[] {
                 ? '删除表头行后，首个数据行会成为新表头；表格只有表头时会删除整张表'
                 : undefined
             }),
-            item('删除当前表格列', MenuActions.TableDeleteCol, { enabled: s.inTable })
+            item('删除当前表格列', MenuActions.TableDeleteCol, { enabled: s.inTable }),
+            sep,
+            // 整表删除：文档末尾的表格后面没有可选中的光标位置，必须提供显式动作
+            item('删除整个表格', MenuActions.TableDelete, { enabled: s.inTable })
           ]
         },
         item('公式块', MenuActions.InsertMathBlock, {

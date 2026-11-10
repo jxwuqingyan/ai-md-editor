@@ -9,7 +9,7 @@ export type FormatAction =
   | 'heading' | 'paragraph' | 'codeBlock' | 'hr'
   | 'upgradeHeading' | 'downgradeHeading'
   | 'strikethrough' | 'underline' | 'clearFormat' | 'hardBreak'
-  | 'insertTable' | 'tableAddRow' | 'tableAddCol' | 'tableDeleteRow' | 'tableDeleteCol'
+  | 'insertTable' | 'tableAddRow' | 'tableAddCol' | 'tableDeleteRow' | 'tableDeleteCol' | 'tableDelete'
   | 'taskList' | 'taskDone' | 'taskUndone' | 'taskClear'
   | 'indentList' | 'outdentList'
   | 'insertParagraphAbove' | 'insertParagraphBelow'

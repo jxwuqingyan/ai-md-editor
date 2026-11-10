@@ -1570,6 +1570,57 @@ async function runTests() {
   );
   check('点击复选框切换完成状态', true);
 
+  // ===== 10.6 文档末尾的表格：下方能点进去输入，且能整表删除 =====
+  // 放在全屏/最小化用例之前：那段会改变窗口激活状态，键盘注入会失效。
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('# 末尾表格\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table td'))`), {
+    label: '末尾表格渲染',
+    timeout: 20000
+  });
+  // 表格是文档最后一个节点时，ProseMirror 后面没有可放光标的位置；
+  // 编辑器应自动补一个空段落作为落点，点它就能直接输入。
+  const trailingTag = await exec(
+    `document.querySelector('.ProseMirror')?.lastElementChild?.tagName?.toLowerCase() ?? ''`
+  );
+  check('文档末尾表格后自动补出可输入段落', trailingTag === 'p', `lastTag=${trailingTag}`);
+
+  // 末尾空段落可能落在滚动区之外，先滚到中间再点击，避免坐标落到视口外
+  await exec(`(() => {
+    const p = document.querySelector('.ProseMirror')?.lastElementChild;
+    if (!p) return false;
+    p.scrollIntoView({ block: 'center' });
+    return true;
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await clickSelector('.ProseMirror > p:last-child', 0);
+  await focusEditor();
+  win.webContents.insertText('表格下方的文字');
+  const typedState = await exec(`(() => {
+    const pm = document.querySelector('.ProseMirror');
+    const last = pm?.lastElementChild;
+    return JSON.stringify({
+      lastTag: last?.tagName?.toLowerCase() ?? '',
+      lastText: last?.textContent ?? '',
+      inTable: [...document.querySelectorAll('.ProseMirror table')].some((t) =>
+        t.textContent.includes('表格下方的文字')
+      ),
+      active: document.activeElement?.className ?? document.activeElement?.tagName ?? ''
+    });
+  })()`);
+  check('点击表格下方空白即可输入内容', typedState.includes('"inTable":false') && typedState.includes('表格下方的文字'), typedState);
+
+  await clickSelector('.ProseMirror table td', 0);
+  const deleteTableEnabled = await menuItemEnabled('删除整个表格');
+  check('光标在表格内时「删除整个表格」可用', deleteTableEnabled === true, `enabled=${deleteTableEnabled}`);
+  menuAction('format:table-delete');
+  await waitFor(() => exec(`!document.querySelector('.ProseMirror table')`), { label: '整表已删除' });
+  const afterDeleteTable = await exec(`document.querySelector('.ProseMirror')?.textContent ?? ''`);
+  check('删除整表后下方段落内容保留', afterDeleteTable.includes('表格下方的文字'), afterDeleteTable);
+
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();

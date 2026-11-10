@@ -528,6 +528,7 @@ export const MenuActions = {
   TableAddCol: 'format:table-add-col',
   TableDeleteRow: 'format:table-delete-row',
   TableDeleteCol: 'format:table-delete-col',
+  TableDelete: 'format:table-delete',
   FormatCodeBlock: 'format:code-block',
   FormatQuote: 'format:quote',
   FormatBulletList: 'format:bullet-list',

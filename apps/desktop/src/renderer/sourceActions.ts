@@ -259,6 +259,24 @@ function tableLineOperation(ctx: SourceContext, op: 'addRow' | 'addCol' | 'delet
 }
 
 /**
+ * 源码模式：删除光标所在的整张表格。
+ * WYSIWYG 模式删的是整个 table 节点；这里对应删掉构成该表格的连续行。
+ */
+function deleteTableBlock(ctx: SourceContext): SourceResult {
+  const block = findTableBlock(ctx.content, ctx.selectionStart);
+  if (!block) return unchanged(ctx);
+  const lines = ctx.content.split('\n');
+  const nextLines = [...lines.slice(0, block.start), ...lines.slice(block.end)];
+  const content = nextLines.join('\n');
+  let caret = 0;
+  for (let i = 0; i < Math.min(block.start, nextLines.length); i += 1) {
+    caret += nextLines[i].length + 1;
+  }
+  caret = Math.max(0, Math.min(caret, content.length));
+  return { content, selectionStart: caret, selectionEnd: caret };
+}
+
+/**
  * 源码模式的表格上下文：按光标所在行判断是否在表格 / 表头。
  * 与 WYSIWYG 模式的 editor.getTableContext() 对齐，供原生菜单置灰使用。
  */
@@ -350,6 +368,8 @@ export function applySourceFormat(
       return tableLineOperation(ctx, 'deleteRow');
     case 'tableDeleteCol':
       return tableLineOperation(ctx, 'deleteCol');
+    case 'tableDelete':
+      return deleteTableBlock(ctx);
     case 'insertParagraphAbove': {
       const { lineStart } = lineBounds(ctx.content, ctx.selectionStart, ctx.selectionEnd);
       return {

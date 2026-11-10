@@ -112,6 +112,29 @@ export function lineOperation(view: EditorView, op: 'up' | 'down' | 'delete' | '
 }
 
 /**
+ * 删除光标所在的整张表格。
+ *
+ * 表格位于文档末尾时，它后面没有可以直接放光标的位置，靠 Backspace
+ * 很难选中整表；菜单动作直接按节点范围删除最可靠。删除后把光标落到
+ * 相邻位置，并保证文档不为空。
+ */
+export function deleteTable(view: EditorView): void {
+  const { state } = view;
+  const table = findAncestor(state.selection.$from, 'table');
+  if (!table) return;
+
+  let tr = state.tr.delete(table.pos, table.pos + table.node.nodeSize);
+  if (tr.doc.childCount === 0) {
+    const paragraph = state.schema.nodes['paragraph'];
+    if (paragraph) tr = tr.insert(0, paragraph.create());
+  }
+  const caret = Math.max(0, Math.min(table.pos, tr.doc.content.size));
+  tr = tr.setSelection(TextSelection.near(tr.doc.resolve(caret)));
+  view.dispatch(tr.scrollIntoView());
+  view.focus();
+}
+
+/**
  * 删除表格当前行。
  *
  * GFM 表格必须保留表头行，所以光标在表头时不直接删：
@@ -146,15 +169,7 @@ export function deleteTableRow(view: EditorView): void {
 
   // 只有表头没有数据行：整张表没有可用内容，直接删表
   if (!headerRowType || !headerCellType || !firstBody) {
-    let tr = state.tr.delete(table.pos, table.pos + table.node.nodeSize);
-    if (tr.doc.childCount === 0) {
-      const paragraph = state.schema.nodes['paragraph'];
-      if (paragraph) tr = tr.insert(0, paragraph.create());
-    }
-    const caret = Math.max(0, Math.min(table.pos, tr.doc.content.size));
-    tr = tr.setSelection(TextSelection.near(tr.doc.resolve(caret)));
-    view.dispatch(tr.scrollIntoView());
-    view.focus();
+    deleteTable(view);
     return;
   }
 
