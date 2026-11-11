@@ -50,6 +50,7 @@ import { calloutPlugin, tocPlugin } from './decorations';
 import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
 import { trailingParagraphPlugin } from './trailing';
+import { listBackspaceShortcut, listUnlistPendingPlugin } from './listBackspace';
 import { slashMenuPlugin } from './slash';
 import { linkClickPlugin } from './link';
 import { taskListPlugin } from './task';
@@ -117,6 +118,9 @@ export async function createEditor(
     .use(gfm)
     // 末尾是非文本块（表格/分割线等）时补一个空段落，保证表格下方能点进去输入、整表也能被删除
     .use(trailingParagraphPlugin)
+    // 列表项开头按退格：去掉当前编号变普通段落，而不是并进上一行；连续按可一路解散列表
+    .use(listUnlistPendingPlugin)
+    .use(listBackspaceShortcut)
     // 撤销/重做历史（ProseMirror history）：没有它 Cmd+Z 在整个编辑器里无效
     .use(history)
     .use([...underlineSchema])

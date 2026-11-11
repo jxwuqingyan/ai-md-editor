@@ -1691,6 +1691,116 @@ async function runTests() {
   );
   check('末尾段落转成代码块后仍自动补出可输入段落', converted === true, `converted=${converted}`);
 
+  // ===== 10.8 列表项开头按退格：去掉当前编号变段落，而不是并进上一行 =====
+  // 旧行为是把「2. 第二项」的文字并到第一项后面（光标跳到上一行），
+  // 列表在文档开头时更是删不动、也没法在最前面写新内容。
+  const pressKey = (keyCode) => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode });
+  };
+
+  /** 点进第 index 个列表项并回到行首 */
+  const caretToListItem = async (index) => {
+    await clickSelector('.ProseMirror li p', index);
+    await focusEditor();
+    pressKey('Home');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  };
+
+  const readBlocks = () =>
+    exec(`(() => {
+      const pm = document.querySelector('.ProseMirror');
+      if (!pm) return '[]';
+      const top = [...pm.children].map((el) => {
+        const tag = el.tagName.toLowerCase();
+        const out = { tag, text: (el.textContent ?? '').slice(0, 30) };
+        if (tag === 'ol' || tag === 'ul') {
+          out.start = el.getAttribute('start');
+          out.items = [...el.children].map((li) => (li.textContent ?? '').slice(0, 30));
+        }
+        return out;
+      });
+      return JSON.stringify(top);
+    })()`);
+
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('1. 第一项\n2. 第二项\n3. 第三项\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`document.querySelectorAll('.ProseMirror li').length === 3`), {
+    label: '三项有序列表渲染',
+    timeout: 20000
+  });
+
+  await caretToListItem(1);
+  pressKey('Backspace');
+  await waitFor(() => exec(`document.querySelectorAll('.ProseMirror > ol').length === 2`), {
+    label: '第 2 项摘出列表',
+    timeout: 8000
+  });
+  const afterSecond = await readBlocks();
+  check(
+    '第 2 项开头退格：本项变普通段落，不并入上一项',
+    afterSecond.includes('"text":"第二项"') && afterSecond.includes('"text":"第一项"'),
+    afterSecond
+  );
+  check(
+    '剩下的一项编号续号（restart 3）',
+    afterSecond.includes('"start":"3"') && afterSecond.includes('第三项'),
+    afterSecond
+  );
+
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('1. 第一项\n2. 第二项\n3. 第三项\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`document.querySelectorAll('.ProseMirror li').length === 3`), {
+    label: '列表还原',
+    timeout: 20000
+  });
+  await caretToListItem(0);
+  pressKey('Backspace');
+  await waitFor(() => exec(`document.querySelector('.ProseMirror')?.firstElementChild?.tagName?.toLowerCase() === 'p'`), {
+    label: '第 1 项摘出列表',
+    timeout: 8000
+  });
+  const afterFirst = await readBlocks();
+  check(
+    '第 1 项开头退格：列表最前面出现可输入的普通段落',
+    afterFirst.startsWith('[{"tag":"p","text":"第一项"}') && afterFirst.includes('"start":"2"'),
+    afterFirst
+  );
+  // 新段落已在文档最前面，直接输入应该写进这个段落
+  win.webContents.insertText('新增一行');
+  await waitFor(
+    () => exec(`(document.querySelector('.ProseMirror')?.firstElementChild?.textContent ?? '').includes('新增一行')`),
+    { label: '最前面可输入新内容' }
+  );
+  check('退回最前面后可以直接输入新内容', true);
+
+  // 空列表项按退格：列表消失，只留一个空段落（不能留下两个空段落）
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('开头段落\n\n1. \n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror ol li'))`), {
+    label: '空列表渲染',
+    timeout: 20000
+  });
+  await caretToListItem(0);
+  pressKey('Backspace');
+  await waitFor(() => exec(`!document.querySelector('.ProseMirror ol')`), {
+    label: '空列表已退出',
+    timeout: 8000
+  });
+  const emptyBlocks = await exec(
+    `document.querySelectorAll('.ProseMirror > *').length + '|' + [...document.querySelectorAll('.ProseMirror > *')].map((el) => el.tagName.toLowerCase()).join(',')`
+  );
+  check('空列表项退格后不留多余空段落', emptyBlocks === '2|p,p', emptyBlocks);
+
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();
