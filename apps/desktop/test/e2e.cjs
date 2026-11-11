@@ -1273,6 +1273,62 @@ async function runTests() {
   const listCount = await exec(`document.querySelectorAll('.slash-list .slash-item').length`);
   check('斜杠菜单默认条目齐全', gridCount === 13 && listCount === 4, `grid=${gridCount} list=${listCount}`);
 
+  // 悬停「表格」条目就应展开行列网格（不需要点右侧箭头），且网格贴在菜单外侧、
+  // 不遮挡菜单里的其他条目（插入区是两列布局，贴条目放会盖住右边那列）。
+  const hoverPoint = async (keyword) =>
+    exec(`(() => {
+      const item = [...document.querySelectorAll('.slash-item')].find((el) => el.textContent.includes(${JSON.stringify(keyword)}));
+      if (!item) return null;
+      const r = item.getBoundingClientRect();
+      return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) });
+    })()`);
+  const tablePt = await hoverPoint('表格');
+  if (tablePt) {
+    const t = JSON.parse(tablePt);
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: t.x, y: t.y });
+    const hoverShown = await waitFor(
+      () =>
+        exec(`(() => {
+          const sub = document.querySelector('.slash-sub');
+          return Boolean(sub) && getComputedStyle(sub).display !== 'none';
+        })()`),
+      { label: '悬停展开二级网格', timeout: 6000 }
+    );
+    check('悬停表格条目即展开行列网格（无需点箭头）', hoverShown === true, `shown=${hoverShown}`);
+
+    const geom = await exec(`(() => {
+      const sub = document.querySelector('.slash-sub').getBoundingClientRect();
+      const menu = document.querySelector('.slash-menu').getBoundingClientRect();
+      // 右侧放不下会翻到菜单左边，两种都算合格：只要两者水平方向不重叠
+      const noOverlap = sub.right <= menu.left || sub.left >= menu.right;
+      return JSON.stringify({
+        subLeft: Math.round(sub.left),
+        subRight: Math.round(sub.right),
+        menuLeft: Math.round(menu.left),
+        menuRight: Math.round(menu.right),
+        noOverlap
+      });
+    })()`);
+    const g = JSON.parse(geom);
+    check('行列网格贴在菜单外侧，不遮挡菜单条目', g.noOverlap === true, geom);
+
+    // 悬停到别的条目：网格应收回去，避免一直挂在那里
+    const otherPt = await hoverPoint('图片');
+    if (otherPt) {
+      const o = JSON.parse(otherPt);
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: o.x, y: o.y });
+      await waitFor(
+        () => exec(`getComputedStyle(document.querySelector('.slash-sub')).display === 'none'`),
+        { label: '网格收回', timeout: 6000 }
+      );
+      check('悬停其他条目后行列网格收回', true);
+    } else {
+      skip('悬停其他条目后行列网格收回', '菜单里找不到图片条目');
+    }
+  } else {
+    skip('悬停表格条目即展开行列网格（无需点箭头）', '菜单里找不到表格条目');
+  }
+
   // 输入「图」过滤到图片一项。「图片」条目现在会打开系统文件选择器（原生对话框无法自动化）：
   // 尝试把 IPC 桩掉再点击验证整条链路；桩不上（contextBridge 只读等）就 Esc 跳过点击。
   win.webContents.insertText('图');

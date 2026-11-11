@@ -239,6 +239,8 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
   /** 二级网格当前选中的行数 / 列数 */
   let subRows = 3;
   let subCols = 3;
+  /** 二级网格的定位锚点：以鼠标实际悬停到的「表格」条目为准，避免网格盖住光标 */
+  let subAnchor: HTMLElement | null = null;
   let trigger: SlashTrigger | null = null;
   let activeIndex = 0;
   /** 当前展示（过滤后）的条目，键盘导航与点击确认都用它的下标 */
@@ -258,10 +260,24 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-slash-id],[data-slash-index]');
       if (!target) return;
       if (target.dataset['slashId'] === TABLE_ID || visible[Number(target.dataset['slashIndex'])]?.id === TABLE_ID) {
+        // 记录真正悬停到的条目：网格要贴着这一行展开，不能盖住光标
+        subAnchor = target;
         if (!subOpen) openSub();
+        else positionSub();
       } else {
+        subAnchor = null;
         closeSub();
       }
+    });
+    // 鼠标移出菜单：把网格一起收回；移进网格本身不算离开
+    panel.addEventListener('mouseleave', () => {
+      if (!isOpen || !subOpen) return;
+      window.setTimeout(() => {
+        if (!isOpen || !subOpen) return;
+        if (subPanel && subPanel.matches(':hover')) return;
+        subAnchor = null;
+        closeSub();
+      }, 120);
     });
     panel.addEventListener('click', (event) => {
       const view = viewRef;
@@ -274,9 +290,10 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
         : visible[Number(target.dataset['slashIndex'])];
       if (!item) return;
       if (item.id === TABLE_ID) {
-        // 表格不直接插入：第一次点展开二级网格，再点按当前选中行列插入
+        // 表格不直接插入：悬停已展开网格，这里只保证网格可见；
+        // 插入一律走点击网格单元格（或键盘 Enter），避免行点击误插 3×3。
         closeForm();
-        if (subOpen) applyTable(view);
+        if (subOpen) positionSub();
         else openSub();
         return;
       }
@@ -339,6 +356,16 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       }
       applyTable(view);
     });
+    // 鼠标离开网格：回到菜单里（含表格那一行）就留着，彻底移开则收回
+    subPanel.addEventListener('mouseleave', () => {
+      if (!subOpen) return;
+      window.setTimeout(() => {
+        if (!subOpen) return;
+        if (panel && panel.matches(':hover')) return;
+        subAnchor = null;
+        closeSub();
+      }, 120);
+    });
     // 一次性构建 8×6 单元格网格（不再每次悬停重建 innerHTML，避免重建导致的点击失效与高亮滞后）
     let cells = '';
     for (let r = 1; r <= SUB_MAX_ROWS; r += 1) {
@@ -370,21 +397,29 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     if (label) label.textContent = `${subRows} 行 × ${subCols} 列`;
   };
 
-  /** 把二级网格定位到表格条目右侧；放不下时翻到左侧 */
+  /** 把二级网格定位到主菜单右侧；放不下时翻到左侧 */
   const positionSub = (): void => {
     if (!subPanel || !panel || subPanel.style.display === 'none') return;
+    // 优先贴着鼠标悬停到的那一行（最近使用区与插入区各有一条，位置不同）；
+    // 行元素被重渲染掉时退回可见的第一条表格条目。
     const anchor =
+      (subAnchor && panel.contains(subAnchor) ? subAnchor : null) ??
       panel.querySelector<HTMLElement>(`[data-slash-id="${TABLE_ID}"]`) ??
       panel.querySelector<HTMLElement>('[data-slash-index]');
     if (!anchor) return;
+    /**
+     * 水平位置按**整个菜单**的右边缘算，而不是按条目右边缘：
+     * 插入区是两列布局，贴着条目放会盖住右边那一列（图片等条目就点不到了）。
+     * 垂直方向仍与悬停到的那一行对齐。
+     */
     const a = anchor.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
     const rect = subPanel.getBoundingClientRect();
     const margin = 8;
-    let left = a.right + 6;
-    if (left + rect.width + margin > window.innerWidth) left = a.left - rect.width - 6;
-    if (left < margin) left = margin;
-    let top = Math.min(a.top, window.innerHeight - rect.height - margin);
-    if (top < margin) top = margin;
+    let left = p.right + 6;
+    if (left + rect.width + margin > window.innerWidth) left = p.left - rect.width - 6;
+    if (left < margin) left = Math.max(margin, window.innerWidth - rect.width - margin);
+    const top = Math.max(margin, Math.min(a.top, window.innerHeight - rect.height - margin));
     subPanel.style.left = `${Math.round(left)}px`;
     subPanel.style.top = `${Math.round(top)}px`;
   };
@@ -635,7 +670,7 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       : item.hint
         ? `<span class="slash-item-hint">${esc(item.hint)}</span>`
         : '';
-    return `<button type="button" class="slash-item${active ? ' slash-active' : ''}" data-slash-index="${index}"><span class="slash-icon-box">${icon}</span><span class="slash-item-label">${esc(item.label)}</span>${tail}</button>`;
+    return `<button type="button" class="slash-item${active ? ' slash-active' : ''}" data-slash-index="${index}" data-slash-id="${esc(item.id)}"><span class="slash-icon-box">${icon}</span><span class="slash-item-label">${esc(item.label)}</span>${tail}</button>`;
   };
 
   /** 确认条目：删掉「/过滤词」→ 套用动作 → 记录最近使用 */
