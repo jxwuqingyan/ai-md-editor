@@ -1621,6 +1621,76 @@ async function runTests() {
   const afterDeleteTable = await exec(`document.querySelector('.ProseMirror')?.textContent ?? ''`);
   check('删除整表后下方段落内容保留', afterDeleteTable.includes('表格下方的文字'), afterDeleteTable);
 
+  // ===== 10.7 文档末尾的代码块：下方同样能点进去写正文 =====
+  // 代码块内部能放光标，但它是封闭块，Enter 换不出普通段落，点下方也没有落点，
+  // 所以和表格一样要自动补一个空段落。
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('# 末尾代码块\n\n```js\nconst a = 1;\n```\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror pre'))`), {
+    label: '末尾代码块渲染',
+    timeout: 20000
+  });
+  const codeTrailingTag = await exec(
+    `document.querySelector('.ProseMirror')?.lastElementChild?.tagName?.toLowerCase() ?? ''`
+  );
+  check('文档末尾代码块后自动补出可输入段落', codeTrailingTag === 'p', `lastTag=${codeTrailingTag}`);
+
+  await exec(`(() => {
+    const p = document.querySelector('.ProseMirror')?.lastElementChild;
+    if (!p) return false;
+    p.scrollIntoView({ block: 'center' });
+    return true;
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await clickSelector('.ProseMirror > p:last-child', 0);
+  await focusEditor();
+  win.webContents.insertText('代码块下方的文字');
+  const codeTypedState = await exec(`(() => {
+    const pm = document.querySelector('.ProseMirror');
+    const last = pm?.lastElementChild;
+    return JSON.stringify({
+      lastTag: last?.tagName?.toLowerCase() ?? '',
+      lastText: last?.textContent ?? '',
+      inPre: [...document.querySelectorAll('.ProseMirror pre')].some((n) =>
+        n.textContent.includes('代码块下方的文字')
+      )
+    });
+  })()`);
+  check(
+    '点击代码块下方空白即可输入内容',
+    codeTypedState.includes('"lastTag":"p"') &&
+      codeTypedState.includes('代码块下方的文字') &&
+      codeTypedState.includes('"inPre":false'),
+    codeTypedState
+  );
+
+  // 真实操作路径：把末尾段落转成代码块（菜单「代码块」）后，下方仍要有可输入区域
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('# 转换代码块\n\n最后一段\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror > p:last-child'))`), {
+    label: '转换前段落渲染',
+    timeout: 20000
+  });
+  await clickSelector('.ProseMirror > p:last-child', 0);
+  await focusEditor();
+  menuAction('format:code-block');
+  const converted = await waitFor(
+    () =>
+      exec(`(() => {
+        const pm = document.querySelector('.ProseMirror');
+        const last = pm?.lastElementChild;
+        return Boolean(pm?.querySelector('pre')) && last?.tagName?.toLowerCase() === 'p';
+      })()`),
+    { label: '转换为代码块后补出段落', timeout: 10000 }
+  );
+  check('末尾段落转成代码块后仍自动补出可输入段落', converted === true, `converted=${converted}`);
+
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();

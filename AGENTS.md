@@ -273,6 +273,7 @@ ai-md-editor/
 | 入口 chunk 3 MB，冷启动慢 | 入口静态 `import` 了编辑器包（含 Milkdown/Shiki/Mermaid/KaTeX），连 `NO_TABLE_CONTEXT` 这种小常量都会把整包拉进来 | 编辑器改为 `await import(...)`；渲染层常量放 `constants.ts`，只从编辑器包导入**类型** |
 | 纯函数单测在 Windows CI 跑不起来 | 直接用 Node 跑 `.ts` 依赖运行器/版本 | `test/run-unit.cjs` 用 esbuild（随 vite 安装）打包成 CJS 再执行 |
 | 只有竖线的普通段落被当成表格 | `findTableBlock` 只检查行首 `\|`，没要求 GFM 分隔行 | 第二行必须是合法分隔行（`isTableSeparator`），否则不算表格 |
+| 文档末尾是表格/代码块时，下方点不进去、写不了字 | ProseMirror 在最后一个块之后没有合法文本位置；代码块虽然是 textblock，但它是封闭块，Enter 换不出普通段落 | `packages/editor/src/trailing.ts` 在末尾补一个空段落：非 textblock 或 `type.spec.code === true` 的块都补，标题/正文/引用/列表不补；补段落只用尾部空白差异，`handleChange` 不置 dirty |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 
