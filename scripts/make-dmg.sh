@@ -48,8 +48,13 @@ echo "=== 4/6 放入应用 / Applications 链接 / 箭头图 / 卷图标 ==="
 # COPYFILE_DISABLE + ditto 参数：避免把扩展属性与 AppleDouble 带进镜像
 COPYFILE_DISABLE=1 ditto --norsrc --noextattr --noacl "$APP" "$MNT/MarkdownNote.app"
 ln -sfn /Applications "$MNT/Applications"
-# 两个图标之间的箭头：放成图片文件由 Finder 显示缩略图（新版 Finder 的背景图不生效）
-cp "$ARROW" "$MNT/箭头.png"
+# 两个图标之间的箭头：做成「自定义图标 + 空白文件名」的文件——
+# 直接放 PNG 会被 Finder 套上白色缩略图底板和文件名，sips -i 把图写进文件图标资源后
+# 就只剩箭头本身（文件名一个空格，标签为空白）
+cp "$ARROW" "$MNT/arrow.png"
+sips -i "$MNT/arrow.png" >/dev/null
+SetFile -a C "$MNT/arrow.png"
+mv "$MNT/arrow.png" "$MNT/ "
 # 卷图标：用应用自己的图标，替换系统默认的「磁盘镜像」灰盒子
 cp "$ICON_ICNS" "$MNT/.VolumeIcon.icns"
 SetFile -a C "$MNT"

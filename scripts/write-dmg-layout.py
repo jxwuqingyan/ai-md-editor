@@ -2,13 +2,13 @@
 """给 dmg 卷写 .DS_Store：固定安装窗口布局。
 
 窗口内容区 540×320：
-    [MarkdownNote.app] (140,140)   [箭头.png] (270,140)   [Applications] (400,140)
+    [MarkdownNote.app] (140,140)   [箭头] (270,140)   [Applications] (400,140)
 
 为什么不用 Finder 脚本：本机自动化权限被系统拒绝（AppleScript 报 -10004）。
-为什么用箭头图片文件而不是窗口背景图：新版 Finder 读 `.DS_Store` 的
-`backgroundImageAlias`（alias / bookmark 两种引用都试过）不再显示背景，
-改为在两个图标之间放一张透明箭头 PNG——图标视图会显示它的缩略图，
-效果等价，且各版本系统都稳定。
+为什么用箭头图标文件而不是窗口背景图：新版 Finder 读 `.DS_Store` 的
+`backgroundImageAlias`（alias / bookmark 两种引用都试过）不再显示背景。
+最终做法：中间放一个文件名是**单个空格**的文件，用 `sips -i` + `SetFile -a C`
+把箭头图写成它的自定义图标——这样既不显示文件名标签，也没有缩略图的白色底板。
 
 用法：python3 scripts/write-dmg-layout.py <挂载点>
 """
@@ -23,7 +23,7 @@ sys.path.insert(0, str(VENDOR))
 from ds_store import DSStore  # noqa: E402
 
 APP_NAME = "MarkdownNote.app"
-ARROW_NAME = "箭头.png"
+ARROW_NAME = " "
 # 图标中心（内容区坐标）
 APP_POS = (140, 140)
 ARROW_POS = (270, 140)
@@ -63,7 +63,7 @@ def main() -> None:
         "gridOffsetY": 0.0,
         "gridSpacing": 100.0,
         "arrangeBy": "none",  # 不要自动排列，否则自定义坐标会被覆盖
-        "showIconPreview": True,  # 让 →.png 显示成图片缩略图
+        "showIconPreview": False,  # 关掉缩略图：箭头用自定义图标，避免白色底板
         "showItemInfo": False,
         "labelOnBottom": True,
         "textSize": TEXT_SIZE,
