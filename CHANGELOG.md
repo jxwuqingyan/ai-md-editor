@@ -37,6 +37,7 @@
 - 窗口布局：应用在左（140,140）、中间箭头（270,140）、Applications 在右（400,140），窗口 540×320、图标 96px、不自动排列；隐藏项（.fseventsd / .Trashes / .DS_Store）在 `.DS_Store` 里被推到窗口外，打开时不会出现在窗口里。
 - 实现方式：本机 Finder 自动化权限被拒（AppleScript `-10004`），改用 electron-builder 自带 vendor 的 `ds_store` 纯 Python 实现直接生成 `.DS_Store`；镜像先挂到 `/Volumes/MarkdownNote` 再写布局（背景 alias 需要该路径）。
 - 注：新版 Finder 不再显示 `.DS_Store` 里的窗口背景图（alias / bookmark 两种引用都验证无效），因此箭头改为一张透明 PNG 放在两个图标之间（`箭头.png`）。
+- 卷图标：镜像里放 `.VolumeIcon.icns`（复用应用图标）并用 `SetFile -a C` 标记自定义图标位，替换系统默认的灰色磁盘镜像图标。
 
 ## 0.14.18 - 2026-11-11
 
