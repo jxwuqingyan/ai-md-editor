@@ -278,6 +278,7 @@ ai-md-editor/
 | 斜杠菜单悬停「表格」不弹行列网格，只有点击才弹 | 定位锚点查 `[data-slash-id="table"]`，但菜单行只渲染 `data-slash-index`，选择器命中不到 → 退回「第一条」，网格压在光标那一行上，鼠标一动又被"悬停其他条目"收回 | 行元素补 `data-slash-id` + 记住实际悬停行（`subAnchor`）；**贴着当前条目右侧展开**（子菜单行为，指针直接滑进网格）；**不要**挪到整个菜单外侧——那样指针要跨过右侧条目，途中就被"悬停其他条目"收回，格子点不中；移出菜单/网格 120ms 后收回 |
 | 公式编辑态需要一个「帮助文档 + 确定」的底部条 | 公式是 atom 节点，自绘 NodeView，没有现成的编辑器外壳 | `mathView.ts` 里给块级公式加 `.md-math-footer`：左侧链接走 `configureMathView({ openLink })` 注入的外部打开通道（`shell:open-external` 白名单），右侧「确定（⌘ / Ctrl + Enter）」点击即 `commit()`；行内公式不加（空间不足） |
 | 公式插入后只有一个蓝色框、改不了 | 公式插件的 `math_inline` / `math_block` 是 **atom** 节点，只有 `toDOM` 渲染 KaTeX，没有编辑界面；点击只能拿到 NodeSelection | `mathView.ts` 提供 NodeView：点击换成文本框编辑原始 TeX、失焦或 ⌘/Ctrl+Enter 提交、Esc 取消、清空即删除；行内写节点文本、块级写 `attrs.value`；插入公式时经 `requestMathAutoEdit()` 自动进入编辑；刚展开 250ms 内的 blur 只重新聚焦（否则点开就被抢焦点关掉） |
+| 编辑行内公式提交后段落被切成两段、源码里多出 `&#x20;` | 回车/退格分支只 `preventDefault()` 没 `stopPropagation()`，事件冒泡到键位链，`baseKeymap` 的 Enter → `splitBlock` 在公式后面分段；`preventDefault()` 对 `cancelable=false` 的合成事件无效，所以偶发 | `mathView.ts` 两个提交分支都补 `stopPropagation()`；`stopEvent()` 对键盘事件无条件返回 `true`（提交后 `editing` 已为 `false`，只按编辑态判断会漏掉仍在传播的那次按键） |
 | 改完内容立刻切源码/切标签，改动丢失 | 编辑器 → 标签状态的回写走 Milkdown 变更监听，**200ms 防抖**；切模式/切标签/关标签会卸载编辑器，监听 destroy 时 `debouncedHandler.cancel()`，那次回写被取消 | 新增 `EditorInstance.flushMarkdown()`（`serializerCtx` 同步序列化当前 doc），切模式、切标签、关标签、保存 / 另存为 / 全部保存前先 flush，不能用带缓存的 `getMarkdown()` |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）

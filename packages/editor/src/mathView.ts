@@ -222,15 +222,21 @@ class MathNodeView implements NodeView {
       this.commit();
       return;
     }
-    // 单行公式里回车直接提交，避免文本框被撑高
+    // 单行公式里回车直接提交，避免文本框被撑高。
+    // 必须同时挡住传播：只 preventDefault 的话，事件照样冒泡到编辑器的键位链，
+    // 基础键位表的 Enter → splitBlock 会把段落从公式后面切成两段
+    // （preventDefault 只在事件可取消时有效，合成事件一律 cancelable=false，所以这个问题会时隐时现）。
     if (event.key === 'Enter' && !this.block && !event.shiftKey) {
       event.preventDefault();
+      event.stopPropagation();
       this.commit();
       return;
     }
-    // 内容已清空时按退格/删除 = 删掉这个公式
+    // 内容已清空时按退格/删除 = 删掉这个公式（同理不能漏掉 stopPropagation，
+    // 否则这笔按键会继续交给编辑器，去删掉公式前后的正文）
     if ((event.key === 'Backspace' || event.key === 'Delete') && !this.input.value) {
       event.preventDefault();
+      event.stopPropagation();
       this.commit();
       return;
     }
@@ -345,8 +351,14 @@ class MathNodeView implements NodeView {
     return true;
   }
 
-  /** 编辑中吞掉所有事件，别让 ProseMirror 抢焦点/改选区 */
-  stopEvent(): boolean {
+  /**
+   * 吞掉从公式内部发出的事件，别让 ProseMirror 抢焦点/改选区。
+   *
+   * 键盘事件无条件吞掉：提交时 editing 已经变回 false，但按键事件本身还在传播，
+   * 若这时交回编辑器，同一个回车会被基础键位表当成「分段」，把段落从公式后面切开。
+   */
+  stopEvent(event: Event): boolean {
+    if (event instanceof KeyboardEvent) return true;
     return this.editing;
   }
 

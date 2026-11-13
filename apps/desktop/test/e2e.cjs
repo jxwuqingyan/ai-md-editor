@@ -2030,6 +2030,13 @@ async function runTests() {
   });
   const inlineSource = await expectMarkdown('$n+1$', '行内公式写回 Markdown');
   check('行内公式改动写回 Markdown', inlineSource.includes('$n+1$'), inlineSource.slice(0, 60));
+  // 提交时若回车事件漏到编辑器键位链，baseKeymap 的 splitBlock 会把段落从公式后面切开，
+  // 源码变成「行内 $n+1$」+ 空行 + 「&#x20;公式」。这里连段落完整性一起断言。
+  check(
+    '行内公式提交不切开段落',
+    inlineSource.includes('行内 $n+1$ 公式') && !inlineSource.includes('&#x20;'),
+    JSON.stringify(inlineSource)
+  );
 
   // 从斜杠菜单插入公式后应直接进入编辑，插完就能敲 TeX
   await ensureSourceMode();
