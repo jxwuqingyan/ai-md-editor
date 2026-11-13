@@ -31,6 +31,13 @@
 - **顺带修掉一个会丢改动的问题**：编辑器内容回写标签状态走变更监听，带 200ms 防抖；而切换源码/渲染模式、切换标签、关闭标签都会卸载编辑器，**防抖中的那次回写会被取消**，刚改的内容只存在编辑器里、没进标签状态（切到源码模式看到的是旧内容，保存也会写旧的）。新增 `EditorInstance.flushMarkdown()` 同步序列化当前文档，并在切模式、切标签、关标签、保存、另存为、全部保存前先 flush。
 - 验证：`tsc --noEmit` 零错误、`npm run build` 通过、单测与菜单校验通过；E2E 新增 7 项真实 GUI 断言（KaTeX 渲染且无描边 / 点击进入编辑并带出 TeX / 提交后重渲染无残留框 / 块级写回 Markdown / 行内可编辑并写回 / 插入后自动进入编辑 / 输入内容保存），全套 **121 项通过**。调试脚本 `test/math-edit-debug.cjs` 保留。
 
+### 打包：安装窗口改成标准布局
+
+- 新增 `scripts/make-dmg.sh`（一条命令出安装包）与 `scripts/make-dmg-background.py`（生成箭头图）。
+- 窗口布局：应用在左（140,140）、中间箭头（270,140）、Applications 在右（400,140），窗口 540×320、图标 96px、不自动排列；隐藏项（.fseventsd / .Trashes / .DS_Store）在 `.DS_Store` 里被推到窗口外，打开时不会出现在窗口里。
+- 实现方式：本机 Finder 自动化权限被拒（AppleScript `-10004`），改用 electron-builder 自带 vendor 的 `ds_store` 纯 Python 实现直接生成 `.DS_Store`；镜像先挂到 `/Volumes/MarkdownNote` 再写布局（背景 alias 需要该路径）。
+- 注：新版 Finder 不再显示 `.DS_Store` 里的窗口背景图（alias / bookmark 两种引用都验证无效），因此箭头改为一张透明 PNG 放在两个图标之间（`箭头.png`）。
+
 ## 0.14.18 - 2026-11-11
 
 ### 修复：斜杠菜单的表格行列网格要「点箭头」才出现，悬停没反应
