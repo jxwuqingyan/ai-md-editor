@@ -16,5 +16,8 @@ const outDir = join(__dirname, '..', 'out');
 try {
   rmSync(outDir, { recursive: true, force: true });
 } catch (err) {
-  console.warn(`清理 out/ 失败（继续构建）：${err instanceof Error ? err.message : String(err)}`);
+  console.warn(
+    `清理 out/ 失败（继续构建，本次安装包会偏大）：${err instanceof Error ? err.message : String(err)}\n` +
+      `  若是在受限环境里构建（安全删除策略拦截批量删除），请先手动清空 apps/desktop/out 再打包。`
+  );
 }
