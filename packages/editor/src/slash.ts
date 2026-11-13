@@ -254,31 +254,8 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     panel.setAttribute('aria-label', '快速插入菜单');
     // 按下不抢焦点：否则编辑器 blur 会先把菜单关掉
     panel.addEventListener('mousedown', (event) => event.preventDefault());
-    // 悬停表格条目时展开二级网格，悬停其他条目时收回；表单展开期间不抢戏
-    panel.addEventListener('mouseover', (event) => {
-      if (!isOpen || formOpen) return;
-      const target = (event.target as HTMLElement).closest<HTMLElement>('[data-slash-id],[data-slash-index]');
-      if (!target) return;
-      if (target.dataset['slashId'] === TABLE_ID || visible[Number(target.dataset['slashIndex'])]?.id === TABLE_ID) {
-        // 记录真正悬停到的条目：网格要贴着这一行展开，不能盖住光标
-        subAnchor = target;
-        if (!subOpen) openSub();
-        else positionSub();
-      } else {
-        subAnchor = null;
-        closeSub();
-      }
-    });
-    // 鼠标移出菜单：把网格一起收回；移进网格本身不算离开
-    panel.addEventListener('mouseleave', () => {
-      if (!isOpen || !subOpen) return;
-      window.setTimeout(() => {
-        if (!isOpen || !subOpen) return;
-        if (subPanel && subPanel.matches(':hover')) return;
-        subAnchor = null;
-        closeSub();
-      }, 120);
-    });
+    // 注意：这里**不监听悬停**。表格的行列网格改成「点右侧 › 才展开」——
+    // 悬停展开会让网格跟着指针闪、格子几乎点不中（用户实测反馈），也不再做悬停收回。
     panel.addEventListener('click', (event) => {
       const view = viewRef;
       if (!view || !isOpen) return;
@@ -290,11 +267,15 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
         : visible[Number(target.dataset['slashIndex'])];
       if (!item) return;
       if (item.id === TABLE_ID) {
-        // 表格不直接插入：悬停已展开网格，这里只保证网格可见；
-        // 插入一律走点击网格单元格（或键盘 Enter），避免行点击误插 3×3。
+        // 表格不直接插入：点行尾的 › 展开行列网格，再点 › 收起；
+        // 点这一行的其它位置只保证网格展开（不会误插 3×3，也不重置已选行列）。
+        // 插入一律走点击网格单元格或键盘 Enter。
         closeForm();
-        if (subOpen) positionSub();
-        else openSub();
+        subAnchor = target;
+        const byArrow = Boolean((event.target as HTMLElement).closest('.slash-item-arrow'));
+        if (!subOpen) openSub();
+        else if (byArrow) closeSub();
+        else positionSub();
         return;
       }
       if (item.id === LINK_ID) {
@@ -356,16 +337,6 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       }
       applyTable(view);
     });
-    // 鼠标离开网格：回到菜单里（含表格那一行）就留着，彻底移开则收回
-    subPanel.addEventListener('mouseleave', () => {
-      if (!subOpen) return;
-      window.setTimeout(() => {
-        if (!subOpen) return;
-        if (panel && panel.matches(':hover')) return;
-        subAnchor = null;
-        closeSub();
-      }, 120);
-    });
     // 一次性构建 8×6 单元格网格（不再每次悬停重建 innerHTML，避免重建导致的点击失效与高亮滞后）
     let cells = '';
     for (let r = 1; r <= SUB_MAX_ROWS; r += 1) {
@@ -397,10 +368,10 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     if (label) label.textContent = `${subRows} 行 × ${subCols} 列`;
   };
 
-  /** 把二级网格定位到表格条目右侧；放不下时翻到菜单左侧 */
+  /** 把二级网格定位到菜单右侧；放不下时翻到菜单左侧 */
   const positionSub = (): void => {
     if (!subPanel || !panel || subPanel.style.display === 'none') return;
-    // 优先贴着鼠标悬停到的那一行（最近使用区与插入区各有一条，位置不同）；
+    // 垂直方向贴着「表格」那一行（最近使用区与插入区各有一条，位置不同）；
     // 行元素被重渲染掉时退回可见的第一条表格条目。
     const anchor =
       (subAnchor && panel.contains(subAnchor) ? subAnchor : null) ??
@@ -408,15 +379,16 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       panel.querySelector<HTMLElement>('[data-slash-index]');
     if (!anchor) return;
     /**
-     * 贴着当前条目右侧展开（标准子菜单行为）：指针从这一行直接往右滑就进了网格。
-     * 不要挪到整个菜单外侧——那样指针必须先跨过右边那一列的条目（图片等），
-     * 途中触发"悬停其他条目 → 收回网格"，网格看着在菜单外面、也点不中格子。
+     * 水平方向按**整个菜单**的右边缘算，而不是按条目右边缘：
+     * 插入区是两列布局，贴着条目放会压在右边那一列上，格子容易被菜单条目挡掉。
+     * 网格是点箭头展开的（没有悬停收起），所以放在菜单外面不会被"路过"关掉。
+     * 垂直方向仍与点击的那一行对齐。
      */
     const a = anchor.getBoundingClientRect();
     const p = panel.getBoundingClientRect();
     const rect = subPanel.getBoundingClientRect();
     const margin = 8;
-    let left = a.right + 6;
+    let left = p.right + 6;
     if (left + rect.width + margin > window.innerWidth) left = p.left - rect.width - 6;
     if (left < margin) left = Math.max(margin, window.innerWidth - rect.width - margin);
     const top = Math.max(margin, Math.min(a.top, window.innerHeight - rect.height - margin));

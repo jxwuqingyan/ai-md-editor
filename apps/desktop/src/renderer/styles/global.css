@@ -2025,13 +2025,24 @@ button:focus-visible {
   white-space: nowrap;
 }
 
-/* 表格条目的 › 二级箭头 */
+/* 表格 / 链接条目的 › 二级箭头：点击它才展开二级面板，做大可点区域 */
 .slash-item-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin-left: auto;
-  padding-left: 4px;
+  /* 右侧留出足够的命中面积，光标不用像素级对准 */
+  padding: 3px 5px 3px 9px;
+  border-radius: 4px;
   font-size: 13px;
   line-height: 1;
   color: var(--text-tertiary);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.slash-item-arrow:hover {
+  color: var(--accent);
+  background: var(--bg-hover, #f2f2f2);
 }
 
 .slash-grid-item:hover,

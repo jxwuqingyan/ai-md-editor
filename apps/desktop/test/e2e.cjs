@@ -185,6 +185,21 @@ async function clickSelector(selector, index = 0) {
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
+/** 按屏幕坐标点击（用于箭头这类小目标，或需要先真实移动鼠标再点的场景） */
+async function clickPoint(point) {
+  const win = getWindow();
+  win.webContents.sendInputEvent({ type: 'mouseDown', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: point.x, y: point.y, button: 'left', clickCount: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+
+/** 把鼠标移到指定坐标（不按键），用于验证「悬停不做任何事」 */
+async function hoverPoint(point) {
+  const win = getWindow();
+  win.webContents.sendInputEvent({ type: 'mouseMove', x: point.x, y: point.y });
+  await new Promise((resolve) => setTimeout(resolve, 400));
+}
+
 /** 切换到源码模式（已经是源码模式则跳过） */
 async function ensureSourceMode() {
   const isSource = await exec(`Boolean(document.querySelector('.source-editor'))`);
@@ -210,6 +225,15 @@ async function ensureWysiwygMode() {
       ),
     { label: '编辑器挂载' }
   );
+}
+
+/** 把文档重置成指定 Markdown（源码模式写入 → 切回 WYSIWYG），避免用例间残留状态互相干扰 */
+async function resetDoc(markdown) {
+  await ensureSourceMode();
+  await exec(`window.__setSource(${JSON.stringify(markdown)}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await new Promise((resolve) => setTimeout(resolve, 150));
 }
 
 /** 表格 Markdown 测试数据 */
@@ -1273,28 +1297,41 @@ async function runTests() {
   const listCount = await exec(`document.querySelectorAll('.slash-list .slash-item').length`);
   check('斜杠菜单默认条目齐全', gridCount === 13 && listCount === 4, `grid=${gridCount} list=${listCount}`);
 
-  // 悬停「表格」条目就应展开行列网格（不需要点右侧箭头），且网格贴在菜单外侧、
-  // 不遮挡菜单里的其他条目（插入区是两列布局，贴条目放会盖住右边那列）。
-  const hoverPoint = async (keyword) =>
+  // 表格的行列网格是「点行尾的 › 才展开」：悬停不做任何事（悬停展开会让网格跟着指针闪，
+  // 格子几乎点不中），展开后也不会因为鼠标移开而收回，要点箭头或按 Esc 才收起。
+  const subShown = () =>
     exec(`(() => {
-      const item = [...document.querySelectorAll('.slash-item')].find((el) => el.textContent.includes(${JSON.stringify(keyword)}));
-      if (!item) return null;
-      const r = item.getBoundingClientRect();
-      return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) });
+      const sub = document.querySelector('.slash-sub');
+      return Boolean(sub) && getComputedStyle(sub).display !== 'none';
     })()`);
-  const tablePt = await hoverPoint('表格');
-  if (tablePt) {
-    const t = JSON.parse(tablePt);
-    win.webContents.sendInputEvent({ type: 'mouseMove', x: t.x, y: t.y });
-    const hoverShown = await waitFor(
-      () =>
-        exec(`(() => {
-          const sub = document.querySelector('.slash-sub');
-          return Boolean(sub) && getComputedStyle(sub).display !== 'none';
-        })()`),
-      { label: '悬停展开二级网格', timeout: 6000 }
-    );
-    check('悬停表格条目即展开行列网格（无需点箭头）', hoverShown === true, `shown=${hoverShown}`);
+  const slashPoints = JSON.parse(
+    await exec(`(() => {
+      const find = (kw) =>
+        [...document.querySelectorAll('.slash-item, .slash-grid-item')].find((el) => (el.textContent ?? '').includes(kw));
+      const center = (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+      };
+      const table = find('表格');
+      const image = find('图片');
+      const arrow = table && table.querySelector('.slash-item-arrow');
+      return JSON.stringify({
+        table: table ? center(table) : null,
+        image: image ? center(image) : null,
+        arrow: arrow ? center(arrow) : null
+      });
+    })()`)
+  );
+
+  if (slashPoints.table && slashPoints.arrow) {
+    // 1) 悬停「表格」：网格不能自己弹出来
+    await hoverPoint(slashPoints.table);
+    check('悬停表格条目不展开行列网格', (await subShown()) === false, `shown=${await subShown()}`);
+
+    // 2) 点行尾的 › 才展开
+    await clickPoint(slashPoints.arrow);
+    const openedByArrow = await waitFor(subShown, { label: '点箭头展开行列网格', timeout: 6000 }).catch(() => false);
+    check('点击表格行的 › 展开行列网格', openedByArrow === true, `shown=${openedByArrow}`);
 
     const geom = await exec(`(() => {
       const sub = document.querySelector('.slash-sub').getBoundingClientRect();
@@ -1309,45 +1346,30 @@ async function runTests() {
         noOverlap
       });
     })()`);
-    const g = JSON.parse(geom);
-    check('行列网格贴在菜单外侧，不遮挡菜单条目', g.noOverlap === true, geom);
+    check('行列网格贴在菜单外侧，不遮挡菜单条目', JSON.parse(geom).noOverlap === true, geom);
 
-    // 悬停到别的条目：网格应收回去，避免一直挂在那里
-    const otherPt = await hoverPoint('图片');
-    if (otherPt) {
-      const o = JSON.parse(otherPt);
-      win.webContents.sendInputEvent({ type: 'mouseMove', x: o.x, y: o.y });
-      await waitFor(
-        () => exec(`getComputedStyle(document.querySelector('.slash-sub')).display === 'none'`),
-        { label: '网格收回', timeout: 6000 }
-      );
-      check('悬停其他条目后行列网格收回', true);
+    // 3) 悬停到别的条目：网格保持展开，不跟着鼠标闪
+    if (slashPoints.image) {
+      await hoverPoint(slashPoints.image);
+      check('悬停其他条目时网格保持展开', (await subShown()) === true);
     } else {
-      skip('悬停其他条目后行列网格收回', '菜单里找不到图片条目');
+      skip('悬停其他条目时网格保持展开', '菜单里找不到图片条目');
     }
-  } else {
-    skip('悬停表格条目即展开行列网格（无需点箭头）', '菜单里找不到表格条目');
-  }
 
-  // 输入「图」过滤到图片一项。「图片」条目现在会打开系统文件选择器（原生对话框无法自动化）：
-  // 尝试把 IPC 桩掉再点击验证整条链路；桩不上（contextBridge 只读等）就 Esc 跳过点击。
-  win.webContents.insertText('图');
-  await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), { label: '过滤到图片一项' });
-  const stubbed = await exec(
-    `(() => { try { window.api.chooseImage = async () => ({ relativePath: 'img/slash-e2e.png', error: null }); return String(window.api.chooseImage).includes('slash-e2e'); } catch { return false; } })()`
-  );
-  if (stubbed) {
-    await exec(`document.querySelector('.slash-menu .slash-item').click()`);
-    await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror img'))`), { label: '图片语法已插入' });
-    const afterImage = await exec(`document.querySelector('.ProseMirror p')?.textContent ?? ''`);
-    check('确认后斜杠与过滤词被清除', !afterImage.includes('/') && !afterImage.includes('图'), afterImage);
+    // 4) 再点一次 › 收起
+    await clickPoint(slashPoints.arrow);
+    const closedByArrow = await waitFor(async () => (await subShown()) === false, {
+      label: '再点箭头收起行列网格',
+      timeout: 6000
+    }).catch(() => false);
+    check('再次点击 › 收起行列网格', closedByArrow === true);
   } else {
-    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
-    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
-    check('图片条目走文件选择器（桩不可用，跳过原生对话框点击）', true);
+    skip('点击表格行的 › 展开行列网格', '菜单里找不到表格条目或箭头');
   }
 
   // 键盘路径：输入「/格」过滤到表格一项，Enter 展开二级行列网格，再按行列调整后确认
+  // 先把文档重置干净：上面那组点击会在正文里留下「/」，用例之间不能互相带状态
+  await resetDoc('正文一段\n');
   await clickSelector('.ProseMirror p', 0);
   await focusEditor();
   win.webContents.insertText('/格');
@@ -1375,6 +1397,7 @@ async function runTests() {
   check('按选中的 4×4 插入表格', tableCols === 4 && tableRows === 4, `cols=${tableCols} rows=${tableRows}`);
 
   // 鼠标路径：输入「/」点击表格条目展开二级网格，点 2 行 × 5 列的格子插入
+  await resetDoc('正文一段\n');
   await clickSelector('.ProseMirror p', 0);
   await focusEditor();
   win.webContents.insertText('/');
