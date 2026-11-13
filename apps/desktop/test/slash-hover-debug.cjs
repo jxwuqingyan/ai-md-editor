@@ -151,6 +151,34 @@ async function run() {
   console.log('  事件：', await exec(`JSON.stringify(window.__evt)`));
   console.log('  光标下的元素：', await exec(`(() => { const el = document.elementFromPoint(${rect.x}, ${rect.y}); return el ? el.className || el.tagName : 'none'; })()`));
 
+  // 从「表格」行把鼠标移进网格，再点 2 行 × 5 列 —— 真实鼠标路径
+  const cellPt = await exec(`(() => {
+    const cell = document.querySelector('.slash-sub-cell[data-sub-r="2"][data-sub-c="5"]');
+    if (!cell) return null;
+    const r = cell.getBoundingClientRect();
+    return JSON.stringify({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) });
+  })()`);
+  if (cellPt) {
+    const c = JSON.parse(cellPt);
+    console.log('目标格子坐标：', c);
+    // 先移到菜单与网格之间的空隙，再进入格子：模拟真人滑动
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round((rect.right + c.x) / 2), y: c.y });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: c.x, y: c.y });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    console.log('移到格子上时网格状态：', await exec(`document.querySelector('.slash-sub')?.style.display !== 'none'`));
+    win.webContents.sendInputEvent({ type: 'mouseDown', x: c.x, y: c.y, button: 'left', clickCount: 1 });
+    win.webContents.sendInputEvent({ type: 'mouseUp', x: c.x, y: c.y, button: 'left', clickCount: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const inserted = await exec(`(() => {
+      const t = [...document.querySelectorAll('.ProseMirror table')].find((el) => el.querySelector('tr')?.children.length === 5);
+      return t ? t.querySelectorAll('tr').length : 0;
+    })()`);
+    console.log('点击格子后插入的表格行数（期望 2，列数 5）：', inserted);
+  } else {
+    console.log('（找不到格子）');
+  }
+
   // 再悬停到别的条目，确认会收回
   const otherRect = await exec(`(() => {
     const item = [...document.querySelectorAll('.slash-item')].find((el) => !el.textContent.includes('表格'));

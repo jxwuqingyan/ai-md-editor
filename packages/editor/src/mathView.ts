@@ -33,7 +33,19 @@ function readTex(node: ProseNode): string {
  * 插入方（`insertSnippet`）在派发事务前调用 `requestMathAutoEdit()`，
  * 新建的节点视图消费一次即失效，不影响打开文档里已有的公式。
  */
+/** 公式语法文档地址（编辑态底部「查看帮助文档」跳转） */
+const KATEX_DOC_URL = 'https://katex.org/';
+
+/** 用系统浏览器打开链接的回调（由渲染层经 createEditor 注入） */
+let openLinkHandler: ((url: string) => void) | null = null;
+
+/** 注入「打开外部链接」的实现，供公式编辑态的帮助文档链接使用 */
+export function configureMathView(options: { openLink?: (url: string) => void }): void {
+  openLinkHandler = options.openLink ?? null;
+}
+
 let autoEditNext = false;
+
 
 /** 请求：下一次创建的公式节点自动进入编辑态 */
 export function requestMathAutoEdit(): void {
@@ -55,6 +67,8 @@ class MathNodeView implements NodeView {
   private node: ProseNode;
   private preview: HTMLElement;
   private input: HTMLTextAreaElement;
+  /** 编辑态底部工具条（仅块级公式有）：帮助文档 + 确定提示 */
+  private footer: HTMLElement | null = null;
   private editing = false;
   /** 进入编辑的时刻：用于忽略刚展开瞬间被浏览器抢焦点造成的 blur */
   private enteredAt = 0;
@@ -85,6 +99,11 @@ class MathNodeView implements NodeView {
     this.input.style.display = 'none';
 
     this.dom.append(this.preview, this.input);
+    // 块级公式编辑态才挂底部工具条：行内公式没空间，塞进去会把正文撑开
+    if (this.block) {
+      this.footer = this.createFooter();
+      this.dom.append(this.footer);
+    }
     this.render(node);
 
     // 用 mousedown 而不是 click：先挡住 ProseMirror 建 NodeSelection，
@@ -92,8 +111,10 @@ class MathNodeView implements NodeView {
     this.dom.addEventListener('mousedown', (event) => this.handleMouseDown(event));
     this.input.addEventListener('blur', () => {
       // 刚展开的一瞬间，点选的后续处理可能把焦点抢回编辑器；这不是"编辑结束"，
-      // 直接提交会导致"点开就关掉"。此时用户还没敲过字，重新聚焦让他真的能输入。
-      if (this.editing && !this.touched && Date.now() - this.enteredAt < 250) {
+      // 直接提交会导致"点开就关掉"。只有「没敲过字且内容没变」才重新聚焦。
+      // 注意不能只看 input 事件：程序化注入文本（自动化/粘贴）不一定派发 input。
+      const changed = this.input.value !== readTex(this.node);
+      if (this.editing && !this.touched && !changed && Date.now() - this.enteredAt < 250) {
         this.focusInput();
         return;
       }
@@ -111,6 +132,48 @@ class MathNodeView implements NodeView {
         if (this.view.editable && !this.editing) this.enter();
       });
     }
+  }
+
+  /** 编辑态底部工具条：左侧帮助文档链接，右侧「确定」提示（可点） */
+  private createFooter(): HTMLElement {
+    const footer = document.createElement('div');
+    footer.className = 'md-math-footer';
+    footer.style.display = 'none';
+
+    const help = document.createElement('a');
+    help.className = 'md-math-help';
+    help.href = KATEX_DOC_URL;
+    help.target = '_blank';
+    help.rel = 'noreferrer';
+    help.innerHTML =
+      '<svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6.4" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M6.2 6.1a1.9 1.9 0 1 1 2.4 1.8c-.4.15-.6.45-.6.85v.45" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="8" cy="11.3" r=".75" fill="currentColor"/></svg><span>查看帮助文档</span>';
+
+    const confirm = document.createElement('button');
+    confirm.type = 'button';
+    confirm.className = 'md-math-confirm';
+    const isMac = /Mac|iPhone|iPad/i.test(navigator.platform || navigator.userAgent);
+    confirm.textContent = `确定（${isMac ? '⌘' : 'Ctrl'} + Enter）`;
+
+    // footer 在 dom 内，冒泡会触发 handleMouseDown 的 preventDefault；
+    // 这里也挡一下 mousedown，避免点按钮时先把焦点拉回文本框
+    footer.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    help.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (openLinkHandler) openLinkHandler(KATEX_DOC_URL);
+      else window.open(KATEX_DOC_URL, '_blank', 'noopener');
+    });
+    confirm.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.commit();
+    });
+
+    footer.append(help, confirm);
+    return footer;
   }
 
   /** 渲染 KaTeX 预览（编辑中不刷新，避免打断输入） */
@@ -182,6 +245,7 @@ class MathNodeView implements NodeView {
     this.dom.classList.add('md-math-editing');
     this.preview.style.display = 'none';
     this.input.style.display = '';
+    if (this.footer) this.footer.style.display = '';
     this.input.value = readTex(this.node);
     this.resize();
     // 同步聚焦一次，再补一次异步：mousedown 之后浏览器可能把焦点还给编辑器
@@ -211,6 +275,7 @@ class MathNodeView implements NodeView {
     this.editing = false;
     this.dom.classList.remove('md-math-editing');
     this.input.style.display = 'none';
+    if (this.footer) this.footer.style.display = 'none';
     this.preview.style.display = '';
   }
 

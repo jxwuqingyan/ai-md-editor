@@ -397,7 +397,7 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
     if (label) label.textContent = `${subRows} 行 × ${subCols} 列`;
   };
 
-  /** 把二级网格定位到主菜单右侧；放不下时翻到左侧 */
+  /** 把二级网格定位到表格条目右侧；放不下时翻到菜单左侧 */
   const positionSub = (): void => {
     if (!subPanel || !panel || subPanel.style.display === 'none') return;
     // 优先贴着鼠标悬停到的那一行（最近使用区与插入区各有一条，位置不同）；
@@ -408,15 +408,15 @@ export function slashMenuPlugin(options: SlashMenuOptions) {
       panel.querySelector<HTMLElement>('[data-slash-index]');
     if (!anchor) return;
     /**
-     * 水平位置按**整个菜单**的右边缘算，而不是按条目右边缘：
-     * 插入区是两列布局，贴着条目放会盖住右边那一列（图片等条目就点不到了）。
-     * 垂直方向仍与悬停到的那一行对齐。
+     * 贴着当前条目右侧展开（标准子菜单行为）：指针从这一行直接往右滑就进了网格。
+     * 不要挪到整个菜单外侧——那样指针必须先跨过右边那一列的条目（图片等），
+     * 途中触发"悬停其他条目 → 收回网格"，网格看着在菜单外面、也点不中格子。
      */
     const a = anchor.getBoundingClientRect();
     const p = panel.getBoundingClientRect();
     const rect = subPanel.getBoundingClientRect();
     const margin = 8;
-    let left = p.right + 6;
+    let left = a.right + 6;
     if (left + rect.width + margin > window.innerWidth) left = p.left - rect.width - 6;
     if (left < margin) left = Math.max(margin, window.innerWidth - rect.width - margin);
     const top = Math.max(margin, Math.min(a.top, window.innerHeight - rect.height - margin));

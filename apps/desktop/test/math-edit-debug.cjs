@@ -141,6 +141,8 @@ async function run() {
   // 点击块级公式 → 应进入编辑
   await clickSelector('.md-math-block');
   console.log('点击块级公式后：', await state());
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  { const img = await getWindow().webContents.capturePage(); writeFileSync(join(OUT_DIR, 'math-edit-open.png'), img.toPNG()); console.log('已截图 math-edit-open.png'); }
 
   // 改写 TeX 并失焦提交
   console.log('  焦点：', await exec(`(() => { const a = document.activeElement; return a ? (a.className || a.tagName) : 'none'; })()`));

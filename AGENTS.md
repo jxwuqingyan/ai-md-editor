@@ -275,7 +275,8 @@ ai-md-editor/
 | 只有竖线的普通段落被当成表格 | `findTableBlock` 只检查行首 `\|`，没要求 GFM 分隔行 | 第二行必须是合法分隔行（`isTableSeparator`），否则不算表格 |
 | 文档末尾是表格/代码块时，下方点不进去、写不了字 | ProseMirror 在最后一个块之后没有合法文本位置；代码块虽然是 textblock，但它是封闭块，Enter 换不出普通段落 | `packages/editor/src/trailing.ts` 在末尾补一个空段落：非 textblock 或 `type.spec.code === true` 的块都补，标题/正文/引用/列表不补；补段落只用尾部空白差异，`handleChange` 不置 dirty |
 | 列表项开头按退格会并进上一行，删不回文档最前面 | 退格走基础键位表的 `joinTextblockBackward`，对列表项就是「与上一项合并」 | `listBackspace.ts` 用 `$shortcut` 注册 `Backspace` 且 `priority: 80`（高于基础键位表 50 才能抢先）；摘项变段落、剩余项靠 `order` 续号；连续退格靠插件状态 `MDNOTE_LIST_UNLIST_PENDING` 继续拆上方列表，打字/移光标即失效；嵌套列表先 `liftListItem` 降级 |
-| 斜杠菜单悬停「表格」不弹行列网格，只有点击才弹 | 定位锚点查 `[data-slash-id="table"]`，但菜单行只渲染 `data-slash-index`，选择器命中不到 → 退回「第一条」，网格压在光标那一行上，鼠标一动又被"悬停其他条目"收回 | 行元素补 `data-slash-id` + 记住实际悬停行（`subAnchor`）；水平按**整个菜单**右边缘定位（插入区两列，贴条目会盖住右列）；移出菜单/网格 120ms 后收回；行点击不再直接插 3×3 |
+| 斜杠菜单悬停「表格」不弹行列网格，只有点击才弹 | 定位锚点查 `[data-slash-id="table"]`，但菜单行只渲染 `data-slash-index`，选择器命中不到 → 退回「第一条」，网格压在光标那一行上，鼠标一动又被"悬停其他条目"收回 | 行元素补 `data-slash-id` + 记住实际悬停行（`subAnchor`）；**贴着当前条目右侧展开**（子菜单行为，指针直接滑进网格）；**不要**挪到整个菜单外侧——那样指针要跨过右侧条目，途中就被"悬停其他条目"收回，格子点不中；移出菜单/网格 120ms 后收回 |
+| 公式编辑态需要一个「帮助文档 + 确定」的底部条 | 公式是 atom 节点，自绘 NodeView，没有现成的编辑器外壳 | `mathView.ts` 里给块级公式加 `.md-math-footer`：左侧链接走 `configureMathView({ openLink })` 注入的外部打开通道（`shell:open-external` 白名单），右侧「确定（⌘ / Ctrl + Enter）」点击即 `commit()`；行内公式不加（空间不足） |
 | 公式插入后只有一个蓝色框、改不了 | 公式插件的 `math_inline` / `math_block` 是 **atom** 节点，只有 `toDOM` 渲染 KaTeX，没有编辑界面；点击只能拿到 NodeSelection | `mathView.ts` 提供 NodeView：点击换成文本框编辑原始 TeX、失焦或 ⌘/Ctrl+Enter 提交、Esc 取消、清空即删除；行内写节点文本、块级写 `attrs.value`；插入公式时经 `requestMathAutoEdit()` 自动进入编辑；刚展开 250ms 内的 blur 只重新聚焦（否则点开就被抢焦点关掉） |
 | 改完内容立刻切源码/切标签，改动丢失 | 编辑器 → 标签状态的回写走 Milkdown 变更监听，**200ms 防抖**；切模式/切标签/关标签会卸载编辑器，监听 destroy 时 `debouncedHandler.cancel()`，那次回写被取消 | 新增 `EditorInstance.flushMarkdown()`（`serializerCtx` 同步序列化当前 doc），切模式、切标签、关标签、保存 / 另存为 / 全部保存前先 flush，不能用带缓存的 `getMarkdown()` |
 

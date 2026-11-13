@@ -1484,11 +1484,14 @@ async function runTests() {
     label: '地址已填入表单',
     timeout: 5000
   });
+  // 回车前把焦点按回地址框：insertText 之后浏览器偶尔会把焦点挪走，
+  // Enter 落到编辑器上，表单不提交（这是这条用例偶发失败的真实原因）。
+  await exec(`(() => { const el = document.querySelector('[data-form="url"]'); if (!el) return false; el.focus(); return document.activeElement === el; })()`);
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
   await waitFor(
     () => exec(`[...document.querySelectorAll('.ProseMirror a')].some((a) => a.getAttribute('href') === 'https://kbd.example.com')`),
-    { label: '键盘路径链接已插入' }
+    { label: '键盘路径链接已插入', timeout: 8000 }
   );
   check('键盘路径链接确认成功', true);
 
@@ -1910,16 +1913,50 @@ async function runTests() {
     timeout: 5000
   });
 
-  // 改写后失焦提交
+  // 编辑态底部的工具条：左侧帮助文档链接，右侧「确定」提示
+  const footerInfo = await exec(`(() => {
+    const footer = document.querySelector('.md-math-block .md-math-footer');
+    if (!footer || footer.style.display === 'none') return null;
+    return JSON.stringify({
+      text: footer.textContent ?? '',
+      help: Boolean(footer.querySelector('.md-math-help')),
+      confirm: Boolean(footer.querySelector('.md-math-confirm'))
+    });
+  })()`);
+  check(
+    '公式编辑框底部有帮助文档与确定提示',
+    Boolean(footerInfo) &&
+      footerInfo.includes('查看帮助文档') &&
+      footerInfo.includes('Enter') &&
+      footerInfo.includes('"help":true') &&
+      footerInfo.includes('"confirm":true'),
+    String(footerInfo)
+  );
+
+  // 帮助文档链接走系统浏览器打开（替换主进程 shell.openExternal 收集）
+  const realOpenForMath = shell.openExternal;
+  const mathHelpUrls = [];
+  shell.openExternal = async (url) => {
+    mathHelpUrls.push(url);
+  };
+  await exec(`document.querySelector('.md-math-block .md-math-help')?.click()`);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  check(
+    '公式帮助文档链接打开 katex.org',
+    mathHelpUrls.some((url) => url.includes('katex.org')),
+    JSON.stringify(mathHelpUrls)
+  );
+  shell.openExternal = realOpenForMath;
+
+  // 改写后点「确定」提交（不依赖失焦）
   await exec(`(() => {
     const input = document.querySelector('.md-math-block .md-math-input');
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
     setter.call(input, 'x^2 + y^2 = z^2');
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.focus();
-    input.blur();
     return true;
   })()`);
+  await exec(`document.querySelector('.md-math-block .md-math-confirm')?.click()`);
   await waitFor(() => exec(`(document.querySelector('.md-math-block')?.textContent ?? '').includes('x2+y2=z2')`), {
     label: '公式已重新渲染',
     timeout: 8000
@@ -1983,10 +2020,14 @@ async function runTests() {
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
     setter.call(input, 'n+1');
     input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.focus();
-    input.blur();
+    // 行内公式是单行框：回车即提交（不依赖失焦，避免窗口焦点抖动影响用例）
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     return true;
   })()`);
+  await waitFor(() => exec(`(document.querySelector('.md-math-inline')?.textContent ?? '').includes('n+1n+1')`), {
+    label: '行内公式已重新渲染',
+    timeout: 8000
+  });
   const inlineSource = await expectMarkdown('$n+1$', '行内公式写回 Markdown');
   check('行内公式改动写回 Markdown', inlineSource.includes('$n+1$'), inlineSource.slice(0, 60));
 
@@ -2028,7 +2069,16 @@ async function runTests() {
     () => exec(`(document.querySelector('.md-math-block .md-math-input')?.value ?? '').includes('frac')`),
     { label: 'TeX 已键入', timeout: 5000 }
   );
-  await exec(`document.querySelector('.md-math-block .md-math-input')?.blur()`);
+  // 用 ⌘+Enter 提交：不依赖失焦（自动化里焦点会被窗口抢走，blur 时有时无）
+  await exec(`(() => {
+    const input = document.querySelector('.md-math-block .md-math-input');
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
+    return true;
+  })()`);
+  await waitFor(() => exec(`(document.querySelector('.md-math-block')?.textContent ?? '').includes('frac')`), {
+    label: '插入的公式已渲染',
+    timeout: 8000
+  });
   const insertSource = await expectMarkdown('\\frac{1}{2}', '插入后输入的公式写回 Markdown');
   check('插入后直接输入的 TeX 被保存', insertSource.includes('\\frac{1}{2}'), insertSource.slice(0, 60));
 

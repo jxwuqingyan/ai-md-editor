@@ -1112,6 +1112,44 @@ button:focus-visible {
   min-width: 6ch;
 }
 
+/* 公式编辑态底部工具条：左侧帮助文档，右侧确定提示 */
+.milkdown-container .md-math-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border, #e0e0e0);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.milkdown-container .md-math-help {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-tertiary, #999);
+  text-decoration: none;
+}
+
+.milkdown-container .md-math-help:hover {
+  color: var(--accent, #2b7fff);
+}
+
+.milkdown-container .md-math-confirm {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-tertiary, #999);
+  cursor: pointer;
+}
+
+.milkdown-container .md-math-confirm:hover {
+  color: var(--accent, #2b7fff);
+}
+
 /* 加粗、斜体、删除线 */
 .milkdown-container .ProseMirror strong {
   font-weight: 650;

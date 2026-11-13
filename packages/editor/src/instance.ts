@@ -58,7 +58,7 @@ import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
 import { trailingParagraphPlugin } from './trailing';
 import { listBackspaceShortcut, listUnlistPendingPlugin } from './listBackspace';
-import { mathNodeViewPlugin } from './mathView';
+import { configureMathView, mathNodeViewPlugin } from './mathView';
 import { slashMenuPlugin } from './slash';
 import { linkClickPlugin } from './link';
 import { taskListPlugin } from './task';
@@ -105,6 +105,8 @@ export async function createEditor(
   const highlightParser = await createHighlightParser();
   // 当前文档所在目录：用于把 `img/xxx.png` 之类的相对路径解析成可显示的绝对地址
   const imageState = { dir: '' };
+
+  configureMathView({ openLink: onOpenLink });
 
   const editor = await Editor.make()
     .config((ctx) => {
@@ -157,7 +159,8 @@ export async function createEditor(
     .use(linkClickPlugin({ openLink: (url) => onOpenLink?.(url) }))
     .use(highlight)
     .use(math)
-    // 公式节点视图：点击原地编辑 TeX（插件默认是 atom，只能选中、不能改）
+    // 公式节点视图：点击原地编辑 TeX（插件默认是 atom，只能选中、不能改）；
+    // 编辑态底部的「查看帮助文档」走渲染层注入的外部链接打开方式
     .use(mathNodeViewPlugin)
     .use(diagram)
     .create();
