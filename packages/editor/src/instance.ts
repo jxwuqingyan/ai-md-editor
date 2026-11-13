@@ -11,7 +11,14 @@
  * 2. 预设没有的命令，下沉到 ProseMirror transaction（见 commands.ts）。
  */
 
-import { Editor, defaultValueCtx, editorViewCtx, parserCtx, rootCtx } from '@milkdown/kit/core';
+import {
+  Editor,
+  defaultValueCtx,
+  editorViewCtx,
+  parserCtx,
+  rootCtx,
+  serializerCtx
+} from '@milkdown/kit/core';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
@@ -51,6 +58,7 @@ import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
 import { trailingParagraphPlugin } from './trailing';
 import { listBackspaceShortcut, listUnlistPendingPlugin } from './listBackspace';
+import { mathNodeViewPlugin } from './mathView';
 import { slashMenuPlugin } from './slash';
 import { linkClickPlugin } from './link';
 import { taskListPlugin } from './task';
@@ -149,6 +157,8 @@ export async function createEditor(
     .use(linkClickPlugin({ openLink: (url) => onOpenLink?.(url) }))
     .use(highlight)
     .use(math)
+    // 公式节点视图：点击原地编辑 TeX（插件默认是 atom，只能选中、不能改）
+    .use(mathNodeViewPlugin)
     .use(diagram)
     .create();
 
@@ -211,6 +221,18 @@ export async function createEditor(
   const instance: EditorInstance = {
     getMarkdown(): string {
       return currentMarkdown;
+    },
+
+    flushMarkdown(): string {
+      let markdown = currentMarkdown;
+      editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const serializer = ctx.get(serializerCtx);
+        if (!view || !serializer) return;
+        markdown = serializer(view.state.doc);
+        currentMarkdown = markdown;
+      });
+      return markdown;
     },
 
     setMarkdown(markdown: string): void {

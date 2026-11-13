@@ -126,22 +126,40 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     editorRef.current?.setMarkdown('');
   }, [editorRef, history]);
 
+  /**
+   * 把编辑器里的当前内容同步回标签状态。
+   *
+   * 编辑器内容回写走变更监听，有 200ms 防抖；切换标签 / 切换模式 / 关闭标签都会
+   * 卸载编辑器，防抖中的那次回写会被取消，刚改的内容就丢了。所有会让编辑器
+   * 换内容的操作前都必须先 flush 一次。
+   */
+  const flushEditor = useCallback((): string | undefined => {
+    const markdown = editorRef.current?.flushMarkdown?.();
+    if (typeof markdown !== 'string') return undefined;
+    handleChange(markdown);
+    return markdown;
+  }, [editorRef, handleChange]);
+
   /** 切换标签：载入目标标签内容到编辑器 */
   const selectTab = useCallback(
     (id: string) => {
       if (id === activeIdRef.current) return;
       const target = tabsRef.current.find((t) => t.id === id);
       if (!target) return;
+      // 先落定当前标签的改动，再换内容
+      flushEditor();
       history.reset();
       setActiveId(id);
       editorRef.current?.setMarkdown(target.content);
     },
-    [editorRef, history]
+    [editorRef, history, flushEditor]
   );
 
   /** 关闭标签：先算出下一个活动标签，再一次性更新状态（避免在 setState 回调里做副作用） */
   const closeTab = useCallback(
     (id: string) => {
+      // 关闭前先落定未回写的改动，避免刚敲的内容没进 content 就被写盘/丢弃
+      flushEditor();
       const prev = tabsRef.current;
       const index = prev.findIndex((t) => t.id === id);
       if (index < 0) return;
@@ -252,8 +270,11 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
 
   /** 保存活动标签：有路径直接写，无路径则另存为 */
   const save = useCallback(async () => {
-    const tab = findActive();
-    if (!tab) return;
+    // 先同步取一次编辑器内容：防抖中的回写可能还没落到 tab.content
+    const markdown = flushEditor();
+    const found = findActive();
+    if (!found) return;
+    const tab = markdown === undefined ? found : { ...found, content: markdown };
     if (tab.path) {
       try {
         await persistTab(tab);
@@ -267,41 +288,51 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
       setTabs((prev) =>
         prev.map((t) =>
           t.id === tab.id
-            ? { ...t, path: result.path, name: result.name ?? t.name, dirty: false, encoding: 'utf-8' }
+            ? { ...t, content: tab.content, path: result.path, name: result.name ?? t.name, dirty: false, encoding: 'utf-8' }
             : t
         )
       );
     }
-  }, [findActive, persistTab]);
+  }, [findActive, persistTab, flushEditor]);
 
   /** 保存全部打开的文件（只写有路径且已修改的标签） */
   const saveAll = useCallback(async () => {
-    const dirty = tabsRef.current.filter((t) => t.path && t.dirty) as (Tab & { path: string })[];
+    // 同上：先把编辑器里的最新内容同步出来，再挑要写的标签
+    const markdown = flushEditor();
+    const activeIdNow = activeIdRef.current;
+    const dirty = tabsRef.current.filter(
+      (t) => t.path && (t.dirty || (t.id === activeIdNow && markdown !== undefined && markdown !== t.content))
+    ) as (Tab & { path: string })[];
     if (dirty.length === 0) return;
+    const targets = dirty.map((t) =>
+      t.id === activeIdNow && markdown !== undefined ? { ...t, content: markdown } : t
+    );
     try {
-      await Promise.all(dirty.map((t) => persistTab(t)));
+      await Promise.all(targets.map((t) => persistTab(t)));
     } catch (err) {
       notifyRef.current.onNotice?.(`保存失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [persistTab]);
+  }, [persistTab, flushEditor]);
 
   /** 另存为：弹出保存对话框 */
   const saveAs = useCallback(async () => {
-    const tab = findActive();
-    if (!tab) return;
+    const markdown = flushEditor();
+    const found = findActive();
+    if (!found) return;
+    const tab = markdown === undefined ? found : { ...found, content: markdown };
     const result = await window.api.saveFileAs(tab.content, tab.name);
     if (!result.canceled && result.path) {
       const path = result.path;
       const name = result.name ?? tab.name;
       setTabs((prev) =>
         prev.map((t) =>
-          t.id === tab.id ? { ...t, path, name, dirty: false, encoding: 'utf-8' } : t
+          t.id === tab.id ? { ...t, content: tab.content, path, name, dirty: false, encoding: 'utf-8' } : t
         )
       );
       // 与保存/重命名保持一致：另存出来的新路径也要进最近文件
       void window.api.addRecent(path, name);
     }
-  }, [findActive]);
+  }, [findActive, flushEditor]);
 
   /**
    * 确保当前标签有磁盘路径（插入图片、插入需要落盘的内容前调用）。
@@ -533,6 +564,7 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     treeRoot,
     setTreeRoot,
     handleChange,
+    flushEditor,
     setActiveContent,
     newTab,
     selectTab,

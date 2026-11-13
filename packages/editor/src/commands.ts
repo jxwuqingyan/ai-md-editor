@@ -9,6 +9,7 @@ import { TextSelection, NodeSelection, type EditorState } from '@milkdown/kit/pr
 import { Fragment, Slice, type Node as ProseNode, type ResolvedPos } from '@milkdown/kit/prose/model';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import type { TableContext } from './types';
+import { requestMathAutoEdit } from './mathView';
 
 /** 顶层节点的起始位置（ProseMirror doc 坐标） */
 export function topLevelPos(doc: ProseNode, index: number): number {
@@ -259,6 +260,9 @@ export function insertSnippet(
 ): void {
   const { state } = view;
   const fragment = parse(markdown).content;
+
+  // 插入的是公式块时，让新节点视图自动进入编辑态（用户插完就能直接写 TeX）
+  if (fragment.firstChild?.type.name === 'math_block') requestMathAutoEdit();
 
   // 只在「单个段落 + 无换行」时按行内方式插入
   const onlyParagraph = fragment.childCount === 1 && fragment.firstChild?.type.name === 'paragraph';

@@ -34,6 +34,13 @@ export const NO_TABLE_CONTEXT: TableContext = { inTable: false, inHeader: false 
 export interface EditorInstance {
   /** 获取当前 Markdown 文本 */
   getMarkdown(): string;
+  /**
+   * 立即把编辑器当前内容序列化并返回。
+   *
+   * `getMarkdown` 读的是变更监听里的缓存，监听有 200ms 防抖；切换模式 / 切换标签
+   * 会卸载编辑器，防抖中的回写会被取消，改动就丢了。切换前必须调这个同步取一次。
+   */
+  flushMarkdown(): string;
   /** 设置编辑器内容（替换全部） */
   setMarkdown(markdown: string): void;
   /** 在光标处插入 markdown 文本（如粘贴图片语法） */

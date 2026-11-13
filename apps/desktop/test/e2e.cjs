@@ -1479,6 +1479,11 @@ async function runTests() {
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' });
   await waitFor(() => exec(`document.activeElement?.getAttribute('data-form') === 'url'`), { label: 'Tab 切到地址框' });
   win.webContents.insertText('https://kbd.example.com');
+  // 等 URL 真的落到输入框里再回车，否则空地址提交会被拦下（偶发失败都出在这里）
+  await waitFor(() => exec(`document.querySelector('.slash-form [data-form="url"]')?.value === 'https://kbd.example.com'`), {
+    label: '地址已填入表单',
+    timeout: 5000
+  });
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
   await waitFor(
@@ -1856,6 +1861,176 @@ async function runTests() {
     `document.querySelectorAll('.ProseMirror > *').length + '|' + [...document.querySelectorAll('.ProseMirror > *')].map((el) => el.tagName.toLowerCase()).join(',')`
   );
   check('空列表项退格后不留多余空段落', emptyBlocks === '2|p,p', emptyBlocks);
+
+  // ===== 10.10 公式：点击就地编辑 TeX，不再只显示一个蓝色选中框 =====
+  console.log('调试-编辑器实例：', await exec(`JSON.stringify({ pm: document.querySelectorAll('.ProseMirror').length, inner: document.querySelectorAll('.editor-inner').length, src: document.querySelectorAll('.source-editor').length })`));
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('$$\nE = mc^2\n$$\n\n行内 $a^2$ 公式\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`Boolean(document.querySelector('.md-math-block .katex'))`), {
+    label: '块级公式渲染',
+    timeout: 20000
+  });
+
+  const mathInitial = await exec(`(() => {
+    const block = document.querySelector('.md-math-block');
+    const inline = document.querySelector('.md-math-inline');
+    return JSON.stringify({
+      blockKatex: Boolean(block && block.querySelector('.katex')),
+      inlineKatex: Boolean(inline && inline.querySelector('.katex')),
+      outline: block ? getComputedStyle(block).outlineStyle : '',
+      editing: Boolean(document.querySelector('.md-math-input:not([style*="display: none"])'))
+    });
+  })()`);
+  check(
+    '公式渲染为 KaTeX 且没有选中描边',
+    mathInitial.includes('"blockKatex":true') &&
+      mathInitial.includes('"inlineKatex":true') &&
+      mathInitial.includes('"outline":"none"') &&
+      mathInitial.includes('"editing":false'),
+    mathInitial
+  );
+
+  // 点击块级公式 → 进入编辑，文本框带出原始 TeX
+  await clickSelector('.md-math-block', 0);
+  const openedTex = await waitFor(
+    () =>
+      exec(`(() => {
+        const input = document.querySelector('.md-math-block .md-math-input');
+        if (!input || input.style.display === 'none') return false;
+        return input.value;
+      })()`),
+    { label: '公式进入编辑', timeout: 8000 }
+  );
+  check('点击公式可进入编辑并带出原始 TeX', openedTex === 'E = mc^2', String(openedTex));
+  await waitFor(() => exec(`document.activeElement?.className === 'md-math-input'`), {
+    label: '公式文本框获得焦点',
+    timeout: 5000
+  });
+
+  // 改写后失焦提交
+  await exec(`(() => {
+    const input = document.querySelector('.md-math-block .md-math-input');
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(input, 'x^2 + y^2 = z^2');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+    input.blur();
+    return true;
+  })()`);
+  await waitFor(() => exec(`(document.querySelector('.md-math-block')?.textContent ?? '').includes('x2+y2=z2')`), {
+    label: '公式已重新渲染',
+    timeout: 8000
+  });
+  const afterCommit = await exec(`(() => {
+    const block = document.querySelector('.md-math-block');
+    return JSON.stringify({
+      katex: Boolean(block && block.querySelector('.katex')),
+      editing: Boolean(document.querySelector('.md-math-input:not([style*="display: none"])')),
+      nodeSelected: Boolean(document.querySelector('.ProseMirror-selectednode'))
+    });
+  })()`);
+  check(
+    '提交后重新渲染且不残留编辑框 / 选中框',
+    afterCommit.includes('"katex":true') &&
+      afterCommit.includes('"editing":false') &&
+      afterCommit.includes('"nodeSelected":false'),
+    afterCommit
+  );
+
+  // 编辑器内容回落到 React 状态是 200ms 防抖 + 一次渲染，读源码用轮询而不是死等
+  const expectMarkdown = async (needle, label) => {
+    await ensureSourceMode();
+    let md = '';
+    try {
+      await waitFor(
+        async () => {
+          md = String(await exec(READ_SOURCE));
+          return md.includes(needle);
+        },
+        { label, timeout: 8000, interval: 200 }
+      );
+    } catch {
+      md = String(await exec(READ_SOURCE));
+    }
+    await ensureWysiwygMode();
+    return md;
+  };
+
+  const mathSource = await expectMarkdown('x^2 + y^2 = z^2', '块级公式写回 Markdown');
+  check('块级公式改动写回 Markdown', mathSource.includes('x^2 + y^2 = z^2'), mathSource.slice(0, 60));
+
+  // 行内公式同样可编辑
+  await clickSelector('.md-math-inline', 0);
+  const inlineTex = await waitFor(
+    () =>
+      exec(`(() => {
+        const input = document.querySelector('.md-math-inline .md-math-input');
+        if (!input || input.style.display === 'none') return false;
+        return input.value;
+      })()`),
+    { label: '行内公式进入编辑', timeout: 8000 }
+  );
+  check('行内公式同样可点击编辑', inlineTex === 'a^2', String(inlineTex));
+  await waitFor(() => exec(`document.activeElement?.className === 'md-math-input'`), {
+    label: '行内公式文本框获得焦点',
+    timeout: 5000
+  });
+  await exec(`(() => {
+    const input = document.querySelector('.md-math-inline .md-math-input');
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+    setter.call(input, 'n+1');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+    input.blur();
+    return true;
+  })()`);
+  const inlineSource = await expectMarkdown('$n+1$', '行内公式写回 Markdown');
+  check('行内公式改动写回 Markdown', inlineSource.includes('$n+1$'), inlineSource.slice(0, 60));
+
+  // 从斜杠菜单插入公式后应直接进入编辑，插完就能敲 TeX
+  await ensureSourceMode();
+  await exec(SET_TEXTAREA);
+  await exec(`window.__setSource(${JSON.stringify('正文一段\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await ensureWysiwygMode();
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror p'))`), {
+    label: '段落渲染',
+    timeout: 20000
+  });
+  await clickSelector('.ProseMirror p', 0);
+  await focusEditor();
+  win.webContents.insertText('/公式');
+  await waitFor(() => exec(`document.querySelectorAll('.slash-item').length === 1`), {
+    label: '过滤到公式一项',
+    timeout: 8000
+  });
+  pressKey('Enter');
+  const autoOpen = await waitFor(
+    () =>
+      exec(`(() => {
+        const input = document.querySelector('.md-math-block .md-math-input');
+        if (!input || input.style.display === 'none') return false;
+        return input.value;
+      })()`),
+    { label: '插入后自动进入编辑', timeout: 8000 }
+  );
+  check('从菜单插入公式后直接进入编辑', String(autoOpen).length > 0, String(autoOpen));
+  // 全选状态直接输入即替换占位内容（等 enter() 的异步聚焦落定后再敲）
+  await waitFor(() => exec(`document.activeElement?.className === 'md-math-input'`), {
+    label: '公式文本框获得焦点',
+    timeout: 5000
+  });
+  win.webContents.insertText('\\frac{1}{2}');
+  await waitFor(
+    () => exec(`(document.querySelector('.md-math-block .md-math-input')?.value ?? '').includes('frac')`),
+    { label: 'TeX 已键入', timeout: 5000 }
+  );
+  await exec(`document.querySelector('.md-math-block .md-math-input')?.blur()`);
+  const insertSource = await expectMarkdown('\\frac{1}{2}', '插入后输入的公式写回 Markdown');
+  check('插入后直接输入的 TeX 被保存', insertSource.includes('\\frac{1}{2}'), insertSource.slice(0, 60));
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

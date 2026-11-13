@@ -76,6 +76,7 @@ export default function App(): JSX.Element {
     treeRoot,
     setTreeRoot,
     handleChange,
+    flushEditor,
     setActiveContent,
     newTab,
     selectTab,
@@ -260,15 +261,17 @@ export default function App(): JSX.Element {
   /** 切换源码 / 渲染模式 */
   const handleToggleMode = useCallback(() => {
     const next = viewModeRef.current === 'wysiwyg' ? 'source' : 'wysiwyg';
-    // 切到源码后编辑器即将卸载，先清掉实例引用，避免格式化命令打到旧实例
+    // 切到源码后编辑器即将卸载，先清掉实例引用，避免格式化命令打到旧实例；
+    // 但卸载会取消变更监听里防抖中的回写，所以必须先把内容同步 flush 回标签。
     if (next === 'source') {
+      flushEditor();
       editorRef.current = null;
       updateTableContext(NO_TABLE_CONTEXT);
     }
     // 切换视图后旧的文本快照不再对应，清空避免撤回到别的模式的内容
     history.reset();
     toggleViewMode();
-  }, [viewModeRef, editorRef, updateTableContext, history, toggleViewMode]);
+  }, [viewModeRef, editorRef, updateTableContext, history, toggleViewMode, flushEditor]);
 
   /** 大纲点击跳转：源码按行号定位选区，渲染按标题序号定位节点 */
   const handleOutlineClick = useCallback(
