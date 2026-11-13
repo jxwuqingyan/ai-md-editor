@@ -15,8 +15,8 @@ export default defineConfig({
     // 也避免 electron-builder 重装依赖时误删 7zip-bin 二进制。
     plugins: [externalizeDepsPlugin({ exclude: ['@ai-md-editor/shared'] })],
     build: {
-      // 不让 vite 清空输出目录：rmSync 在本机沙箱环境下会被安全删除 shim 拦截
-      // （state lock timeout）。构建脚本（package.json）已先手动 rm -rf out，效果等价。
+      // 不让 vite 自己清空输出目录：rmSync 在本机沙箱环境下会被安全删除 shim 拦截
+      // （state lock timeout）。改由构建脚本先跑 `scripts/clean-out.cjs`，效果等价。
       emptyOutDir: false,
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') }

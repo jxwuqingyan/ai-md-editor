@@ -4,6 +4,12 @@
 
 ## 0.14.21 - 2026-11-13
 
+### 打包：构建前清空 `out/`，安装包不再被历史产物撑大
+
+- **现象**：`apps/desktop/out` 涨到 415M，`app.asar` 517M、dmg 271M。原因是渲染层的 `build.emptyOutDir` 为关闭状态（本机沙箱里 vite 内部的 rmSync 曾被打断），每次构建都留下上一版带 hash 的 `index-<hash>.js`，一个都没被删——实测堆了 2336 个文件。
+- **修复**：新增 `apps/desktop/scripts/clean-out.cjs`，`build` / `dist` 脚本先跑它再构建；清理失败只告警不中断（`index.html` 始终指向新产物）。
+- 结果：`out/` 415M → 21M，`app.asar` 517M → 129M，dmg 271M → **159M**。
+
 ### 修复：编辑行内公式后段落被切成两段、空格变成 `&#x20;`
 
 - **现象**：`行内 $a^2$ 公式` 把公式改成 `$x+1$` 并提交后，Markdown 源码变成
