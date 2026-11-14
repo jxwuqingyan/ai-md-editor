@@ -3,7 +3,7 @@ import { registerIpcHandlers } from './ipc';
 import { setupApplicationMenu } from './menu';
 import { loadRecent } from './recent';
 import { flushSettings, loadSettings } from './settings';
-import { createWindow, openFileInRenderer } from './window';
+import { createWindow, flushPendingOpenFiles, openFileInRenderer } from './window';
 
 /**
  * macOS 会往「编辑」菜单自动追加「自动填充 / 开始听写… / 表情与符号」三项，
@@ -52,6 +52,9 @@ if (!singleInstance) {
     setupApplicationMenu();
 
     createWindow();
+
+    // 「打开方式」启动时 open-file 在就绪前触发，路径已排队；现在窗口已建，依次打开
+    flushPendingOpenFiles();
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

@@ -122,7 +122,7 @@ npm run test:e2e --workspace @ai-md-editor/desktop
 - `test/menuRuntime.cjs`：加载构建产物构造真实原生菜单，断言当前平台的关键快捷键（含隐藏项）已注册，
   并逐项点击菜单验证「一点击 = 一条 `menu:action`、动作与源码声明一致」
 - `test/e2e.cjs`：启动真实主进程（`out/main/index.js`）+ preload + 渲染层，经原生菜单通道派发动作，
-  覆盖 189 项断言：表格增删行列语义、缩放、三种复制格式、打印、
+  覆盖 192 项断言：就绪前 open-file 排队打开（Finder「打开方式」时序）、表格增删行列语义、缩放、三种复制格式、打印、
   全屏/最小化、深层目录文件树定位与键盘导航、源码撤销合并、图片相对路径与拖拽复制、
   偏好持久化与窗口尺寸记忆、后台标签自动保存、GBK 文档读取与转存 UTF-8、外部修改提示与重新加载、
   关闭前未保存汇总与立即写盘、会话恢复、主题单击切换、文件树 ⋮ 菜单、新建文件先命名与落盘、
@@ -158,7 +158,7 @@ npm run test:e2e --workspace @ai-md-editor/desktop
 ## 打包与分发
 
 - **本地打包**：macOS 本机只打 `arm64` dmg（Apple Silicon）。先 `electron-builder --mac --arm64 --dir` 出 `.app`，再用 `scripts/make-dmg.sh <版本号> arm64` 组装安装窗口（应用 / 箭头 / Applications 三点布局，卷图标复用应用图标），产物落在 `apps/desktop/release/`；直出 dmg 在受限环境会被挂载卷清理拦截，故走两步。
-- **当前状态（0.14.28）**：GitHub Actions 因账号计费阻断，三平台 Release 暂无法产出；本版本已本地打出 `MarkdownNote-0.14.28-arm64.dmg`（约 159 MB，ad-hoc 签名，未公证）。首次打开请在访达中右键→打开。额度恢复前只推 `main`、不打 `v*` tag，避免触发必然失败的打包 workflow；额度恢复后无需改代码。
+- **当前状态（0.14.29）**：GitHub Actions 因账号计费阻断，三平台 Release 暂无法产出；本版本已本地打出 `MarkdownNote-0.14.29-arm64.dmg`（约 159 MB，ad-hoc 签名，未公证）。首次打开请在访达中右键→打开。额度恢复前只推 `main`、不打 `v*` tag，避免触发必然失败的打包 workflow；额度恢复后无需改代码。
 - **CI 自动打包**（额度恢复后）：推送 `main` 或打 `v*` tag 时，GitHub Actions 自动产出三架构：
   - macOS x64（Intel）dmg
   - macOS arm64（Apple Silicon）dmg

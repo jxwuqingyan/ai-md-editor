@@ -2,7 +2,7 @@
  * 窗口管理：创建应用窗口、向渲染层派发待打开的文件。
  * 独立成模块，供主入口与 IPC（新建窗口）共同复用，避免循环依赖。
  */
-import { BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
 import { join } from 'node:path';
 import {
   FlushBeforeCloseChannel,
@@ -191,8 +191,21 @@ export function createWindow(): void {
   }
 }
 
+/**
+ * 应用就绪前收到的待打开文件。
+ * Finder「打开方式」/ 拖到 Dock 图标启动时，macOS 的 `open-file` 事件会在
+ * `app.whenReady()` 完成**之前**触发，此时不能创建 BrowserWindow，
+ * 只能先把路径排队，等入口里调用 flushPendingOpenFiles() 再依次打开。
+ */
+const pendingOpenFiles: string[] = [];
+
 /** 通知渲染进程打开指定路径的文件（等渲染层就绪后再发送） */
 export function openFileInRenderer(filePath: string): void {
+  // 应用未就绪时 BrowserWindow 尚不可用，先排队避免抛错
+  if (!app.isReady()) {
+    if (!pendingOpenFiles.includes(filePath)) pendingOpenFiles.push(filePath);
+    return;
+  }
   if (!mainWindow && BrowserWindow.getAllWindows().length === 0) createWindow();
   const target = BrowserWindow.getFocusedWindow() ?? mainWindow ?? BrowserWindow.getAllWindows()[0];
   if (!target) return;
@@ -202,5 +215,13 @@ export function openFileInRenderer(filePath: string): void {
     });
   } else {
     target.webContents.send('open-file', filePath);
+  }
+}
+
+/** 应用就绪后把积压的待打开文件依次交给渲染层（在主入口创建首个窗口后调用） */
+export function flushPendingOpenFiles(): void {
+  while (pendingOpenFiles.length > 0) {
+    const filePath = pendingOpenFiles.shift();
+    if (filePath) openFileInRenderer(filePath);
   }
 }

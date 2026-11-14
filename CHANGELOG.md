@@ -2,6 +2,19 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.29 - 2026-11-14
+
+### 修复：Finder「打开方式」启动时报「Cannot create BrowserWindow before app is ready」
+
+- **现象**：右键 Markdown 文档 →「打开方式 → MarkdownNote」时弹 JavaScript 错误对话框。原因是 macOS 在 `app.whenReady()` 完成**之前**就派发 `open-file` 事件，`openFileInRenderer` 直接调 `createWindow()`，而 Electron 不允许在 ready 前创建窗口。
+- **修法**：`window.ts` 维护 `pendingOpenFiles` 队列——`app.isReady()` 为 false 时把路径排队，`index.ts` 在就绪回调里 `createWindow()` 之后调用新增的 `flushPendingOpenFiles()` 依次打开；正常双击 dock / `second-instance` 的路径不受影响。
+- **测试**：E2E 在 `require('../out/main/index.js')` 之后、`whenReady` resolve 之前同步合成 `open-file` 事件，真实复现「就绪前触发」时序：断言主进程不报错、排队文件在启动后自动打开为活动标签，断言后关闭标签还原现场。全套 **192/192**（新增 2 条）。
+
+### 验证与出包
+
+- `tsc --noEmit`、`npm run build` 通过；单测 61/61、菜单运行时 3/3、E2E **192/192**。
+- 重打 `MarkdownNote-0.14.29-arm64.dmg`（166282462 字节 / 约 159 MB，Apple Silicon，ad-hoc 签名，未公证）；SHA-256 `cb35eca22d2c9905fe039fa32b4633642c248d3097f411a7aaf7d9a3ba16cba5`。`hdiutil verify` 校验和有效、卷内三点布局齐全、`Info.plist` 版本 0.14.29、`lipo -archs` 为 arm64，`app.asar` 内 416 个文件与 `out/` 逐字节一致，包内确认含 `flushPendingOpenFiles` 排队修复。首次打开仍需「访达中右键→打开」。
+
 ## 0.14.28 - 2026-11-14
 
 ### 新增：表格行列手柄，选中整行 / 整列后直接增删

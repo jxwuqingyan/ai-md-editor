@@ -267,6 +267,21 @@ function normalizeTable(text) {
 }
 
 /**
+ * 复现 Finder「打开方式」的时序：就绪前收到 open-file。
+ * 真实场景里 macOS 在 app ready 之前就派发 open-file，此时不能创建 BrowserWindow，
+ * 主进程必须把路径排队、就绪后再打开（回归 0.14.28 的「Cannot create BrowserWindow」报错）。
+ * 这段是顶层同步代码，先于文件末尾的 whenReady → runTests 执行，app.isReady() 此时为 false。
+ */
+const QUEUED_FILE = join(PROFILE_DIR, 'open-file-queued.md');
+writeFileSync(QUEUED_FILE, '# 就绪前排队打开\n\n这一行来自启动前派发的 open-file。\n', 'utf-8');
+app.emit('open-file', { preventDefault() {} }, QUEUED_FILE);
+check(
+  '就绪前收到 open-file 时主进程不报错（路径排队）',
+  !app.isReady(),
+  `isReady=${app.isReady()}`
+);
+
+/**
  * 主流程。
  */
 async function runTests() {
@@ -274,6 +289,26 @@ async function runTests() {
   const win = await waitFor(() => getWindow(), { label: '窗口创建' });
   await waitFor(() => exec(`Boolean(document.querySelector('.app'))`), { label: 'React 挂载' });
   check('窗口与渲染层启动', true, `windowSize=${win.getContentSize().join('x')}`);
+
+  // ===== 0.5 就绪前排队的 open-file 在启动后自动打开 =====
+  const queuedTab = await waitFor(
+    () =>
+      exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`).then((name) =>
+        name === 'open-file-queued.md' ? name : null
+      ),
+    { label: '排队文件打开为活动标签', timeout: 10000 }
+  ).catch(() => null);
+  check('就绪前收到的 open-file 在应用就绪后排队打开', queuedTab === 'open-file-queued.md', `tab=${queuedTab}`);
+  // 关掉这个标签还原现场（文件在磁盘上且未改动，直接关闭不会弹确认）
+  await exec(`document.querySelector('.tab-active .tab-close')?.click()`);
+  await waitFor(
+    () =>
+      exec(`document.querySelector('.tab-active .tab-name')?.textContent ?? ''`).then((name) =>
+        name !== 'open-file-queued.md' ? name : null
+      ),
+    { label: '排队文件标签关闭' }
+  );
+  rmSync(QUEUED_FILE, { force: true });
 
   // ===== 1. 表格操作与菜单结构 =====
   // 段落菜单里的整组表格子菜单已移除（插入表格走工具栏），先确认没有残留项
