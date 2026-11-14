@@ -31,7 +31,8 @@ import type {
   StatPathResult,
   SaveImageFromPathInput,
   OpenExternalResult,
-  TextEncoding
+  TextEncoding,
+  WriteFileOptions
 } from '@ai-md-editor/shared';
 import {
   IpcChannel,
@@ -47,6 +48,7 @@ import { exportFile } from './export';
 import { updateMenuState, refreshRecentMenu } from './menu';
 import { createWindow } from './window';
 import { markSelfWrite, watchDocumentFile, unwatchDocumentFile } from './fileWatcher';
+import { assertDiskUnchanged, forgetDiskStamp, recordDiskStamp, writeFileAtomic } from './fileWrite';
 
 /** Markdown 文件扩展名过滤 */
 const MD_FILTERS = [
@@ -83,6 +85,8 @@ async function readTextFile(
     }
     // UTF-8 BOM / UTF-16 / GBK 都在这里识别；纯 UTF-8 也走同一分支
     const { text, encoding } = decodeBytes(bytes);
+    // 记住这次读到的磁盘版本：之后写入前要比对，防止静默覆盖外部改动
+    await recordDiskStamp(filePath);
     return { content: text, encoding, error: null };
   } catch (err) {
     return { content: null, encoding: null, error: err instanceof Error ? err.message : String(err) };
@@ -168,15 +172,17 @@ async function handleSaveFileAs(
   }
   // 另存为一律写 UTF-8：新文件不存在「沿用原编码」的问题
   markSelfWrite(result.filePath);
-  await writeFile(result.filePath, content, 'utf-8');
+  await writeFileAtomic(result.filePath, content);
   return { canceled: false, path: result.filePath, name: basename(result.filePath) };
 }
 
 /**
  * 读取指定路径的文件内容与编码。
+ * 读完记录磁盘版本，后续写入时据此判断是否被外部改过。
  */
 async function handleReadFile(filePath: string): Promise<ReadFileResult> {
   const { text, encoding } = decodeBytes(await readFile(filePath));
+  await recordDiskStamp(filePath);
   return { content: text, encoding };
 }
 
@@ -185,16 +191,21 @@ async function handleReadFile(filePath: string): Promise<ReadFileResult> {
  *
  * 除带 BOM 的 UTF-8 外统一写成 UTF-8：TextEncoder 无法编码 GBK / UTF-16，
  * 强行写回会乱码，转存 UTF-8 内容不会丢失。
+ *
+ * 写入前先比对磁盘版本：被外部程序改过就抛错，避免自动保存静默覆盖；
+ * 用户显式「保存」传 force，明确表示以当前编辑器内容为准。
  */
 async function handleWriteFile(
   filePath: string,
   content: string,
-  encoding: TextEncoding = 'utf-8'
+  encoding: TextEncoding = 'utf-8',
+  options?: WriteFileOptions
 ): Promise<TextEncoding> {
   const effective = writeEncoding(encoding);
+  if (!options?.force) await assertDiskUnchanged(filePath);
   // 先登记再写：写盘与 fs.watch 事件之间存在竞态，提前登记才能可靠过滤自身写入
   markSelfWrite(filePath);
-  await writeFile(filePath, encodeText(content, effective));
+  await writeFileAtomic(filePath, encodeText(content, effective));
   return effective;
 }
 
@@ -430,6 +441,9 @@ async function handleRenameFile(input: RenameFileInput): Promise<RenameFileResul
       }
     }
     await rename(input.path, target);
+    // 旧路径的版本记录作废，新路径按改名后的状态重新登记
+    forgetDiskStamp(input.path);
+    await recordDiskStamp(target);
     return { ok: true, path: target, name: finalName, error: null };
   } catch (err) {
     return { ok: false, path: null, name: null, error: err instanceof Error ? err.message : String(err) };
@@ -548,8 +562,10 @@ export function registerIpcHandlers(): void {
   );
   ipcMain.handle(IpcChannel.ReadFile, (_event, filePath: string) => handleReadFile(filePath));
   ipcMain.handle(IpcChannel.ReadPathQuiet, (_event, filePath: string) => handleReadPathQuiet(filePath));
-  ipcMain.handle(IpcChannel.WriteFile, (_event, filePath: string, content: string, encoding?: TextEncoding) =>
-    handleWriteFile(filePath, content, encoding)
+  ipcMain.handle(
+    IpcChannel.WriteFile,
+    (_event, filePath: string, content: string, encoding?: TextEncoding, options?: WriteFileOptions) =>
+      handleWriteFile(filePath, content, encoding, options)
   );
   ipcMain.handle(IpcChannel.WatchFile, (_event, filePath: string) => {
     watchDocumentFile(filePath);

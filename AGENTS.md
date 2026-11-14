@@ -48,7 +48,7 @@
 ai-md-editor/
 ├── apps/
 │   └── desktop/              # Electron 桌面端
-│       ├── src/main/         # 主进程（窗口 window.ts、IPC、文件 I/O、编码识别、外部修改监听 fileWatcher.ts、最近文件、原生菜单 menu.ts）
+│       ├── src/main/         # 主进程（窗口 window.ts、IPC、文件 I/O、原子写入 fileWrite.ts、编码识别、外部修改监听 fileWatcher.ts、最近文件、原生菜单 menu.ts）
 │       ├── src/preload/      # preload 桥接（contextBridge 白名单 API）
 │       ├── src/renderer/     # 渲染进程（React + Milkdown）
 │       │   ├── hooks/            # 状态按职责拆分的自定义 Hook
@@ -178,7 +178,7 @@ ai-md-editor/
 | 26 | 表头删除语义保留「删旧表头 + 首个数据行升级为表头」（GFM 表格必须有表头），但菜单文案标注「（表头）」并给 macOS 悬停说明，避免用户以为会删整表 |
 | 27 | CI 新增独立 `test` job：macOS 跑完整 `npm test`，Windows 跑单元测试 + 静态检查 + 菜单运行时校验；测试 job 不设 `needs`，不会阻塞 Release 上传 |
 | 28 | 会话恢复只持久化**路径**（`settings.lastSession`），不存未落盘文档的内容：内容保存是退出确认的职责，设置文件不做隐式草稿 |
-| 29 | 关闭窗口前必须问渲染层要「未保存汇总」（`app:unsaved-ask` / `app:unsaved-reply`），只有「无路径且有改动」才拦人；确认后先 `app:flush-before-close` 立即写盘再关 |
+| 29 | 关闭窗口前必须问渲染层要「未保存汇总」（`app:unsaved-ask` / `app:unsaved-reply`），只有「无路径且有改动」才拦人；确认后发带 `requestId` 的 `app:flush-before-close`，等渲染层 `app:flush-reply` 回包（失败清单 / 15s 超时都弹窗）才真正 `close()` |
 | 30 | 编码识别顺序固定为 BOM（UTF-8/UTF-16LE/BE）→ 严格 UTF-8 → GBK；保存统一写 UTF-8（`TextEncoder` 无法编码 GBK/UTF-16），带 BOM 的保留 BOM，并同步标签编码 |
 | 31 | 编辑器内核必须动态 `import`：入口 chunk 只留壳与文档状态（当前 ~0.59 MB），编辑器作为独立 chunk 按需加载；渲染层不要从 `@ai-md-editor/editor` 直接导入**值**（`NO_TABLE_CONTEXT` 放在 `renderer/constants.ts`） |
 | 32 | 外部修改监听由渲染层按「当前活动文档」登记（`fs:watch` / `fs:unwatch`）；主进程自身写盘前 `markSelfWrite`，1.5s 宽限期内忽略事件，否则会出现「自己保存后提示文件被修改」 |
@@ -214,7 +214,9 @@ ai-md-editor/
 | 63 | macOS 会往「编辑」菜单自动追加「自动填充 / 开始听写… / 表情与符号」，它们不在模板里、`Menu.getApplicationMenu()` 也看不到，只能在主进程入口、菜单构建**之前**用 `systemPreferences.setUserDefault('NSDisabled*MenuItem', 'boolean', true)` 关闭（E2E 用 `getUserDefault` 校验开关已写入）。删菜单项要连带清理状态 / 快捷键 / 持久化 / 实现，别留死逻辑；打字机模式按用户要求连 `centerCaret`、F9、光标居中监听一起删干净 |
 | 64 | 表格行列增删的唯一界面入口在 `packages/editor/src/tableHandles.ts`（0.14.27 删掉原生菜单整组表格子菜单后补上）：table 节点用自定义 NodeView 包一层，列头 / 行首手柄是 `contentDOM` 的**兄弟节点**，`ignoreMutation` 必须忽略它们否则会被当成内容改动；手柄尺寸靠 `contentDOM.rows[0].cells[i].getBoundingClientRect()` 同步，工具条挂 body 用 fixed 定位避免被滚动容器裁掉。**坑**：`CellSelection.colSelection/rowSelection` 要的是「单元格节点前」的 ResolvedPos（`node(-1)` 必须是 table）；单元格里还有一层 paragraph，多进一层 `$cell.node(-1)` 会变成 `table_header_row`，直接抛 `Not a table node`。命令统一走 `format`（新增 `tableAddRowBefore` / `tableAddColBefore`，删除用既有自定义命令处理表头），执行后必须把整格选区收回 `TextSelection`，否则用户接着打字会一次清空整行 / 整列；表头禁「上插」、只剩一列或表头+一数据行禁删除 |
 | 65 | Finder「打开方式」/ 拖 Dock 启动时，macOS 的 `open-file` 事件在 `app.whenReady()` **之前**触发，此时不能创建 `BrowserWindow`（直接抛错弹系统错误框）。`openFileInRenderer` 里必须先判 `app.isReady()`，未就绪就把路径压进 `pendingOpenFiles` 队列，主入口在就绪回调 `createWindow()` 之后调 `flushPendingOpenFiles()`。E2E 复现方式：`require('../out/main/index.js')` 之后、`whenReady` resolve 之前同步 `app.emit('open-file', {preventDefault(){}}, path)`——注意这段顶层代码必须放在 `check`/`results` 声明之后，否则模块加载即 `ReferenceError` |
-| 66 | 表格手柄必须默认隐藏（阅读不被干扰）：`.md-table-handle-bar` 与角手柄 `visibility: hidden`，仅表格 hover / 光标在表内（`md-table-active`）/ 有整格选区（`md-table-has-selection`）时浮现。**坑**：`visibility` 不能参与 CSS transition——窗口失焦时 Chromium 节流动画帧，过渡停在起点导致永不隐藏，必须立即切换、只留 opacity 过渡。左上角角手柄（`md-table-corner`）点击构造首格到末格的 `CellSelection` 选中整表，此时工具条只留「删除整张表」。E2E 验证显隐必须用真实鼠标点击（`clickSelector`，`sendInputEvent` mouse 事件）移动选区，合成 `el.click()` 不动 ProseMirror 选区；且断言用 `visibility` 而非 opacity（失焦时 opacity 过渡同样不推进） |
+| 66 | 表格手柄必须默认隐藏（阅读不被干扰）：`.md-table-handle-bar` 与角手柄 `visibility: hidden`，仅表格 hover 或存在整行 / 整列 / 整表选区（`md-table-has-selection`）时浮现；光标在表内但没选中时不常驻。**坑**：`visibility` 不能参与 CSS transition——窗口失焦时 Chromium 节流动画帧，过渡停在起点导致永不隐藏，必须立即切换、只留 opacity 过渡。E2E 验证显隐必须用真实鼠标点击（`clickSelector`，`sendInputEvent` mouse 事件）移动选区，合成 `el.click()` 不动 ProseMirror 选区；且断言用 `visibility` 而非 opacity（失焦时 opacity 过渡同样不推进）；hover 状态在 E2E 里不可靠，改断言「选中后鼠标移开手柄仍显示」 |
+| 67 | 表格手柄的视觉细节（0.14.31）：手柄带宽度用 `--md-table-gutter: 16px` 与 block 的 padding 精确相等，手柄与表格、手柄与手柄之间必须 0 间隙（分隔用 `inset box-shadow`，不用 border）；插入图标按轴切换（列 `INSERT_ICONS.col` 左右箭头、行 `INSERT_ICONS.row` 上下箭头）；行列选中只渲染「插左/插右/删除」三键，`removeTable` 只在角手柄选中整表时出现；工具条定位以 **block**（含手柄带）为基准 `top - height - 8`，不能用 `contentDOM`（会把列手柄带盖住）。整表选中时所有手柄一起 `is-selected`（连成蓝带） |
+| 68 | 保存链路的三条硬约束：①写盘必须原子（`main/fileWrite.ts` 临时文件 + fsync + rename），不要退回 `writeFile(path)`；②关闭标签必须 `await` 写盘成功再移除标签，失败保留标签与 dirty；③关闭窗口必须按 `requestId` 等渲染层回包（`app:flush-reply`），超时/失败都要弹窗让用户选择，禁止用固定延时假定写盘完成。外部改动检测的版本记录在 `recordDiskStamp`（读成功、写成功后刷新），只有显式保存传 `force: true` 才跳过比对，自动保存永远不 force |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -228,18 +230,19 @@ ai-md-editor/
 | 大纲章节搬运 | `packages/shared/src/text.ts` `moveOutlineSection` | 纯按行切片；渲染层 `renderer/OutlineList.tsx` 负责拖放交互，接线见 #61 |
 | 片段插入 | `packages/editor/src/commands.ts` `insertSnippet` | 行内片段替换选区；块级片段插到当前顶层块之后（空段落直接替换），否则定义类节点会拆坏段落；`placeholder` 会选中新片段里的占位文字（警告框必需） |
 | 表格行/列增删 | `packages/editor/src/commands.ts` | 删行：正文行直接删，表头行整表重建；删列：`table_row` 与 `table_header_row` 都要遍历 |
-| 表格行列手柄 | `packages/editor/src/tableHandles.ts` | table 的 NodeView 渲染列头 / 行首手柄与浮动增删工具条，默认隐藏（hover / 编辑 / 选中时浮现）；角手柄可选中整张表；坐标与选区坑见 #64、显隐坑见 #66；诊断脚本 `test/table-handles-debug.cjs` |
+| 表格行列手柄 | `packages/editor/src/tableHandles.ts` | table 的 NodeView 渲染列头 / 行首手柄与浮动增删工具条，默认隐藏（hover / 有选区时浮现）；角手柄可选中整张表；坐标与选区坑见 #64、显隐坑见 #66、视觉与图标规则见 #67；诊断脚本 `test/table-handles-debug.cjs`、`test/table-visual-check.cjs` |
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
 | 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |
 | 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验；`lastSession` 只保留非空路径且最多 40 条 |
 | 会话恢复 | `renderer/hooks/useTabs.ts` | 挂载时读设置 → 逐条 `readPathQuiet`（失败静默跳过）→ 替换标签并选中 `activePath`；`sessionReady` 之前禁止回写，否则默认标签会覆盖上次会话 |
-| 关闭前确认 | `main/window.ts` `confirmClose` | `close` 事件先 `preventDefault`，向渲染层要汇总；确认后发 `app:flush-before-close` 并等待 120ms 再真正 `close()` |
+| 关闭前确认 | `main/window.ts` `confirmClose` | `close` 事件先 `preventDefault`，向渲染层要汇总；确认后发带 `requestId` 的 `app:flush-before-close`，等 `app:flush-reply`（15s 超时）；有失败项或超时弹窗让用户「取消 / 仍要退出」，不再用固定延时 |
+| 文件写入 | `main/fileWrite.ts` | `writeFileAtomic`：同目录临时文件 → `handle.sync()` → `rename` 替换（Windows rename 失败退回直接覆盖）；写成功刷新 `recordDiskStamp`。写入前 `assertDiskUnchanged` 比对 mtime/size，不一致抛 `EXTERNAL_CHANGED`（用户显式保存传 `force: true` 跳过） |
 | 编码识别 | `packages/shared/src/text.ts` | `decodeBytes` 按 BOM → 严格 UTF-8 → GBK；`writeEncoding` 除 BOM 外统一 UTF-8；主进程读写都走这两个函数 |
 | 外部修改监听 | `main/fileWatcher.ts` | 按文件登记 watcher，250ms 去抖、自身写入 1.5s 宽限；`rename` 事件后重建 watcher（保存常是「写临时文件 + rename」） |
 | 编辑器动态加载 | `renderer/MarkdownEditor.tsx` | `await import('@ai-md-editor/editor')`，卸载时判 `disposed` 后销毁；加载期间渲染 `.editor-loading` 占位 |
 | 文件树无障碍 | `renderer/FileTree.tsx` | 条目为 `<button>`（Enter/Space 生效），容器 `onKeyDown` 处理 ↑↓←→/Home/End，`data-depth` 用于「回父级」 |
-| 自动保存范围 | `renderer/hooks/useTabs.ts` | 防抖到点写入**所有**「有路径且 dirty」的标签，按内容快照清 dirty；只写当前标签会在切标签时丢稿 |
+| 自动保存范围 | `renderer/hooks/useTabs.ts` | 防抖到点写入**所有**「有路径且 dirty 且未标记 externalChanged」的标签，按内容快照清 dirty；只写当前标签会在切标签时丢稿。失败要在状态栏展示（`saveState`），不能静默吞掉 |
 | 打开文件校验 | `apps/desktop/src/main/ipc.ts` `readTextFile` | 先 `stat`：> 20 MB 或含 NUL 字节（二进制）直接拒绝并弹窗说明；不要静默返回「已取消」 |
 | 拖拽取路径 | `apps/desktop/src/preload/index.ts` | `getPathForFile(file)` = `webUtils.getPathForFile`；渲染层据此区分 图片 / 文件夹 / 文档 |
 | 导出公式 | `main/mathExport.ts` + `main/export.ts` | 提取/还原纯函数（可单测）；块级公式先于行内提取；`throwOnError:false` 下非法 TeX 渲染成 `katex-error` 标记而非抛异常 |

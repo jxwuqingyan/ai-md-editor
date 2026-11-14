@@ -25,11 +25,15 @@ import type {
   OpenExternalResult,
   TextEncoding,
   UnsavedSummary,
-  FileChangedMessage
+  FileChangedMessage,
+  FlushBeforeCloseMessage,
+  FlushReplyMessage,
+  WriteFileOptions
 } from '@ai-md-editor/shared';
 import {
   FileChangedChannel,
   FlushBeforeCloseChannel,
+  FlushReplyChannel,
   IpcChannel,
   MenuActionChannel,
   MenuStateChannel,
@@ -62,9 +66,14 @@ const api = {
   readPathQuiet: (filePath: string): Promise<OpenFileResult> =>
     ipcRenderer.invoke(IpcChannel.ReadPathQuiet, filePath),
 
-  /** 写入内容到指定路径，返回实际使用的编码 */
-  writeFile: (filePath: string, content: string, encoding?: TextEncoding): Promise<TextEncoding> =>
-    ipcRenderer.invoke(IpcChannel.WriteFile, filePath, content, encoding),
+  /** 写入内容到指定路径，返回实际使用的编码。force 用于用户显式保存时跳过外部改动检查 */
+  writeFile: (
+    filePath: string,
+    content: string,
+    encoding?: TextEncoding,
+    options?: WriteFileOptions
+  ): Promise<TextEncoding> =>
+    ipcRenderer.invoke(IpcChannel.WriteFile, filePath, content, encoding, options),
 
   /** 监听指定文件的外部修改 */
   watchFile: (filePath: string): Promise<void> => ipcRenderer.invoke(IpcChannel.WatchFile, filePath),
@@ -219,11 +228,16 @@ const api = {
     ipcRenderer.send(UnsavedReplyChannel, summary);
   },
 
-  /** 监听「退出前立即写盘」请求 */
-  onFlushBeforeClose: (callback: () => void): (() => void) => {
-    const listener = (): void => callback();
+  /** 监听「退出前立即写盘」请求，处理完必须用 replyFlush 把结果回给主进程 */
+  onFlushBeforeClose: (callback: (message: FlushBeforeCloseMessage) => void): (() => void) => {
+    const listener = (_event: unknown, message: FlushBeforeCloseMessage): void => callback(message);
     ipcRenderer.on(FlushBeforeCloseChannel, listener);
     return () => ipcRenderer.removeListener(FlushBeforeCloseChannel, listener);
+  },
+
+  /** 回复退出前写盘结果（requestId 必须原样带回） */
+  replyFlush: (message: FlushReplyMessage): void => {
+    ipcRenderer.send(FlushReplyChannel, message);
   }
 };
 

@@ -21,7 +21,7 @@
  * 单独跑：npm run test:e2e --workspace @ai-md-editor/desktop
  */
 const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain } = require('electron');
-const { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } = require('node:fs');
+const { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync, rmSync } = require('node:fs');
 const { join } = require('node:path');
 const { tmpdir } = require('node:os');
 
@@ -880,6 +880,38 @@ async function runTests() {
   ).catch(() => false);
   check('点击重新加载后读到新内容', reloaded === true, `reloaded=${reloaded}`);
 
+  // ===== 12.1 本地有改动时外部修改：暂停自动保存，不能静默覆盖 =====
+  await exec(`window.__setSource('# 外部\\n\\n本地改动\\n')`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  writeFileSync(extPath, '# 外部\n\n又改了\n', 'utf-8');
+  const conflictNotice = await waitFor(
+    async () => {
+      const text = await exec(`document.querySelector('.statusbar-notice')?.textContent ?? ''`);
+      return String(text).includes('已暂停自动保存') ? String(text) : null;
+    },
+    { label: '外部冲突暂停保存提示', timeout: 10000 }
+  ).catch(() => '');
+  check('本地有改动时外部修改会暂停自动保存', conflictNotice.includes('已暂停自动保存'), conflictNotice);
+  const conflictStatus = await exec(`document.querySelector('.statusbar-save')?.textContent ?? ''`);
+  check('状态栏标记外部已修改', String(conflictStatus).includes('外部已修改'), String(conflictStatus));
+
+  // 等过自动保存的防抖窗口，磁盘必须仍是外部版本（没被静默覆盖）
+  await new Promise((resolve) => setTimeout(resolve, 2300));
+  const diskAfterConflict = readFileSync(extPath, 'utf-8');
+  check(
+    '自动保存不会覆盖外部版本',
+    diskAfterConflict.includes('又改了') && !diskAfterConflict.includes('本地改动'),
+    JSON.stringify(diskAfterConflict)
+  );
+
+  // 用户显式保存：以编辑器内容为准覆盖磁盘
+  menuAction('file:save');
+  const forcedSave = await waitFor(
+    () => (readFileSync(extPath, 'utf-8').includes('本地改动') ? true : false),
+    { label: '显式保存覆盖外部版本', timeout: 8000 }
+  ).catch(() => false);
+  check('显式保存以编辑器内容为准', forcedSave === true, JSON.stringify(readFileSync(extPath, 'utf-8')));
+
   // ===== 13. 关闭前：未保存汇总 + 立即写盘 =====
   await exec(`window.__setSource('# 外部\\n\\n关闭前写入\\n')`);
   await new Promise((resolve) => setTimeout(resolve, 200));
@@ -897,12 +929,41 @@ async function runTests() {
     JSON.stringify(summary)
   );
 
-  win.webContents.send('app:flush-before-close');
+  // 退出前写盘：主进程发带 requestId 的请求，渲染层必须回包写盘结果
+  const flushReply = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 12000);
+    ipcMain.once('app:flush-reply', (_event, payload) => {
+      clearTimeout(timer);
+      resolve(payload);
+    });
+    win.webContents.send('app:flush-before-close', { requestId: 'e2e-flush-1' });
+  });
+  check(
+    '退出前写盘回包带 requestId 且无失败项',
+    Boolean(flushReply) &&
+      flushReply.requestId === 'e2e-flush-1' &&
+      Array.isArray(flushReply.failures) &&
+      flushReply.failures.length === 0,
+    JSON.stringify(flushReply)
+  );
   const flushed = await waitFor(
     () => (readFileSync(extPath, 'utf-8').includes('关闭前写入') ? true : false),
     { label: '退出前写盘', timeout: 8000 }
   ).catch(() => false);
   check('退出前立即写盘生效', flushed === true, `flushed=${flushed}`);
+
+  // ===== 13.1 关闭标签必须等写盘完成；原子写入不残留临时文件 =====
+  await ensureSourceMode();
+  await exec(`window.__setSource('# 外部\\n\\n关标签前的改动\\n')`);
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  menuAction('file:close-tab');
+  const closedWrote = await waitFor(
+    () => (readFileSync(extPath, 'utf-8').includes('关标签前的改动') ? true : false),
+    { label: '关闭标签时写盘', timeout: 8000 }
+  ).catch(() => false);
+  check('关闭标签前会等待写盘完成', closedWrote === true, JSON.stringify(readFileSync(extPath, 'utf-8')));
+  const leftoverTemp = readdirSync(encDir).filter((name) => name.endsWith('.tmp'));
+  check('原子写入不残留临时文件', leftoverTemp.length === 0, JSON.stringify(leftoverTemp));
 
   // ===== 14. 会话恢复：新窗口重新打开上次的文档 =====
   await exec(
@@ -2814,13 +2875,24 @@ async function runTests() {
     hiddenState.col === false && hiddenState.row === false && hiddenState.corner === false,
     JSON.stringify(hiddenState)
   );
-  // 光标进入单元格后手柄浮现
-  await clickSelector('.ProseMirror table td p');
-  const shownState = JSON.parse(await handlesVisibility());
+  // 鼠标悬停到表格上（或选中行列）时手柄浮现：手柄只是「就近操作」入口，不常驻。
+  // 注意：E2E 窗口不一定获得真实 hover 状态，这里断言更关键的「有选区就保持显示」，
+  // 悬停路径由 CSS `:hover` 提供，属于纯样式行为。
+  await clickTableHandle('col', 0);
+  await waitToolbar();
+  const awayPoint = await exec(`(() => {
+    const p = document.querySelector('.ProseMirror > p:last-of-type');
+    if (!p) return null;
+    const r = p.getBoundingClientRect();
+    return { x: Math.round(r.left + 5), y: Math.round(r.top + 5) };
+  })()`);
+  if (awayPoint) win.webContents.sendInputEvent({ type: 'mouseMove', x: awayPoint.x, y: awayPoint.y });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const keepState = JSON.parse(await handlesVisibility());
   check(
-    '光标进入表格后手柄与角手柄浮现',
-    shownState.col === true && shownState.row === true && shownState.corner === true,
-    JSON.stringify(shownState)
+    '选中整列后鼠标移开手柄仍保持显示',
+    keepState.col === true && keepState.row === true && keepState.corner === true,
+    JSON.stringify(keepState)
   );
 
   check('可点击第 1 列手柄', (await clickTableHandle('col', 0)) === true);
@@ -2831,6 +2903,40 @@ async function runTests() {
     `document.querySelector('.md-table-col-handle[data-index="0"]')?.classList.contains('is-selected') === true`
   );
   check('被选中的列手柄高亮', selectedHandle === true);
+
+  // 列选中：插入图标必须是左右方向，且不出现「删除整张表」
+  const colToolbar = JSON.parse(
+    await exec(`(() => {
+      const toolbar = document.querySelector('.md-table-toolbar:not([hidden])');
+      const btn = (action) => toolbar?.querySelector('.md-table-tool-btn[data-table-action="' + action + '"]');
+      const before = btn('insertBefore');
+      const after = btn('insertAfter');
+      const removeTable = btn('removeTable');
+      const table = document.querySelector('.ProseMirror table');
+      const tRect = table.getBoundingClientRect();
+      const barRect = toolbar.getBoundingClientRect();
+      return JSON.stringify({
+        beforeIcon: before ? before.innerHTML : '',
+        afterIcon: after ? after.innerHTML : '',
+        removeTableHidden: !removeTable || getComputedStyle(removeTable).display === 'none',
+        removeTableDisabled: !removeTable || removeTable.disabled === true,
+        toolbarCoversTable: barRect.bottom > tRect.top + 1 && barRect.top < tRect.bottom,
+        buttons: toolbar ? toolbar.querySelectorAll('.md-table-tool-btn:not([hidden])').length : 0
+      });
+    })()`)
+  );
+  check(
+    '列选中的插入图标为左右方向',
+    colToolbar.beforeIcon.includes('M5 4v16') && colToolbar.afterIcon.includes('M19 4v16'),
+    colToolbar.beforeIcon.slice(0, 60)
+  );
+  check(
+    '列选中工具条只有插左 / 插右 / 删除三键',
+    colToolbar.buttons === 3,
+    String(colToolbar.buttons)
+  );
+  check('列选中不显示「删除整张表」', colToolbar.removeTableHidden === true, JSON.stringify(colToolbar));
+  check('工具条浮在表格上方、不遮挡表格', colToolbar.toolbarCoversTable === false, JSON.stringify(colToolbar));
 
   check('工具条可在右侧插入一列', (await clickTableAction('insertAfter')) === true);
   await waitCols(4);
@@ -2857,6 +2963,24 @@ async function runTests() {
   await waitToolbar();
   shape = await tableShape();
   check('点行手柄选中整行', shape.selectedCells === 4 && shape.toolbarVisible, JSON.stringify(shape));
+  const rowIcons = JSON.parse(
+    await exec(`(() => {
+      const toolbar = document.querySelector('.md-table-toolbar:not([hidden])');
+      const btn = (action) => toolbar?.querySelector('.md-table-tool-btn[data-table-action="' + action + '"]');
+      const removeTable = btn('removeTable');
+      return JSON.stringify({
+        beforeIcon: btn('insertBefore')?.innerHTML ?? '',
+        afterIcon: btn('insertAfter')?.innerHTML ?? '',
+        removeTableHidden: !removeTable || getComputedStyle(removeTable).display === 'none'
+      });
+    })()`)
+  );
+  check(
+    '行选中的插入图标为上下方向',
+    rowIcons.beforeIcon.includes('M4 5h16') && rowIcons.afterIcon.includes('M4 19h16'),
+    rowIcons.beforeIcon.slice(0, 60)
+  );
+  check('行选中不显示「删除整张表」', rowIcons.removeTableHidden === true, JSON.stringify(rowIcons));
   check('工具条可在下方插入一行', (await clickTableAction('insertAfter')) === true);
   await waitRows(4);
   check('插行后行手柄同步为 4', (await tableShape()).rowHandles === 4);

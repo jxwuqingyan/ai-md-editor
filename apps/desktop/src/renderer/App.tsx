@@ -93,7 +93,9 @@ export default function App(): JSX.Element {
     reloadFromDisk,
     reloadPath,
     rename,
-    loadQuickEntries
+    loadQuickEntries,
+    saveState,
+    markExternalChange
   } = useTabs({
     editorRef,
     history,
@@ -595,7 +597,16 @@ export default function App(): JSX.Element {
         // 只对当前正在编辑的文档提示：后台标签重新激活时会重新读盘
         if (!tab || tab.id !== activeIdRef.current) return;
         if (tab.dirty) {
-          setNotice({ text: '文件已被外部程序修改，当前文档有未保存改动' });
+          // 本地还有未保存改动：暂停自动保存，避免把磁盘上的新版本静默覆盖掉
+          markExternalChange(path);
+          setNotice({
+            text: '文件已被外部程序修改，已暂停自动保存',
+            actionLabel: '载入磁盘版本',
+            onAction: () => {
+              setNotice(null);
+              void reloadPath(path);
+            }
+          });
           return;
         }
         setNotice({
@@ -607,7 +618,7 @@ export default function App(): JSX.Element {
           }
         });
       }),
-    [reloadPath]
+    [reloadPath, markExternalChange]
   );
 
   // ===== 关闭窗口前的未保存确认 =====
@@ -624,7 +635,16 @@ export default function App(): JSX.Element {
     [tabsRef]
   );
 
-  useEffect(() => window.api.onFlushBeforeClose(() => void saveAll()), [saveAll]);
+  // 退出前写盘：必须把真实结果回给主进程，主进程按失败清单决定是否拦下退出
+  useEffect(
+    () =>
+      window.api.onFlushBeforeClose((message) => {
+        void saveAll().then((failures) => {
+          window.api.replyFlush({ requestId: message.requestId, failures });
+        });
+      }),
+    [saveAll]
+  );
 
   // ===== 原生菜单动作分发 =====
   useMenuBridge({
@@ -634,7 +654,7 @@ export default function App(): JSX.Element {
     openMostRecent: () => void handleOpenMostRecent(),
     openPath: (path) => void openPath(path),
     quickOpen: () => void handleQuickOpen(),
-    closeTab: () => closeTab(activeIdRef.current),
+    closeTab: () => void closeTab(activeIdRef.current),
     save: () => void save(),
     saveAll: () => void saveAll(),
     saveAs: () => void saveAs(),
@@ -824,6 +844,32 @@ export default function App(): JSX.Element {
       <footer className="statusbar">
         <span>{viewMode === 'wysiwyg' ? 'Markdown' : '源码'}</span>
         {readOnly && <span>只读</span>}
+        {/* 保存状态：比脏点更明确，失败 / 外部冲突要一直看得到 */}
+        {saveState.kind !== 'idle' && activeTab?.path && (
+          <span
+            className={`statusbar-save statusbar-save-${saveState.kind}`}
+            title={saveState.message ?? undefined}
+          >
+            {saveState.kind === 'saving' && '正在保存…'}
+            {saveState.kind === 'saved' && '已保存'}
+            {saveState.kind === 'error' && '未能保存'}
+            {saveState.kind === 'external' && '外部已修改'}
+            {saveState.kind === 'error' && (
+              <button type="button" className="statusbar-notice-action" onClick={() => void save()}>
+                重试
+              </button>
+            )}
+            {saveState.kind === 'external' && activeTab?.path && (
+              <button
+                type="button"
+                className="statusbar-notice-action"
+                onClick={() => void reloadPath(activeTab.path as string)}
+              >
+                载入磁盘版本
+              </button>
+            )}
+          </span>
+        )}
         {notice && (
           <span className="statusbar-notice">
             {notice.text}

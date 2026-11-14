@@ -4,10 +4,14 @@
  */
 import { app, BrowserWindow, dialog, ipcMain, screen, shell } from 'electron';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   FlushBeforeCloseChannel,
+  FlushReplyChannel,
   UnsavedAskChannel,
   UnsavedReplyChannel,
+  type FlushBeforeCloseMessage,
+  type FlushReplyMessage,
   type UnsavedSummary
 } from '@ai-md-editor/shared';
 import { getSettings, saveWindowBounds } from './settings';
@@ -20,6 +24,9 @@ const DEFAULT_WINDOW_SIZE = { width: 1200, height: 800 };
 
 /** 询问渲染层未保存文档的等待上限（渲染层未响应时按「无未保存内容」处理，不阻塞退出） */
 const UNSAVED_REPLY_TIMEOUT_MS = 800;
+
+/** 等待渲染层写盘结果的上限：留足大文件与网络盘写入的时间，但不能无限等 */
+const FLUSH_REPLY_TIMEOUT_MS = 15000;
 
 /**
  * 向渲染层询问未保存文档数量。
@@ -55,10 +62,47 @@ function requestUnsavedSummary(win: BrowserWindow): Promise<UnsavedSummary | nul
 }
 
 /**
+ * 要求渲染层把所有有路径的改动写盘，并等待真实结果。
+ *
+ * 带 requestId：多窗口 / 重复请求时按 id 匹配回复，避免串话；
+ * 超时返回 null，调用方按「保存未完成」处理，绝不当成保存成功。
+ */
+function flushBeforeClose(win: BrowserWindow): Promise<FlushReplyMessage | null> {
+  const requestId = randomUUID();
+  return new Promise((resolve) => {
+    let timer: NodeJS.Timeout | null = null;
+    const cleanup = (): void => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      ipcMain.removeListener(FlushReplyChannel, onReply);
+    };
+    const onReply = (event: Electron.IpcMainEvent, reply: FlushReplyMessage): void => {
+      if (event.sender !== win.webContents) return;
+      if (!reply || reply.requestId !== requestId) return;
+      cleanup();
+      resolve(reply);
+    };
+
+    if (win.webContents.isDestroyed()) {
+      resolve(null);
+      return;
+    }
+    ipcMain.on(FlushReplyChannel, onReply);
+    timer = setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, FLUSH_REPLY_TIMEOUT_MS);
+    const message: FlushBeforeCloseMessage = { requestId };
+    win.webContents.send(FlushBeforeCloseChannel, message);
+  });
+}
+
+/**
  * 关闭窗口前的确认流程。
  *
  * - 只有「未落盘（无磁盘路径）且有改动」的文档才拦人：这类内容关掉就真的没了。
- * - 有路径的改动交给自动保存，这里额外触发一次立即写盘，避免卡在防抖窗口里丢内容。
+ * - 有路径的改动逐份写盘，等渲染层回包确认；写盘失败或超时都会拦下退出，
+ *   让用户决定「取消退出」还是「仍要退出」，不再靠固定延时猜写盘是否完成。
  *
  * @returns true 表示可以关闭
  */
@@ -76,10 +120,37 @@ async function confirmClose(win: BrowserWindow): Promise<boolean> {
     });
     if (response !== 1) return false;
   }
-  if (!win.webContents.isDestroyed()) {
-    win.webContents.send(FlushBeforeCloseChannel);
-    // 给渲染层一点时间把 writeFile 发出去（写盘本身在 IPC 里完成）
-    await new Promise((resolve) => setTimeout(resolve, 120));
+  if (win.webContents.isDestroyed()) return true;
+
+  const reply = await flushBeforeClose(win);
+  if (reply === null) {
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'warning',
+      buttons: ['取消', '仍要退出'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      message: '保存没有在预期时间内完成',
+      detail: '为避免丢失改动，建议取消退出，确认文档保存后再关闭。'
+    });
+    return response === 1;
+  }
+  if (reply.failures.length > 0) {
+    const list = reply.failures
+      .slice(0, 6)
+      .map((item) => `· ${item.name}：${item.reason}`)
+      .join('\n');
+    const more = reply.failures.length > 6 ? `\n… 另有 ${reply.failures.length - 6} 个文档` : '';
+    const { response } = await dialog.showMessageBox(win, {
+      type: 'error',
+      buttons: ['取消', '仍要退出'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true,
+      message: `有 ${reply.failures.length} 个文档未能保存到磁盘`,
+      detail: `${list}${more}\n\n退出会丢失这些文档未保存的改动。`
+    });
+    return response === 1;
   }
   return true;
 }

@@ -1222,11 +1222,16 @@ button:focus-visible {
 }
 
 /* ============ 表格行列手柄（选中整行 / 整列后增删） ============ */
-/* 外层容器为列手柄（上 20px）与行手柄（左 20px）留位，手柄不在可编辑内容里 */
+/*
+ * 外层容器为列手柄（上）与行手柄（左）留出一条手柄带。
+ * 手柄带宽度 = 手柄尺寸，手柄与表格之间、手柄与手柄之间都不留缝，
+ * 选中时连成一条整色带（参考常见表格编辑器的视觉）。
+ */
 .milkdown-container .ProseMirror .md-table-block {
+  --md-table-gutter: 16px;
   position: relative;
   margin: 0.8em 0;
-  padding: 20px 0 0 20px;
+  padding: var(--md-table-gutter) 0 0 var(--md-table-gutter);
 }
 
 .milkdown-container .ProseMirror .md-table-block > table {
@@ -1237,7 +1242,7 @@ button:focus-visible {
   position: absolute;
   display: flex;
   z-index: 2;
-  /* 默认隐藏，不打扰阅读：悬停表格或光标落在表格内时才浮现。
+  /* 默认隐藏，不打扰阅读：悬停表格或存在整行 / 整列 / 整表选区时才浮现。
      visibility 立即切换不参与过渡——窗口失焦时动画帧被节流，过渡式显隐会停在起点 */
   visibility: hidden;
   opacity: 0;
@@ -1245,7 +1250,6 @@ button:focus-visible {
 }
 
 .milkdown-container .ProseMirror .md-table-block:hover .md-table-handle-bar,
-.milkdown-container .ProseMirror .md-table-block.md-table-active .md-table-handle-bar,
 .milkdown-container .ProseMirror .md-table-block.md-table-has-selection .md-table-handle-bar {
   visibility: visible;
   opacity: 1;
@@ -1253,15 +1257,15 @@ button:focus-visible {
 
 .md-table-col-bar {
   top: 0;
-  left: 20px;
+  left: var(--md-table-gutter);
   right: 0;
-  height: 16px;
+  height: var(--md-table-gutter);
 }
 
 .md-table-row-bar {
   left: 0;
-  top: 20px;
-  width: 16px;
+  top: var(--md-table-gutter);
+  width: var(--md-table-gutter);
   flex-direction: column;
 }
 
@@ -1269,8 +1273,9 @@ button:focus-visible {
   flex: 0 0 auto;
   padding: 0;
   border: none;
-  border-right: 1px solid var(--bg-panel);
-  border-radius: 2px;
+  /* 手柄之间用极细的内阴影分隔而不是 border，避免看起来像「缝隙」 */
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.05);
+  border-radius: 0;
   background: var(--bg-subtle);
   color: transparent;
   cursor: pointer;
@@ -1281,8 +1286,20 @@ button:focus-visible {
 }
 
 .md-table-row-handle {
-  border-right: none;
-  border-bottom: 1px solid var(--bg-panel);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* 手柄带两端收圆角，与表格外框的圆角观感一致 */
+.md-table-col-bar .md-table-col-handle:first-child {
+  border-top-left-radius: 4px;
+}
+
+.md-table-col-bar .md-table-col-handle:last-child {
+  border-top-right-radius: 4px;
+}
+
+.md-table-row-bar .md-table-row-handle:last-child {
+  border-bottom-left-radius: 4px;
 }
 
 /* 左上角角手柄：点击选中整张表，显隐规则与行列手柄一致 */
@@ -1290,11 +1307,11 @@ button:focus-visible {
   position: absolute;
   top: 0;
   left: 0;
-  width: 16px;
-  height: 16px;
+  width: var(--md-table-gutter);
+  height: var(--md-table-gutter);
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: 4px 0 0 0;
   background: var(--bg-subtle);
   color: transparent;
   cursor: pointer;
@@ -1309,7 +1326,6 @@ button:focus-visible {
 }
 
 .milkdown-container .ProseMirror .md-table-block:hover .md-table-corner,
-.milkdown-container .ProseMirror .md-table-block.md-table-active .md-table-corner,
 .milkdown-container .ProseMirror .md-table-block.md-table-has-selection .md-table-corner {
   visibility: visible;
   opacity: 1;
@@ -1330,9 +1346,15 @@ button:focus-visible {
   color: var(--text-tertiary);
 }
 
+/* 选中态：整条手柄带同色，分隔线改成半透明白，保持连贯不显缝 */
 .md-table-handle.is-selected {
   background: var(--accent);
   color: #fff;
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.35);
+}
+
+.md-table-row-handle.is-selected {
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.35);
 }
 
 .md-table-grip svg {
@@ -1394,11 +1416,9 @@ button:focus-visible {
   cursor: not-allowed;
 }
 
-/* 「删除整张表」与行列操作分开，避免误点 */
-.md-table-tool-btn[data-table-action='removeTable'] {
-  margin-left: 2px;
-  border-left: 1px solid var(--border-subtle);
-  border-radius: 0 4px 4px 0;
+/* 「删除整张表」只在角手柄选中整表时单独出现，不再需要与行列操作分隔 */
+.md-table-tool-btn[hidden] {
+  display: none;
 }
 
 /* 选中文本：强调色浅底 */
@@ -1550,6 +1570,22 @@ button:focus-visible {
 
 .statusbar-notice-action:hover {
   color: var(--accent-hover, var(--accent));
+}
+
+/* 保存状态：失败与外部冲突用警示色，成功保持低调 */
+.statusbar-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.statusbar-save-error {
+  color: var(--danger, #c0392b);
+}
+
+.statusbar-save-external {
+  color: var(--warning, #b9770e);
 }
 
 /* 编辑器内核（动态加载）就绪前的占位，避免整块区域空白 */

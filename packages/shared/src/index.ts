@@ -390,8 +390,22 @@ export const UnsavedAskChannel = 'app:unsaved-ask';
 /** 渲染进程 → 主进程：未保存文档汇总 */
 export const UnsavedReplyChannel = 'app:unsaved-reply';
 
-/** 主进程 → 渲染进程：退出前把所有有路径的改动写盘 */
+/** 主进程 → 渲染进程：退出前把所有有路径的改动写盘（带 requestId，渲染层必须回复） */
 export const FlushBeforeCloseChannel = 'app:flush-before-close';
+
+/** 渲染进程 → 主进程：退出前写盘结果（成功与失败清单） */
+export const FlushReplyChannel = 'app:flush-reply';
+
+/**
+ * 写入前发现磁盘文件已被外部改动时，主进程抛出的错误前缀。
+ * 渲染层据此区分「写盘失败」和「外部版本已变化、拒绝静默覆盖」。
+ */
+export const EXTERNAL_CHANGE_ERROR = 'EXTERNAL_CHANGED';
+
+/** 判断异常信息是否为外部改动冲突 */
+export function isExternalChangeError(message: string): boolean {
+  return message.includes(EXTERNAL_CHANGE_ERROR);
+}
 
 /** 关闭窗口前的未保存文档汇总 */
 export interface UnsavedSummary {
@@ -399,6 +413,36 @@ export interface UnsavedSummary {
   untitledCount: number;
   /** 有路径但尚未写入磁盘的文档数：退出前会补写一次 */
   dirtyCount: number;
+}
+
+/** 退出前写盘请求 */
+export interface FlushBeforeCloseMessage {
+  /** 请求 id：渲染层的回复必须原样带回，主进程按 id 匹配，避免串话 */
+  requestId: string;
+}
+
+/** 单个文档写盘失败的原因 */
+export interface FlushFailure {
+  /** 文件绝对路径（未落盘文档为空串） */
+  path: string;
+  /** 标签显示名 */
+  name: string;
+  /** 失败原因（外部版本已变化 / 权限 / 磁盘错误等） */
+  reason: string;
+}
+
+/** 退出前写盘回复 */
+export interface FlushReplyMessage {
+  /** 对应 FlushBeforeCloseMessage.requestId */
+  requestId: string;
+  /** 写盘失败或未能落盘的文档；空数组表示全部保存成功 */
+  failures: FlushFailure[];
+}
+
+/** 写入文件的选项 */
+export interface WriteFileOptions {
+  /** 忽略「磁盘已被外部修改」的检查（用户显式保存时使用） */
+  force?: boolean;
 }
 
 /** 文件外部修改事件 */

@@ -5,9 +5,9 @@
  * 对外的回调都是稳定引用，供菜单分发表与其它 hook 直接使用。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
-import type { TextEncoding } from '@ai-md-editor/shared';
+import { isExternalChangeError, type FlushFailure, type TextEncoding } from '@ai-md-editor/shared';
 import type { EditorInstance } from '@ai-md-editor/editor';
-import type { Tab } from '../types';
+import type { SaveState, Tab } from '../types';
 import type { QuickEntry } from '../Dialogs';
 import type { SourceHistory } from './useSourceHistory';
 
@@ -74,6 +74,8 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
   const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', DEFAULT_DOC)]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
   const [treeRoot, setTreeRoot] = useState<string | null>(null);
+  /** 当前文档的保存状态（状态栏展示，比脏点更明确） */
+  const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
 
   // 保存最新的 tabs / activeId，供事件回调使用（避免闭包过期）
   const tabsRef = useRef(tabs);
@@ -155,22 +157,41 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     [editorRef, history, flushEditor]
   );
 
-  /** 关闭标签：先算出下一个活动标签，再一次性更新状态（避免在 setState 回调里做副作用） */
+  /**
+   * 关闭标签：先算出下一个活动标签，再一次性更新状态（避免在 setState 回调里做副作用）。
+   *
+   * 有路径且 dirty 的标签必须**等写盘成功**再关闭：写失败时保留标签和脏点并提示，
+   * 不把「最后一次保存」交给一个没人等的后台写入。
+   */
   const closeTab = useCallback(
-    (id: string) => {
+    async (id: string) => {
       // 关闭前先落定未回写的改动，避免刚敲的内容没进 content 就被写盘/丢弃
-      flushEditor();
+      const markdown = flushEditor();
       const prev = tabsRef.current;
       const index = prev.findIndex((t) => t.id === id);
       if (index < 0) return;
       const target = prev[index];
+      const content =
+        target.id === activeIdRef.current && markdown !== undefined ? markdown : target.content;
+      const dirty = target.dirty || content !== target.content;
 
-      // 有路径的改动直接补写一次，不打断用户（自动保存的防抖可能还没到）
-      if (target.path && target.dirty) {
-        void window.api.writeFile(target.path, target.content, target.encoding);
+      // 有路径的改动补写一次：自动保存的防抖可能还没到，关掉标签会取消那次保存
+      if (target.path && dirty) {
+        setSaveState({ kind: 'saving' });
+        try {
+          await window.api.writeFile(target.path, content, target.encoding);
+          setSaveState({ kind: 'saved' });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setSaveState({ kind: 'error', message });
+          notifyRef.current.onNotice?.(
+            `已取消关闭：${target.name} 保存失败 — ${message}`
+          );
+          return;
+        }
       }
       // 未落盘的新文档没有兜底，关掉就真的没了，必须问一句
-      if (!target.path && target.dirty) {
+      if (!target.path && dirty) {
         const confirmed = window.confirm(`「${target.name}」尚未保存到磁盘，关闭后内容会丢失。仍要关闭吗？`);
         if (!confirmed) return;
       }
@@ -187,8 +208,9 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
       setTabs(rest.length === 0 ? [next] : rest);
       setActiveId(next.id);
       editorRef.current?.setMarkdown(next.content);
+      setSaveState({ kind: 'idle' });
     },
-    [editorRef, history]
+    [editorRef, history, flushEditor]
   );
 
   /** 打开文件内容（新建/复用标签），供对话框、拖拽、open-file 事件复用 */
@@ -255,14 +277,24 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
    * 写盘并把标签标记为已保存。
    * 非 UTF-8 文档会被转存为 UTF-8（TextEncoder 无法编码 GBK / UTF-16），
    * 因此这里用主进程返回的实际编码覆盖标签编码，避免下次读回时按旧编码误解码。
+   *
+   * `force` 只在用户显式保存时传：表示以编辑器内容为准，允许覆盖磁盘上的外部改动。
    */
-  const persistTab = useCallback(async (tab: Tab): Promise<void> => {
+  const persistTab = useCallback(async (tab: Tab, options?: { force?: boolean }): Promise<void> => {
     if (!tab.path) return;
-    const effective = await window.api.writeFile(tab.path, tab.content, tab.encoding);
+    const effective = await window.api.writeFile(tab.path, tab.content, tab.encoding, {
+      force: options?.force
+    });
     setTabs((prev) =>
       prev.map((t) =>
         t.id === tab.id
-          ? { ...t, encoding: effective, dirty: t.content === tab.content ? false : t.dirty }
+          ? {
+              ...t,
+              encoding: effective,
+              dirty: t.content === tab.content ? false : t.dirty,
+              // 成功写盘即视为冲突解除
+              externalChanged: false
+            }
           : t
       )
     );
@@ -276,10 +308,15 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     if (!found) return;
     const tab = markdown === undefined ? found : { ...found, content: markdown };
     if (tab.path) {
+      setSaveState({ kind: 'saving' });
       try {
-        await persistTab(tab);
+        // 显式保存以编辑器内容为准
+        await persistTab(tab, { force: true });
+        setSaveState({ kind: 'saved' });
       } catch (err) {
-        notifyRef.current.onNotice?.(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+        const message = err instanceof Error ? err.message : String(err);
+        setSaveState({ kind: 'error', message });
+        notifyRef.current.onNotice?.(`保存失败：${message}`);
       }
       return;
     }
@@ -288,31 +325,74 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
       setTabs((prev) =>
         prev.map((t) =>
           t.id === tab.id
-            ? { ...t, content: tab.content, path: result.path, name: result.name ?? t.name, dirty: false, encoding: 'utf-8' }
+            ? {
+                ...t,
+                content: tab.content,
+                path: result.path,
+                name: result.name ?? t.name,
+                dirty: false,
+                encoding: 'utf-8',
+                externalChanged: false
+              }
             : t
         )
       );
+      setSaveState({ kind: 'saved' });
     }
   }, [findActive, persistTab, flushEditor]);
 
-  /** 保存全部打开的文件（只写有路径且已修改的标签） */
-  const saveAll = useCallback(async () => {
+  /**
+   * 保存全部打开的文件（只写有路径且已修改的标签）。
+   * 返回写盘失败的清单，供关闭窗口的确认流程判断能否退出。
+   */
+  const saveAll = useCallback(async (): Promise<FlushFailure[]> => {
     // 同上：先把编辑器里的最新内容同步出来，再挑要写的标签
     const markdown = flushEditor();
     const activeIdNow = activeIdRef.current;
     const dirty = tabsRef.current.filter(
       (t) => t.path && (t.dirty || (t.id === activeIdNow && markdown !== undefined && markdown !== t.content))
     ) as (Tab & { path: string })[];
-    if (dirty.length === 0) return;
+    if (dirty.length === 0) return [];
     const targets = dirty.map((t) =>
       t.id === activeIdNow && markdown !== undefined ? { ...t, content: markdown } : t
     );
-    try {
-      await Promise.all(targets.map((t) => persistTab(t)));
-    } catch (err) {
-      notifyRef.current.onNotice?.(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+    setSaveState({ kind: 'saving' });
+    const results = await Promise.allSettled(targets.map((t) => persistTab(t)));
+    const failures: FlushFailure[] = [];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') return;
+      const target = targets[index];
+      failures.push({
+        path: target.path,
+        name: target.name,
+        reason: result.reason instanceof Error ? result.reason.message : String(result.reason)
+      });
+    });
+    if (failures.length === 0) {
+      setSaveState({ kind: 'saved' });
+    } else {
+      const external = failures.every((item) => isExternalChangeError(item.reason));
+      setSaveState({
+        kind: external ? 'external' : 'error',
+        message: failures[0].reason
+      });
+      notifyRef.current.onNotice?.(
+        external ? '文件已被外部程序修改，已暂停自动保存' : `保存失败：${failures[0].reason}`
+      );
     }
+    return failures;
   }, [persistTab, flushEditor]);
+
+  /**
+   * 标记某个路径的文档「磁盘已被外部改动」。
+   * 该标签的自动保存会暂停，直到用户重新加载或显式保存。
+   */
+  const markExternalChange = useCallback((path: string) => {
+    setTabs((prev) =>
+      prev.map((tab) => (tab.path === path ? { ...tab, externalChanged: true } : tab))
+    );
+    setSaveState({ kind: 'external', message: '文件已被外部程序修改，已暂停自动保存' });
+  }, []);
 
   /** 另存为：弹出保存对话框 */
   const saveAs = useCallback(async () => {
@@ -378,12 +458,13 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
         setTabs((prev) =>
           prev.map((t) =>
             t.id === target.id
-              ? { ...t, content: result.content, encoding: result.encoding, dirty: false }
+              ? { ...t, content: result.content, encoding: result.encoding, dirty: false, externalChanged: false }
               : t
           )
         );
         if (target.id === activeIdRef.current) {
           editorRef.current?.setMarkdown(result.content);
+          setSaveState({ kind: 'idle' });
         }
       } catch (err) {
         notifyRef.current.onNotice?.(`重新加载失败：${err instanceof Error ? err.message : String(err)}`);
@@ -526,31 +607,58 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
   // 自动保存：内容变化后防抖 1.5s 写入所有「有路径且 dirty」的标签。
   // 只保存当前标签会丢稿：敲完立刻切到别的标签（或新建标签）时，
   // 原标签的计时器被清掉且再也不会重新触发。
+  // 外部改动冲突的标签会被跳过（等用户决定用哪个版本），失败要在状态栏说清楚。
   useEffect(() => {
     const timer = setTimeout(() => {
-      const dirty = tabsRef.current.filter((tab) => tab.path && tab.dirty);
+      const dirty = tabsRef.current.filter((tab) => tab.path && tab.dirty && !tab.externalChanged);
       if (dirty.length === 0) return;
       // 记录写入时的内容快照：写盘过程中用户继续编辑，不能把 dirty 清掉
       const snapshots = new Map(dirty.map((tab) => [tab.id, tab.content]));
-      void Promise.all(
+      setSaveState({ kind: 'saving' });
+      void Promise.allSettled(
         dirty.map((tab) => window.api.writeFile(tab.path as string, tab.content, tab.encoding))
-      )
-        .then((encodings) => {
-          const effective = new Map(dirty.map((tab, index) => [tab.id, encodings[index]]));
-          setTabs((prev) =>
-            prev.map((tab) => {
-              const written = snapshots.get(tab.id);
-              const encoding = effective.get(tab.id);
-              if (written === undefined || written !== tab.content) {
-                return encoding && encoding !== tab.encoding ? { ...tab, encoding } : tab;
-              }
-              return { ...tab, dirty: false, encoding: encoding ?? tab.encoding };
-            })
-          );
-        })
-        .catch(() => {
-          // 写盘失败保留 dirty，下一次编辑继续重试
+      ).then((results) => {
+        const effective = new Map<string, TextEncoding>();
+        const conflicts: string[] = [];
+        let firstError: string | null = null;
+        results.forEach((result, index) => {
+          const tab = dirty[index];
+          if (result.status === 'fulfilled') {
+            effective.set(tab.id, result.value);
+            return;
+          }
+          const message =
+            result.reason instanceof Error ? result.reason.message : String(result.reason);
+          if (isExternalChangeError(message)) {
+            conflicts.push(tab.id);
+          } else if (firstError === null) {
+            firstError = `${tab.name}：${message}`;
+          }
         });
+        setTabs((prev) =>
+          prev.map((tab) => {
+            // 外部已变化的标签：暂停自动保存，等用户选择版本
+            if (conflicts.includes(tab.id)) return { ...tab, externalChanged: true };
+            const written = snapshots.get(tab.id);
+            const encoding = effective.get(tab.id);
+            if (written === undefined || encoding === undefined) return tab;
+            if (written !== tab.content) {
+              return encoding !== tab.encoding ? { ...tab, encoding } : tab;
+            }
+            return { ...tab, dirty: false, encoding };
+          })
+        );
+        if (conflicts.length > 0) {
+          setSaveState({ kind: 'external', message: '文件已被外部程序修改，已暂停自动保存' });
+          notifyRef.current.onNotice?.('文件已被外部程序修改，已暂停自动保存');
+        } else if (firstError !== null) {
+          // 写盘失败保留 dirty，下一次编辑继续重试；但必须让用户知道
+          setSaveState({ kind: 'error', message: firstError });
+          notifyRef.current.onNotice?.(`未能保存：${firstError}`);
+        } else {
+          setSaveState({ kind: 'saved' });
+        }
+      });
     }, 1500);
     return () => clearTimeout(timer);
   }, [tabs]);
@@ -581,6 +689,8 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     reloadFromDisk,
     reloadPath,
     rename,
-    loadQuickEntries
+    loadQuickEntries,
+    saveState,
+    markExternalChange
   };
 }

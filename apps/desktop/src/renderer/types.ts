@@ -18,4 +18,19 @@ export interface Tab {
   dirty: boolean;
   /** 读入时识别到的编码（保存后统一转为 UTF-8） */
   encoding: TextEncoding;
+  /**
+   * 磁盘文件已被外部程序改动（与内存内容冲突）。
+   * 该状态为 true 时暂停自动保存，避免静默覆盖外部版本；
+   * 用户「重新加载」或显式「保存」后清除。
+   */
+  externalChanged?: boolean;
+}
+
+/** 当前文档的保存状态（状态栏展示） */
+export type SaveStateKind = 'idle' | 'saving' | 'saved' | 'error' | 'external';
+
+export interface SaveState {
+  kind: SaveStateKind;
+  /** 失败原因 / 冲突说明 */
+  message?: string;
 }

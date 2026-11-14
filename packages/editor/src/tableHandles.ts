@@ -46,35 +46,51 @@ const GRIP_ICON =
   '<circle cx="3" cy="6" r="1"/><circle cx="9" cy="6" r="1"/>' +
   '<circle cx="3" cy="9.5" r="1"/><circle cx="9" cy="9.5" r="1"/></svg>';
 
-/** 工具条按钮图标：在前插入、在后插入、删除 */
-const ACTION_ICONS: Record<HandleAction, string> = {
-  insertBefore:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">' +
-    '<path d="M12 20v-9M8.5 14.5 12 11l3.5 3.5"/><path d="M5 7h14"/></svg>',
-  insertAfter:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">' +
-    '<path d="M12 4v9M8.5 9.5 12 13l3.5-3.5"/><path d="M5 17h14"/></svg>',
-  remove:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">' +
-    '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>',
-  removeTable:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">' +
-    '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 10h18M9 4v16M15 20 20 15M20 20l-5-5"/></svg>'
+/**
+ * 插入按钮图标：方向必须和选中的轴一致。
+ * 列用左右箭头（在左 / 右插入一列），行用上下箭头（在上 / 下插入一行）；
+ * 之前两个轴共用竖箭头，选列时看起来像在加行，容易误点。
+ */
+const INSERT_ICONS: Record<Axis, Record<'insertBefore' | 'insertAfter', string>> = {
+  col: {
+    insertBefore:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M5 4v16"/><path d="M20 12H9"/><path d="M12.5 8.5 9 12l3.5 3.5"/></svg>',
+    insertAfter:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M19 4v16"/><path d="M4 12h11"/><path d="M11.5 8.5 15 12l-3.5 3.5"/></svg>'
+  },
+  row: {
+    insertBefore:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M4 5h16"/><path d="M12 20V9"/><path d="M8.5 12.5 12 9l3.5 3.5"/></svg>',
+    insertAfter:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="M4 19h16"/><path d="M12 4v11"/><path d="M8.5 11.5 12 15l3.5-3.5"/></svg>'
+  }
 };
 
+/** 删除整行 / 整列 */
+const REMOVE_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg>';
+
+/** 删除整张表（只在角手柄选中整表时出现） */
+const REMOVE_TABLE_ICON =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<rect x="3" y="4" width="18" height="16" rx="1"/><path d="M3 10h18M9 4v16M15 20 20 15M20 20l-5-5"/></svg>';
+
 /** 工具条按钮文案（按选中轴切换） */
-const ACTION_LABELS: Record<Axis, Record<HandleAction, string>> = {
+const ACTION_LABELS: Record<Axis, Record<'insertBefore' | 'insertAfter' | 'remove', string>> = {
   col: {
     insertBefore: '在左侧插入一列',
     insertAfter: '在右侧插入一列',
-    remove: '删除这一列',
-    removeTable: '删除整张表'
+    remove: '删除这一列'
   },
   row: {
     insertBefore: '在上方插入一行',
     insertAfter: '在下方插入一行',
-    remove: '删除这一行',
-    removeTable: '删除整张表'
+    remove: '删除这一行'
   }
 };
 
@@ -163,7 +179,9 @@ class TableNodeView implements NodeView {
       button.type = 'button';
       button.className = 'md-table-tool-btn';
       button.dataset.tableAction = action;
-      button.innerHTML = ACTION_ICONS[action];
+      // 图标与显隐按选中轴在 paint() 里决定：行 / 列只给插入、删除本行/列，
+      // 「删除整张表」只在角手柄选中整表时出现
+      button.innerHTML = action === 'removeTable' ? REMOVE_TABLE_ICON : REMOVE_ICON;
       // 不让按下去的瞬间抢走编辑器焦点，否则 CellSelection 会丢
       button.addEventListener('mousedown', (event) => event.preventDefault());
       button.addEventListener('click', (event) => {
@@ -214,12 +232,6 @@ class TableNodeView implements NodeView {
       isCellSelection &&
       tablePos !== undefined &&
       findAncestor(selection.$anchorCell, 'table')?.pos === tablePos;
-    // 编辑光标落在表格内（含整行 / 列 / 整表选区）时手柄常显；光标离开即收起
-    const active =
-      tablePos !== undefined &&
-      selection.from >= tablePos &&
-      selection.from <= tablePos + (view.state.doc.nodeAt(tablePos)?.nodeSize ?? 0);
-    this.dom.classList.toggle('md-table-active', active);
     // 用户在别处点了一下，或命令改掉了选区：收起工具条
     if (!belongsHere && this.selected) {
       this.selected = null;
@@ -323,46 +335,65 @@ class TableNodeView implements NodeView {
     this.dom.classList.toggle('md-table-has-selection', selected !== null);
     this.corner.classList.toggle('is-selected', selected?.axis === 'table');
     Array.from(this.dom.querySelectorAll<HTMLElement>('.md-table-handle')).forEach((handle) => {
+      // 整表选中时整条手柄带一起变蓝（与左上角角手柄连成一体），行列选中只亮对应的那一个
       const active =
         selected !== null &&
-        handle.dataset.axis === selected.axis &&
-        Number(handle.dataset.index) === selected.index;
+        (selected.axis === 'table' ||
+          (handle.dataset.axis === selected.axis && Number(handle.dataset.index) === selected.index));
       handle.classList.toggle('is-selected', active);
     });
     this.toolbar.hidden = selected === null;
     if (!selected) return;
-    const labels = ACTION_LABELS[selected.axis === 'table' ? 'row' : selected.axis];
+
+    const isTable = selected.axis === 'table';
+    const axis: Axis = isTable ? 'row' : selected.axis;
+    const labels = ACTION_LABELS[axis];
     Array.from(this.toolbar.querySelectorAll<HTMLButtonElement>('.md-table-tool-btn')).forEach((button) => {
       const action = button.dataset.tableAction as HandleAction;
-      // 整表选中时行列增删语义不明，只保留「删除整张表」
-      const tableBlocked = selected.axis === 'table' && action !== 'removeTable';
+      // 行列选中时只提供「插入本行/列的左右（上下）侧」和「删除本行/列」；
+      // 「删除整张表」只在角手柄选中整表时出现，避免删行列时误删整表
+      const visible = isTable ? action === 'removeTable' : action !== 'removeTable';
+      button.hidden = !visible;
+      if (!visible) {
+        button.disabled = true;
+        return;
+      }
+      if (isTable) {
+        button.innerHTML = REMOVE_TABLE_ICON;
+        button.disabled = false;
+        button.title = '删除整张表';
+        return;
+      }
+      button.innerHTML = action === 'remove' ? REMOVE_ICON : INSERT_ICONS[axis][action];
       // 表头行之上不能插数据行（表格必须以表头行开头），禁用而不是给出坏结果
-      const headerBlocked =
-        selected.axis === 'row' && selected.index === 0 && action === 'insertBefore';
+      const headerBlocked = axis === 'row' && selected.index === 0 && action === 'insertBefore';
       // 只剩一列 / 只剩「表头 + 一个数据行」时，再删会产出非法表格
       const lastBlocked =
         action === 'remove' &&
-        (selected.axis === 'col'
+        (axis === 'col'
           ? (this.contentDOM.rows[0]?.cells.length ?? 0) <= 1
-          : selected.axis === 'row' && this.contentDOM.rows.length <= 2);
-      button.disabled = tableBlocked || headerBlocked || lastBlocked;
-      button.title = tableBlocked
-        ? '整表选中时请先选中一行或一列'
-        : headerBlocked
-          ? '表头上方不能插入行'
-          : lastBlocked
-            ? '表格不能再缩小了'
-            : labels[action];
+          : this.contentDOM.rows.length <= 2);
+      button.disabled = headerBlocked || lastBlocked;
+      button.title = headerBlocked
+        ? '表头上方不能插入行'
+        : lastBlocked
+          ? '表格不能再缩小了'
+          : labels[action];
     });
     this.toolbar.dataset.axis = selected.axis;
     this.positionToolbar();
   }
 
-  /** 工具条浮在表格上方居中；表格贴近视口顶部时改放下方 */
+  /**
+   * 工具条浮在表格上方居中，**不压住表格**：
+   * 以整个 block（含上方手柄带）为基准，向上留 8px 间隙；
+   * 上方空间不足（表格贴视口顶部）时改到表格下方，同样留 8px。
+   */
   private positionToolbar(): void {
     if (!this.selected) return;
-    const rect = this.contentDOM.getBoundingClientRect();
-    const above = rect.top - 44;
+    const rect = this.dom.getBoundingClientRect();
+    const height = this.toolbar.offsetHeight || 36;
+    const above = rect.top - height - 8;
     this.toolbar.style.left = `${rect.left + rect.width / 2}px`;
     this.toolbar.style.top = `${above >= 8 ? above : rect.bottom + 8}px`;
   }
