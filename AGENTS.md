@@ -307,6 +307,7 @@ ai-md-editor/
      （`test/unit.ts` 纯函数单测 → 静态快捷键校验 → `test/menuRuntime.cjs` 真实菜单校验 → `test/e2e.cjs` 端到端）。
    - Electron 测试统一由 `test/run-e2e.cjs` 启动（可传脚本名复用），会自动剔除宿主注入的 `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS`；无需再手动 `env -u`。
    - 纯函数（编码、路径、文本、源码格式化）优先补 `test/unit.ts`：不需要 GUI、跑得快，Windows CI 也能覆盖。
+   - README 的功能配图由 `test/shot-readme.cjs` 生成（`npm run build && node test/run-e2e.cjs shot-readme.cjs`），产物直接写入 `docs/assets/`；改界面后重跑一次，按功能区域裁剪，不把整窗缩略图塞进 README。
    - 改快捷键后除 `npm test` 外，还要确认 CI 的 Windows `test` job 通过（平台专属键位与动作绑定只在 Windows runner 上实跑）。
 2. **文档同步**：开发功能的同时，同步更新 `README.md`（项目说明）、`AGENTS.md`（协作规范）与 `docs/` 下的设计与方案文档，不得等到最后一次性补。文档中如与实际实现不符（依赖未引入、主题数量、包管理器等），一并订正。
 3. **提交前检查**（每次 `git commit` 前逐条确认）：
