@@ -2692,6 +2692,132 @@ async function runTests() {
     JSON.stringify(dragMd.slice(0, 140))
   );
 
+  // ===== 10.19 表格行列手柄：点选整行 / 整列后浮出增删工具条 =====
+  const TABLE_HANDLE_DOC =
+    '| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n| a1 | b1 | c1 |\n| a2 | b2 | c2 |\n';
+  await resetDoc(TABLE_HANDLE_DOC);
+  await waitFor(() => exec(`document.querySelectorAll('.md-table-col-handle').length === 3`), {
+    label: '表格列手柄出现',
+    timeout: 15000
+  });
+
+  /** 读取表格形状与手柄 / 工具条状态 */
+  const tableShape = async () =>
+    JSON.parse(
+      await exec(`(() => {
+        const table = document.querySelector('.ProseMirror table');
+        return JSON.stringify({
+          rows: table ? table.rows.length : 0,
+          cols: table && table.rows[0] ? table.rows[0].cells.length : 0,
+          colHandles: document.querySelectorAll('.md-table-col-handle').length,
+          rowHandles: document.querySelectorAll('.md-table-row-handle').length,
+          selectedCells: document.querySelectorAll('.selectedCell').length,
+          toolbarVisible: Boolean(document.querySelector('.md-table-toolbar:not([hidden])'))
+        });
+      })()`)
+    );
+  const clickTableHandle = (axis, index) =>
+    exec(`(() => {
+      const el = document.querySelector('.md-table-${axis}-handle[data-index="${index}"]');
+      if (!el) return false;
+      el.click();
+      return true;
+    })()`);
+  const clickTableAction = (action) =>
+    exec(`(() => {
+      const el = document.querySelector('.md-table-toolbar:not([hidden]) .md-table-tool-btn[data-table-action="${action}"]');
+      if (!el || el.disabled) return false;
+      el.click();
+      return true;
+    })()`);
+  const waitToolbar = () =>
+    waitFor(() => exec(`Boolean(document.querySelector('.md-table-toolbar:not([hidden])'))`), {
+      label: '表格增删工具条展开'
+    });
+  const waitCols = (count) =>
+    waitFor(() => exec(`document.querySelector('.ProseMirror table')?.rows[0]?.cells.length === ${count}`), {
+      label: `列数变为 ${count}`
+    });
+  const waitRows = (count) =>
+    waitFor(() => exec(`document.querySelector('.ProseMirror table')?.rows.length === ${count}`), {
+      label: `行数变为 ${count}`
+    });
+
+  let shape = await tableShape();
+  check(
+    '表格渲染出 3 列 / 3 行手柄',
+    shape.colHandles === 3 && shape.rowHandles === 3 && shape.rows === 3 && shape.cols === 3,
+    JSON.stringify(shape)
+  );
+  check('未选中时增删工具条保持隐藏', shape.toolbarVisible === false, JSON.stringify(shape));
+
+  check('可点击第 1 列手柄', (await clickTableHandle('col', 0)) === true);
+  await waitToolbar();
+  shape = await tableShape();
+  check('点列手柄选中整列并浮出增删工具条', shape.selectedCells === 3 && shape.toolbarVisible, JSON.stringify(shape));
+  const selectedHandle = await exec(
+    `document.querySelector('.md-table-col-handle[data-index="0"]')?.classList.contains('is-selected') === true`
+  );
+  check('被选中的列手柄高亮', selectedHandle === true);
+
+  check('工具条可在右侧插入一列', (await clickTableAction('insertAfter')) === true);
+  await waitCols(4);
+  shape = await tableShape();
+  check(
+    '插列后手柄同步、整格选区收回普通光标',
+    shape.cols === 4 && shape.colHandles === 4 && shape.selectedCells === 0 && !shape.toolbarVisible,
+    JSON.stringify(shape)
+  );
+
+  await clickTableHandle('col', 1);
+  await waitToolbar();
+  check('工具条可在左侧插入一列', (await clickTableAction('insertBefore')) === true);
+  await waitCols(5);
+  check('左插后共 5 列且手柄同步', (await tableShape()).colHandles === 5);
+
+  await clickTableHandle('col', 1);
+  await waitToolbar();
+  check('工具条可删除一列', (await clickTableAction('remove')) === true);
+  await waitCols(4);
+  check('删列后表格仍有 4 列', (await tableShape()).cols === 4);
+
+  await clickTableHandle('row', 1);
+  await waitToolbar();
+  shape = await tableShape();
+  check('点行手柄选中整行', shape.selectedCells === 4 && shape.toolbarVisible, JSON.stringify(shape));
+  check('工具条可在下方插入一行', (await clickTableAction('insertAfter')) === true);
+  await waitRows(4);
+  check('插行后行手柄同步为 4', (await tableShape()).rowHandles === 4);
+
+  await clickTableHandle('row', 0);
+  await waitToolbar();
+  const headerBeforeDisabled = await exec(
+    `document.querySelector('.md-table-toolbar:not([hidden]) .md-table-tool-btn[data-table-action="insertBefore"]')?.disabled === true`
+  );
+  check('表头行禁用「在上方插入行」', headerBeforeDisabled === true);
+  check('表头行可删除（首个数据行升级为表头）', (await clickTableAction('remove')) === true);
+  await waitRows(3);
+  check('删除表头行后表格仍合法', (await tableShape()).rows === 3);
+
+  const handleMd = await expectMarkdown('| a1', '表格手柄操作写回 Markdown');
+  const rawRows = handleMd.split('\n').filter((line) => line.trim().startsWith('|'));
+  const barCount = (rawRows[0]?.match(/\|/g) ?? []).length;
+  check(
+    '增行删列写回 Markdown，表格各行仍是相同列数',
+    rawRows.length >= 4 && barCount >= 5 && rawRows.every((line) => (line.match(/\|/g) ?? []).length === barCount),
+    rawRows.join(' / ')
+  );
+
+  // 精简原生菜单后，「删除整个表格」只由工具条提供，不能丢
+  await clickTableHandle('col', 0);
+  await waitToolbar();
+  check('工具条提供「删除整张表」', (await clickTableAction('removeTable')) === true);
+  await waitFor(() => exec(`!document.querySelector('.ProseMirror table')`), { label: '整张表被删除' });
+  const tableHandlesGone = await exec(
+    `document.querySelectorAll('.md-table-handle').length === 0 && !document.querySelector('.md-table-toolbar:not([hidden])')`
+  );
+  check('删除整张表后手柄与工具条一并收起', tableHandlesGone === true);
+
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();

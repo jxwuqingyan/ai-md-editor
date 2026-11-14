@@ -206,7 +206,10 @@ function caretColumn(line: string, columnInLine: number): number {
 }
 
 /** 表格行操作：增删行 / 增删列（以整张表为单位，保证列数一致） */
-function tableLineOperation(ctx: SourceContext, op: 'addRow' | 'addCol' | 'deleteRow' | 'deleteCol'): SourceResult {
+function tableLineOperation(
+  ctx: SourceContext,
+  op: 'addRow' | 'addRowBefore' | 'addCol' | 'addColBefore' | 'deleteRow' | 'deleteCol'
+): SourceResult {
   const block = findTableBlock(ctx.content, ctx.selectionStart);
   if (!block) return unchanged(ctx);
 
@@ -239,10 +242,15 @@ function tableLineOperation(ctx: SourceContext, op: 'addRow' | 'addCol' | 'delet
     return rebuild(block.lines.filter((_line, i) => i !== rowIndex), Math.max(0, rowIndex - 1));
   }
 
-  if (op === 'addRow') {
+  if (op === 'addRow' || op === 'addRowBefore') {
     const cellCount = rowCells(block.lines[0]).length;
-    // 「在下方插入行」：表头下方应插在分隔行之后，否则会破坏表格结构
-    const insertAt = hasHeader && rowIndex === 0 ? 2 : rowIndex + 1;
+    // 表头与分隔行之间不能插数据行：两种插入方向都落到分隔行之后
+    const insertAt =
+      op === 'addRowBefore'
+        ? Math.max(hasHeader ? 2 : 0, rowIndex)
+        : hasHeader && rowIndex === 0
+          ? 2
+          : rowIndex + 1;
     const emptyRow = joinCells(Array.from({ length: cellCount }, () => '  '));
     const rows = [...block.lines.slice(0, insertAt), emptyRow, ...block.lines.slice(insertAt)];
     return rebuild(rows, insertAt);
@@ -252,11 +260,12 @@ function tableLineOperation(ctx: SourceContext, op: 'addRow' | 'addCol' | 'delet
   if (column < 0) return unchanged(ctx);
   const cellCount = rowCells(block.lines[rowIndex]).length;
 
-  if (op === 'addCol') {
+  if (op === 'addCol' || op === 'addColBefore') {
+    const insertAt = op === 'addColBefore' ? column : column + 1;
     const rows = block.lines.map((line, i) => {
       const cells = rowCells(line);
-      if (column + 1 > cells.length) return line;
-      cells.splice(column + 1, 0, i === 1 ? ' --- ' : '  ');
+      if (insertAt > cells.length) return line;
+      cells.splice(insertAt, 0, i === 1 ? ' --- ' : '  ');
       return joinCells(cells);
     });
     return rebuild(rows, rowIndex);
@@ -384,6 +393,10 @@ export function applySourceFormat(
       return tableLineOperation(ctx, 'addRow');
     case 'tableAddCol':
       return tableLineOperation(ctx, 'addCol');
+    case 'tableAddRowBefore':
+      return tableLineOperation(ctx, 'addRowBefore');
+    case 'tableAddColBefore':
+      return tableLineOperation(ctx, 'addColBefore');
     case 'tableDeleteRow':
       return tableLineOperation(ctx, 'deleteRow');
     case 'tableDeleteCol':

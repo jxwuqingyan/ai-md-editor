@@ -40,7 +40,9 @@ import {
 import {
   toggleStrikethroughCommand,
   addRowAfterCommand,
-  addColAfterCommand
+  addColAfterCommand,
+  addRowBeforeCommand,
+  addColBeforeCommand
 } from '@milkdown/kit/preset/gfm';
 import { TextSelection } from '@milkdown/kit/prose/state';
 import { toggleMark } from '@milkdown/kit/prose/commands';
@@ -64,6 +66,7 @@ import { collectTextSegments, textOffsetToPos } from './textPos';
 import { slashMenuPlugin } from './slash';
 import { linkClickPlugin } from './link';
 import { taskListPlugin } from './task';
+import { tableHandlesPlugin } from './tableHandles';
 import { applyImageSources, imageSourcePlugin } from './images';
 import {
   applyTaskState,
@@ -128,6 +131,8 @@ export async function createEditor(
     })
     .use(commonmark)
     .use(gfm)
+    // 表格行列手柄：点选整行 / 整列后浮出增删工具条（与工具栏、菜单共用 format 链路）
+    .use(tableHandlesPlugin((action) => formatRef.current(action)))
     // 末尾是非文本块（表格/分割线等）时补一个空段落，保证表格下方能点进去输入、整表也能被删除
     .use(trailingParagraphPlugin)
     // 查找命中高亮：装饰而非改文本，不影响撤销栈
@@ -366,6 +371,12 @@ export async function createEditor(
           break;
         case 'tableAddCol':
           editor.action(callCommand(addColAfterCommand.key));
+          break;
+        case 'tableAddRowBefore':
+          editor.action(callCommand(addRowBeforeCommand.key));
+          break;
+        case 'tableAddColBefore':
+          editor.action(callCommand(addColBeforeCommand.key));
           break;
         case 'tableDeleteRow':
           withView(deleteTableRow);

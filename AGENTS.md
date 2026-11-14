@@ -82,6 +82,7 @@ ai-md-editor/
 │   │   ├── underline.ts      # <u> 下划线 mark
 │   │   ├── frontmatter.ts    # YAML Front Matter 节点
 │   │   ├── stringify.ts      # remark-stringify handler 汇总
+│   │   ├── tableHandles.ts   # 表格行列手柄 NodeView（选中整行/整列后增删）
 │   │   └── decorations.ts    # 警告框 / [TOC] 目录渲染装饰
 │   ├── markdown-core/        # 解析/序列化/大纲（纯函数）
 │   ├── theme/                # 主题系统（design tokens）
@@ -211,6 +212,7 @@ ai-md-editor/
 | 61 | 大纲拖动重排：`OutlineList.tsx` 由侧栏与独立大纲窗口共用，HTML5 drag 的落点按指针在目标条目上 / 下半部决定 before / after，拖到列表空白落到末节之后，插入指示线用 `box-shadow: inset` 画。文本搬运交给 `packages/shared/src/text.ts` 的 `moveOutlineSection`（纯按行切片，章节范围取「下一个层级不高于当前标题的行」之前），目标落在自身章节内 / 拖到自己 / 越界返回 `moved=false`。拖动前必须 `flushEditor()` 并按**最新源码**重新 `extractOutline`（渲染用的 `useDeferredValue` 大纲可能滞后），再 `setActiveContent` + `setMarkdown`；源码模式额外压撤销栈，只读模式拒绝 |
 | 62 | 侧栏底栏与编辑区工具栏各自都有 `border-top`，必须**同高**才能让两条线对齐：共用 `--bottom-bar-height: 39px` 的 `min-height`（不要用 `height` 硬卡，工具栏换行会被压扁）。底栏文字用 `.filetree-root-name` 包一层保留省略号，⋮ 按钮 `align-self: stretch` 让竖线贯通。E2E 用两者 `rect.top` 差值 ≤1px 守门 |
 | 63 | macOS 会往「编辑」菜单自动追加「自动填充 / 开始听写… / 表情与符号」，它们不在模板里、`Menu.getApplicationMenu()` 也看不到，只能在主进程入口、菜单构建**之前**用 `systemPreferences.setUserDefault('NSDisabled*MenuItem', 'boolean', true)` 关闭（E2E 用 `getUserDefault` 校验开关已写入）。删菜单项要连带清理状态 / 快捷键 / 持久化 / 实现，别留死逻辑；打字机模式按用户要求连 `centerCaret`、F9、光标居中监听一起删干净 |
+| 64 | 表格行列增删的唯一界面入口在 `packages/editor/src/tableHandles.ts`（0.14.27 删掉原生菜单整组表格子菜单后补上）：table 节点用自定义 NodeView 包一层，列头 / 行首手柄是 `contentDOM` 的**兄弟节点**，`ignoreMutation` 必须忽略它们否则会被当成内容改动；手柄尺寸靠 `contentDOM.rows[0].cells[i].getBoundingClientRect()` 同步，工具条挂 body 用 fixed 定位避免被滚动容器裁掉。**坑**：`CellSelection.colSelection/rowSelection` 要的是「单元格节点前」的 ResolvedPos（`node(-1)` 必须是 table）；单元格里还有一层 paragraph，多进一层 `$cell.node(-1)` 会变成 `table_header_row`，直接抛 `Not a table node`。命令统一走 `format`（新增 `tableAddRowBefore` / `tableAddColBefore`，删除用既有自定义命令处理表头），执行后必须把整格选区收回 `TextSelection`，否则用户接着打字会一次清空整行 / 整列；表头禁「上插」、只剩一列或表头+一数据行禁删除 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -224,6 +226,7 @@ ai-md-editor/
 | 大纲章节搬运 | `packages/shared/src/text.ts` `moveOutlineSection` | 纯按行切片；渲染层 `renderer/OutlineList.tsx` 负责拖放交互，接线见 #61 |
 | 片段插入 | `packages/editor/src/commands.ts` `insertSnippet` | 行内片段替换选区；块级片段插到当前顶层块之后（空段落直接替换），否则定义类节点会拆坏段落；`placeholder` 会选中新片段里的占位文字（警告框必需） |
 | 表格行/列增删 | `packages/editor/src/commands.ts` | 删行：正文行直接删，表头行整表重建；删列：`table_row` 与 `table_header_row` 都要遍历 |
+| 表格行列手柄 | `packages/editor/src/tableHandles.ts` | table 的 NodeView 渲染列头 / 行首手柄与浮动增删工具条；坐标与选区坑见 #64；诊断脚本 `test/table-handles-debug.cjs` |
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
 | 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |

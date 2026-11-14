@@ -2,6 +2,25 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.28 - 2026-11-14
+
+### 新增：表格行列手柄，选中整行 / 整列后直接增删
+
+- **背景**：上一轮按使用者要求精简了原生段落菜单的整组「表格」子菜单，插入表格后就没有增删行列的界面入口了。
+- **交互**：新增 `packages/editor/src/tableHandles.ts`，用 table 节点的 NodeView 包一层：表格上方每列一个列手柄、左侧每行一个行手柄；点手柄构造整行 / 整列的 `CellSelection`，选中单元格由预设表格插件的 `selectedCell` 装饰染成浅蓝，手柄变蓝并带六点抓取标记；表格上方浮出工具条——在左 / 上插入、在右 / 下插入、删除这一行 / 列、删除整张表。
+- **实现要点**：
+  - 手柄是 `contentDOM` 的兄弟节点，`ignoreMutation` 忽略它的变化，避免被当成表格内容被改动；
+  - `cellBeforePos` 必须停在**单元格节点前**：单元格内还有一层 paragraph，多进一层会让 `$cell.node(-1)` 变成行节点，`CellSelection` 直接抛 `Not a table node`；
+  - 命令统一走 `format` 链路：新增 `tableAddRowBefore` / `tableAddColBefore`（源码模式也支持在光标行 / 列前插入），删除仍用既有 `deleteTableRow` / `deleteTableColumn`（表头行删除会把首个数据行升级为新表头）；
+  - 命令后把整格选区收回普通文本光标，否则用户接着打字会一次清空整行 / 整列单元格；表头行禁用「上方插入」，只剩一列 / 表头 + 一个数据行时禁用删除，避免产出非法表格；
+  - 工具条挂在 `document.body` 用 fixed 定位，滚动 / 缩放时重算位置，不会被编辑区滚动容器裁掉。
+- **诊断脚本**：`apps/desktop/test/table-handles-debug.cjs`（不进 `npm test`），逐步打印行列数、选中单元格数、工具条状态，并保存选中态截图到 `/tmp/md-note-shots/table-handles.png`。
+
+### 验证与出包
+
+- `tsc --noEmit`、`npm run build` 通过；E2E 新增 20 条断言，全套 **189/189**（全屏 / 最小化 2 项按环境跳过）；单测 61/61、菜单运行时 3/3。
+- 代码变更后重打 `MarkdownNote-0.14.28-arm64.dmg`（166229369 字节 / 约 159 MB，Apple Silicon，ad-hoc 签名，未公证）；SHA-256 `245c37443fe7c91d4c7c9dfaf875f7fdbed14a8c630d586e2b2fd73e2dfdb6a6`。`hdiutil verify` 校验和有效、卷内三点布局齐全、`Info.plist` 版本 0.14.28、`lipo -archs` 为 arm64，`app.asar` 内 416 个文件与 `out/` 逐字节一致，包内确认含 `md-table-handle` / `removeTable` / `tableAddRowBefore` 代码。首次打开仍需「访达中右键→打开」。
+
 ## 0.14.27 - 2026-11-14
 
 ### 修复：警告框插入后直接打字把语法标记写成正文

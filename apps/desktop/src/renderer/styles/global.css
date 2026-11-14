@@ -1221,6 +1221,134 @@ button:focus-visible {
   font-weight: 600;
 }
 
+/* ============ 表格行列手柄（选中整行 / 整列后增删） ============ */
+/* 外层容器为列手柄（上 20px）与行手柄（左 20px）留位，手柄不在可编辑内容里 */
+.milkdown-container .ProseMirror .md-table-block {
+  position: relative;
+  margin: 0.8em 0;
+  padding: 20px 0 0 20px;
+}
+
+.milkdown-container .ProseMirror .md-table-block > table {
+  margin: 0;
+}
+
+.md-table-handle-bar {
+  position: absolute;
+  display: flex;
+  z-index: 2;
+}
+
+.md-table-col-bar {
+  top: 0;
+  left: 20px;
+  right: 0;
+  height: 16px;
+}
+
+.md-table-row-bar {
+  left: 0;
+  top: 20px;
+  width: 16px;
+  flex-direction: column;
+}
+
+.md-table-handle {
+  flex: 0 0 auto;
+  padding: 0;
+  border: none;
+  border-right: 1px solid var(--bg-panel);
+  border-radius: 2px;
+  background: var(--bg-subtle);
+  color: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms var(--ease-out), color 150ms var(--ease-out);
+}
+
+.md-table-row-handle {
+  border-right: none;
+  border-bottom: 1px solid var(--bg-panel);
+}
+
+.md-table-handle:hover {
+  background: var(--bg-hover);
+  color: var(--text-tertiary);
+}
+
+.md-table-handle.is-selected {
+  background: var(--accent);
+  color: #fff;
+}
+
+.md-table-grip svg {
+  display: block;
+  fill: currentColor;
+}
+
+/* 预设的表格编辑插件给整行 / 整列选中的单元格加 .selectedCell */
+.milkdown-container .ProseMirror td.selectedCell,
+.milkdown-container .ProseMirror th.selectedCell {
+  background: var(--accent-subtle);
+}
+
+/* 浮动增删工具条：挂 body 上用 fixed，避免被编辑区滚动容器裁掉 */
+.md-table-toolbar {
+  position: fixed;
+  z-index: 90;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+}
+
+.md-table-toolbar[hidden] {
+  display: none;
+}
+
+.md-table-tool-btn {
+  width: 28px;
+  height: 28px;
+  padding: 4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.md-table-tool-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.md-table-tool-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.md-table-tool-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 「删除整张表」与行列操作分开，避免误点 */
+.md-table-tool-btn[data-table-action='removeTable'] {
+  margin-left: 2px;
+  border-left: 1px solid var(--border-subtle);
+  border-radius: 0 4px 4px 0;
+}
+
 /* 选中文本：强调色浅底 */
 .milkdown-container .ProseMirror ::selection {
   background: var(--accent-subtle);
