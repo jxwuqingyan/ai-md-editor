@@ -26,7 +26,6 @@ import { callCommand } from '@milkdown/kit/utils';
 import {
   toggleStrongCommand,
   toggleEmphasisCommand,
-  toggleInlineCodeCommand,
   wrapInBlockquoteCommand,
   wrapInBulletListCommand,
   wrapInOrderedListCommand,
@@ -297,7 +296,13 @@ export async function createEditor(
           editor.action(callCommand(toggleEmphasisCommand.key));
           break;
         case 'code':
-          editor.action(callCommand(toggleInlineCodeCommand.key));
+          // 预设的 toggleInlineCodeCommand 在空选区时直接返回 false：光标没选中文字时
+          // 点「行内代码」按钮/菜单毫无反应。改用 ProseMirror 的 toggleMark，它在空选区
+          // 会切换 storedMark，与加粗/斜体一致——下一次输入自动带行内代码，再点一次取消。
+          withView((view) => {
+            const type = view.state.schema.marks['inlineCode'];
+            if (type) toggleMark(type)(view.state, view.dispatch, view);
+          });
           break;
         case 'quote':
           editor.action(callCommand(wrapInBlockquoteCommand.key));

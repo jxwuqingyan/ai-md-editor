@@ -2332,8 +2332,10 @@ async function runTests() {
     toolbarTitles.join(' | ')
   );
   check(
-    '工具栏不再有「更多」浮层，也没有重复的代码块按钮',
-    !toolbarTitles.includes('更多') && !toolbarTitles.includes('代码块'),
+    '工具栏不再有「更多」浮层，代码入口只保留一个代码块按钮',
+    !toolbarTitles.includes('更多') &&
+      toolbarTitles.filter((t) => t === '代码块').length === 1 &&
+      !toolbarTitles.includes('行内代码'),
     toolbarTitles.join(' | ')
   );
   check(
@@ -2356,12 +2358,17 @@ async function runTests() {
   );
   check('新增按钮后工具栏不溢出编辑区', toolbarFits.overflow === false, JSON.stringify(toolbarFits));
 
-  // 块级「代码块」归入段落类型下拉，工具栏上只保留行内代码按钮
+  // 段落下拉只放块级文本类型；引用 / 代码块与工具栏、斜杠菜单、原生菜单重复，已删除
   await exec(`document.querySelector('.tb-dd-btn').click()`);
   const paraItems = JSON.parse(
     await exec(`JSON.stringify([...document.querySelectorAll('.tb-menu-item')].map((el) => el.textContent))`)
   );
-  check('代码块归入段落类型下拉（不与行内代码重复）', paraItems.includes('代码块'), paraItems.join('|'));
+  check(
+    '段落下拉不再重复「引用」「代码块」，只保留正文与标题',
+    !paraItems.includes('引用') && !paraItems.includes('代码块') &&
+      paraItems.includes('正文') && paraItems.includes('标题 4'),
+    paraItems.join('|')
+  );
   await exec(`document.querySelector('.tb-dd-btn').click()`);
 
   /** 按 title 点工具栏按钮（title 是稳定标识，不依赖按钮顺序） */
@@ -2378,6 +2385,35 @@ async function runTests() {
     await clickSelector('.ProseMirror > p:last-child');
     await focusEditor();
   };
+
+  // 工具栏「代码块」按钮：空选区点击即把当前段落转成可见代码块，末尾仍补出可输入段落
+  await resetDoc('工具栏代码块\n');
+  await caretToLastParagraph();
+  check('工具栏代码块按钮存在且可点', (await clickToolbar('代码块')) === true);
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror pre'))`), {
+    label: '工具栏插入代码块',
+    timeout: 12000
+  });
+  const toolbarCodeLastTag = await exec(
+    `document.querySelector('.ProseMirror')?.lastElementChild?.tagName?.toLowerCase() ?? ''`
+  );
+  check('工具栏代码块按钮插入可见代码块', true);
+  check('工具栏代码块后仍补出可输入段落', toolbarCodeLastTag === 'p', `lastTag=${toolbarCodeLastTag}`);
+
+  // 原生菜单「行内代码」：预设命令在空选区返回 false，旧实现点完输入也不带代码样式
+  await resetDoc('行内代码测试\n');
+  await caretToLastParagraph();
+  menuAction('format:code');
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  win.webContents.insertText('abc');
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.ProseMirror code')].some((el) => el.textContent.includes('abc'))`),
+    { label: '空选区行内代码生效', timeout: 10000 }
+  );
+  const inlineCodes = await exec(
+    `JSON.stringify([...document.querySelectorAll('.ProseMirror code')].map((el) => el.textContent))`
+  );
+  check('原生菜单行内代码在空选区下可用（输入即带代码样式）', String(inlineCodes).includes('abc'), String(inlineCodes));
 
   // 表格：默认 3 行 × 3 列（表头 + 两行数据）
   await resetDoc('工具栏表格\n');

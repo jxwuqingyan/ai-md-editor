@@ -14,15 +14,16 @@ interface ToolbarProps {
   linkFormRequest: number;
 }
 
-/** 段落类型选项 */
+/**
+ * 段落类型选项：只放块级文本类型。
+ * 引用与代码块已有工具栏按钮、斜杠菜单与原生菜单入口，不再在下拉里重复出现。
+ */
 const PARAGRAPH_OPTIONS: { label: string; action: FormatAction; level?: number }[] = [
   { label: '正文', action: 'paragraph' },
   { label: '标题 1', action: 'heading', level: 1 },
   { label: '标题 2', action: 'heading', level: 2 },
   { label: '标题 3', action: 'heading', level: 3 },
-  { label: '标题 4', action: 'heading', level: 4 },
-  { label: '引用', action: 'quote' },
-  { label: '代码块', action: 'codeBlock' }
+  { label: '标题 4', action: 'heading', level: 4 }
 ];
 
 /** 工具栏图标名称 */
@@ -178,7 +179,7 @@ export default function Toolbar({
 
       {btn(<strong>B</strong>, '加粗 (Cmd/Ctrl+B)', 'bold')}
       {btn(<em>I</em>, '斜体 (Cmd/Ctrl+I)', 'italic')}
-      {btn(<ToolbarSvg name="code" />, '行内代码', 'code')}
+      {btn(<ToolbarSvg name="code" />, '代码块', 'codeBlock')}
 
       {/* 链接：弹出文本/地址表单 */}
       <div className="tb-dd-wrap">
