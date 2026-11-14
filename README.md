@@ -12,8 +12,8 @@
 - **文件树**：左侧文件面板浏览目录，懒加载展开、点击打开文档
 - **原生菜单栏**：macOS 顶部系统菜单收纳文件/编辑/段落/格式/显示五组功能，不占用编辑窗口；主题、窗口、帮助类菜单已移除
 - **紧凑顶栏**：标签栏右上角集中主题选择与侧栏开关，取消独立功能顶栏
-- **底部工具栏**：段落/加粗/斜体/代码/链接/图片/引用/列表等常用排版操作，固定在编辑区底部独立成行，不遮挡内容
-- **完整排版能力**：一至六级标题、标题升降级、表格增删行列、任务列表（自绘复选框，点击方框勾选，回车产生未勾选新条目）、列表缩进、上下插入段落、行移动/删除、脚注、链接引用、警告框、内容目录、YAML Front Matter、下划线、删除线、清除样式
+- **底部工具栏**：段落类型（含代码块）/加粗/斜体/行内代码/链接/图片/引用/无序·有序·任务列表/表格/公式/分割线，与斜杠菜单同一套能力；链接弹「文本 + 地址」表单，图片走系统文件选择器，固定在编辑区底部独立成行，不遮挡内容
+- **完整排版能力**：一至六级标题、标题升降级、表格增删行列、任务列表（自绘复选框，点击方框勾选，回车产生未勾选新条目，空条目再回车退出列表直接写正文）、列表缩进、上下插入段落、行移动/删除、脚注、链接引用、警告框、内容目录、YAML Front Matter、下划线、删除线、清除样式
 - **表格体验**：表格增删行列菜单项随光标上下文自动置灰（不在表格内不可点）；表头行也能删除（移除旧表头、首个数据行升级为新表头），不会产出非法表格
 - **扩展语法渲染**：`> [!NOTE]` 等警告框渲染成带色条的提示块（5 种类型），`[TOC]` 渲染成可点击的实时目录，文件头 YAML Front Matter 以独立区块呈现且往返不丢失
 - **编辑辅助**：撤销/重做（`Cmd/Ctrl+Z`、`Shift+Cmd/Ctrl+Z`，Windows 支持 `Ctrl+Y`）、查找/替换（下一处/上一处/全部替换）、复制为 Markdown / 纯文本 / HTML 代码、粘贴为纯文本
@@ -88,9 +88,13 @@ npm run dev
 # 构建产物
 npm run build
 
-# 打包（本地）
+# 打包（本地，macOS Apple Silicon）
 cd apps/desktop
-npx electron-builder --mac --arm64      # macOS Apple Silicon (arm64) dmg
+# 先只出 .app：受限环境里 dmg target 会因挂载卷上的临时文件清理失败而中断
+env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE CSC_IDENTITY_DISABLED=1 \
+  ../../node_modules/.bin/electron-builder --mac --arm64 --dir
+cd ../..
+bash scripts/make-dmg.sh <版本号> arm64   # 组装安装窗口并压缩成 dmg
 # Windows x64 安装包需在 Windows 环境或 CI 中打包
 ```
 
@@ -107,7 +111,7 @@ npm run test:menu-runtime --workspace @ai-md-editor/desktop
 npm run test:e2e --workspace @ai-md-editor/desktop
 ```
 
-- `test/unit.ts`（由 `test/run-unit.cjs` 用 esbuild 打包执行）：纯函数单测 46 项——
+- `test/unit.ts`（由 `test/run-unit.cjs` 用 esbuild 打包执行）：纯函数单测 50 项——
   编码识别（UTF-8 / BOM / UTF-16 / GBK）、`file://` 地址生成、Markdown 简化、
   源码模式表格上下文与格式化、导出用公式提取/还原（代码掩码、货币文本不误判、渲染失败兜底）、
   导出时本地图片内联（读不到/超限保留原样）、
@@ -117,7 +121,7 @@ npm run test:e2e --workspace @ai-md-editor/desktop
 - `test/menuRuntime.cjs`：加载构建产物构造真实原生菜单，断言当前平台的关键快捷键（含隐藏项）已注册，
   并逐项点击菜单验证「一点击 = 一条 `menu:action`、动作与源码声明一致」
 - `test/e2e.cjs`：启动真实主进程（`out/main/index.js`）+ preload + 渲染层，经原生菜单通道派发动作，
-  覆盖 87 项断言：表格上下文置灰（含程序化定位光标）、表头行删除语义、缩放、三种复制格式、打印、
+  覆盖 157 项断言：表格上下文置灰（含程序化定位光标）、表头行删除语义、缩放、三种复制格式、打印、
   全屏/最小化、深层目录文件树定位与键盘导航、源码撤销合并、图片相对路径与拖拽复制、
   偏好持久化与窗口尺寸记忆、后台标签自动保存、GBK 文档读取与转存 UTF-8、外部修改提示与重新加载、
   关闭前未保存汇总与立即写盘、会话恢复、主题单击切换、文件树 ⋮ 菜单、新建文件先命名与落盘、
@@ -128,8 +132,10 @@ npm run test:e2e --workspace @ai-md-editor/desktop
   表格二级行列网格默认 3×3 / 方向键调整后按 4×4 插入 / 点击格子按 2×5 插入、
   链接二级表单鼠标与键盘两条路径、图片条目桩掉 IPC 后验证插入链路）、
   链接打开（普通单击不打开、悬停 title 提示、⌘+点击走系统浏览器——主进程侧替换 shell.openExternal 收集调用）、
-  任务列表（任务项与普通项渲染区分、点击方框勾选）、
-  工具栏与编辑内容区不重叠。需先 `npm run build`（测试直接加载构建产物）。
+  任务列表（任务项与普通项渲染区分、点击方框勾选、两次回车退出为正文）、
+  底部工具栏（按钮齐全且不溢出、代码块归段落下拉、表格 3×3 / 公式 / 任务列表 / 有序列表、
+  链接表单与菜单复用、图片走文件选择器）、工具栏与编辑内容区不重叠。
+  需先 `npm run build`（测试直接加载构建产物）。
 - `test/run-e2e.cjs`：通用 Electron 测试启动器（默认 `e2e.cjs`，可传脚本名复用），自动剔除宿主终端注入的
   `ELECTRON_RUN_AS_NODE` / `NODE_OPTIONS` 并附加无 GUI 会话所需的开关。
 - `test/shot.cjs`：界面截图脚本（`node test/run-e2e.cjs shot.cjs`，不参与 `npm test`）：
@@ -146,8 +152,9 @@ npm run test:e2e --workspace @ai-md-editor/desktop
 
 ## 打包与分发
 
-- **本地打包**：macOS 本机只打 `arm64` dmg（Apple Silicon）；Windows x64 安装包由 CI 打包
-- **CI 自动打包**：推送 `main` 或打 `v*` tag 时，GitHub Actions 自动产出三架构：
+- **本地打包**：macOS 本机只打 `arm64` dmg（Apple Silicon）。先 `electron-builder --mac --arm64 --dir` 出 `.app`，再用 `scripts/make-dmg.sh <版本号> arm64` 组装安装窗口（应用 / 箭头 / Applications 三点布局，卷图标复用应用图标），产物落在 `apps/desktop/release/`；直出 dmg 在受限环境会被挂载卷清理拦截，故走两步。
+- **当前状态（0.14.25）**：GitHub Actions 因账号计费阻断，三平台 Release 暂无法产出；本版本已本地打出 `MarkdownNote-0.14.25-arm64.dmg`（159 MB，ad-hoc 签名，未公证）。首次打开请在访达中右键→打开。额度恢复前只推 `main`、不打 `v*` tag，避免触发必然失败的打包 workflow；额度恢复后无需改代码。
+- **CI 自动打包**（额度恢复后）：推送 `main` 或打 `v*` tag 时，GitHub Actions 自动产出三架构：
   - macOS x64（Intel）dmg
   - macOS arm64（Apple Silicon）dmg
   - Windows x64 安装包（nsis exe）

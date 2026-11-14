@@ -555,7 +555,6 @@ export const MenuActions = {
   FormatStrikethrough: 'format:strikethrough',
   InsertComment: 'format:insert-comment',
   InsertLink: 'format:insert-link',
-  InsertImage: 'format:insert-image',
   ChooseImage: 'format:choose-image',
   ClearFormat: 'format:clear',
 

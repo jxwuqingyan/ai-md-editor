@@ -1196,6 +1196,8 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 按钮较多，窄窗口允许换行；仍是固定占位行，不会盖住正文 */
+  flex-wrap: wrap;
   gap: 2px;
   padding: 5px 12px;
   background: var(--bg-panel);
@@ -1274,6 +1276,20 @@ button:focus-visible {
 .tb-menu-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* 工具栏链接表单（复用 slash-form 字段样式，锚在链接按钮上方） */
+.tb-link-form {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 240px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  padding: 10px 12px 12px;
+  z-index: 60;
 }
 
 /* 状态栏（安静，细边框之上极简一行） */

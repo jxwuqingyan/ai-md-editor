@@ -1,6 +1,6 @@
 {
   "name": "@ai-md-editor/desktop",
-  "version": "0.14.24",
+  "version": "0.14.25",
   "private": true,
   "description": "MarkdownNote - 跨平台本地 Markdown 编辑器",
   "author": "wuqingyan <1131169640@qq.com>",

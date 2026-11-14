@@ -58,6 +58,7 @@ import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
 import { trailingParagraphPlugin } from './trailing';
 import { listBackspaceShortcut, listUnlistPendingPlugin } from './listBackspace';
+import { listItemExitPlugin } from './listItemExit';
 import { configureMathView, mathNodeViewPlugin } from './mathView';
 import { clearSearchHighlight, searchHighlightPlugin, setSearchHighlight } from './search';
 import { collectTextSegments, textOffsetToPos } from './textPos';
@@ -135,6 +136,8 @@ export async function createEditor(
     // 列表项开头按退格：去掉当前编号变普通段落，而不是并进上一行；连续按可一路解散列表
     .use(listUnlistPendingPlugin)
     .use(listBackspaceShortcut)
+    // 任务列表里被拆出来的空项：换成列表后面的正文段落
+    .use(listItemExitPlugin)
     // 撤销/重做历史（ProseMirror history）：没有它 Cmd+Z 在整个编辑器里无效
     .use(history)
     .use([...underlineSchema])

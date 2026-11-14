@@ -53,11 +53,9 @@ export interface MenuHandlerDeps {
   pastePlain: () => void;
   /** 统一格式化入口 */
   format: (action: FormatAction, payload?: number | string) => void;
-  /** 插入链接占位 */
+  /** 打开链接表单（菜单「超链接」与工具栏共用） */
   insertLink: () => void;
-  /** 插入图片占位 */
-  insertImage: () => void;
-  /** 从本地文件选择图片 */
+  /** 从本地文件选择图片（菜单、工具栏图片按钮、斜杠菜单共用） */
   chooseImage: () => void;
   /** 打开查找栏 */
   openFind: (withReplace: boolean) => void;
@@ -178,7 +176,6 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.FormatStrikethrough]: () => deps.format('strikethrough'),
     [MenuActions.InsertComment]: () => deps.format('snippet', '<!-- 注释 -->'),
     [MenuActions.InsertLink]: deps.insertLink,
-    [MenuActions.InsertImage]: deps.insertImage,
     [MenuActions.ChooseImage]: deps.chooseImage,
     [MenuActions.ClearFormat]: () => deps.format('clearFormat'),
 

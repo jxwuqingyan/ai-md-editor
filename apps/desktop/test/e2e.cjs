@@ -659,30 +659,58 @@ async function runTests() {
   );
 
   // ===== 10. 设置持久化：偏好与窗口尺寸写入 userData，新窗口读取后恢复 =====
+  // 设置写入是 300ms 防抖 + 异步落盘，固定 sleep 在机器负载高时会读到上一次的值；
+  // 改成轮询文件直到目标值出现，断言强度不变，只消除时序偶发。
+  const waitForSetting = (predicate, label) =>
+    waitFor(
+      async () => {
+        try {
+          const settings = JSON.parse(readFileSync(join(PROFILE_DIR, 'settings.json'), 'utf-8'));
+          return predicate(settings) ? settings : null;
+        } catch {
+          return null;
+        }
+      },
+      { label, timeout: 8000, interval: 150 }
+    );
+
   // 通过菜单切换侧栏，验证界面变化会落盘
   menuAction('view:toggle-sidebar');
-  await new Promise((resolve) => setTimeout(resolve, 900));
-  let savedSettings = JSON.parse(readFileSync(join(PROFILE_DIR, 'settings.json'), 'utf-8'));
-  check('侧栏开关变化写入设置文件', savedSettings.sidebarOpen === false, `sidebarOpen=${savedSettings.sidebarOpen}`);
+  const sidebarSettings = await waitForSetting((s) => s.sidebarOpen === false, '侧栏开关落盘').catch(() => null);
+  check('侧栏开关变化写入设置文件', sidebarSettings?.sidebarOpen === false, `sidebarOpen=${sidebarSettings?.sidebarOpen}`);
   menuAction('view:toggle-sidebar');
-  await new Promise((resolve) => setTimeout(resolve, 900));
+  await waitForSetting((s) => s.sidebarOpen === true, '侧栏恢复落盘').catch(() => null);
 
   // 窗口尺寸同样被记住。CI runner 的屏幕工作区可能比请求值小，系统会自动裁剪 bounds
   // （实测 macOS runner 把 1000×700 裁成 1000×684），所以与窗口实际 bounds 比对。
+  // 无 GUI 会话里系统可能直接拒绝改尺寸，此时不硬判，按环境限制跳过。
   win.setBounds({ x: 60, y: 60, width: 1000, height: 700 });
-  await new Promise((resolve) => setTimeout(resolve, 1200));
-  const actualBounds = win.getBounds();
-  savedSettings = JSON.parse(readFileSync(join(PROFILE_DIR, 'settings.json'), 'utf-8'));
-  const savedBounds = savedSettings.windowBounds;
-  check(
-    '窗口尺寸写入设置文件',
-    Boolean(savedBounds) &&
-      savedBounds.width === actualBounds.width &&
-      savedBounds.height === actualBounds.height &&
-      Math.abs(savedBounds.width - 1000) <= 20 &&
-      Math.abs(savedBounds.height - 700) <= 40,
-    `saved=${JSON.stringify(savedBounds)} actual=${JSON.stringify(actualBounds)}`
-  );
+  const boundsApplied = await waitFor(
+    async () => {
+      const b = win.getBounds();
+      return Math.abs(b.width - 1000) <= 20 && Math.abs(b.height - 700) <= 40;
+    },
+    { label: '窗口尺寸生效', timeout: 5000, interval: 150 }
+  ).catch(() => false);
+  if (!boundsApplied) {
+    skip('窗口尺寸写入设置文件', '当前会话系统不允许修改窗口尺寸');
+  } else {
+    const actualBounds = win.getBounds();
+    const boundsSettings = await waitForSetting(
+      (s) => Boolean(s.windowBounds) &&
+        s.windowBounds.width === actualBounds.width &&
+        s.windowBounds.height === actualBounds.height,
+      '窗口尺寸落盘'
+    ).catch(() => null);
+    const savedBounds = boundsSettings?.windowBounds;
+    check(
+      '窗口尺寸写入设置文件',
+      Boolean(savedBounds) &&
+        Math.abs(savedBounds.width - 1000) <= 20 &&
+        Math.abs(savedBounds.height - 700) <= 40,
+      `saved=${JSON.stringify(savedBounds)} actual=${JSON.stringify(actualBounds)}`
+    );
+  }
 
   // 写入一份「非默认」偏好，再开新窗口，验证渲染层启动时会读取并应用
   await exec(`window.api.updateSettings({ themeId: 'dark', toolbarVisible: false, zoomPercent: 125 })`);
@@ -2288,6 +2316,209 @@ async function runTests() {
   check('源码模式替换生效', sourceReplaced === true, String(await exec(`document.querySelector('.source-editor')?.value ?? ''`)));
   await exec(`document.querySelector('.find-close')?.click()`);
   await ensureWysiwygMode();
+
+  // ===== 10.13 底部工具栏：与斜杠菜单对齐（图片走文件选择器、链接走表单、块级功能平铺） =====
+  // 旧行为：链接 / 图片按钮只插「链接文字」「图片」占位文本，「更多」浮层里还重复放一个代码块。
+  const toolbarTitles = JSON.parse(
+    await exec(`JSON.stringify([...document.querySelectorAll('.toolbar .tb-btn')].map((b) => b.title))`)
+  );
+  check(
+    '工具栏平铺有序列表 / 任务列表 / 表格 / 公式 / 分割线',
+    toolbarTitles.some((t) => t === '有序列表') &&
+      toolbarTitles.some((t) => t === '任务列表') &&
+      toolbarTitles.some((t) => t.startsWith('表格')) &&
+      toolbarTitles.some((t) => t === '公式') &&
+      toolbarTitles.some((t) => t === '分割线'),
+    toolbarTitles.join(' | ')
+  );
+  check(
+    '工具栏不再有「更多」浮层，也没有重复的代码块按钮',
+    !toolbarTitles.includes('更多') && !toolbarTitles.includes('代码块'),
+    toolbarTitles.join(' | ')
+  );
+  check(
+    '原生菜单不再提供图片占位入口',
+    !menuHasLabel('插入图片占位') && menuHasLabel('插入图片…'),
+    '图像子菜单已合并为「插入图片…」'
+  );
+  const toolbarFits = JSON.parse(
+    await exec(`(() => {
+      const bar = document.querySelector('.toolbar').getBoundingClientRect();
+      const btns = [...document.querySelectorAll('.toolbar .tb-btn')];
+      return JSON.stringify({
+        count: btns.length,
+        overflow: btns.some((b) => {
+          const r = b.getBoundingClientRect();
+          return r.right > bar.right + 1 || r.left < bar.left - 1;
+        })
+      });
+    })()`)
+  );
+  check('新增按钮后工具栏不溢出编辑区', toolbarFits.overflow === false, JSON.stringify(toolbarFits));
+
+  // 块级「代码块」归入段落类型下拉，工具栏上只保留行内代码按钮
+  await exec(`document.querySelector('.tb-dd-btn').click()`);
+  const paraItems = JSON.parse(
+    await exec(`JSON.stringify([...document.querySelectorAll('.tb-menu-item')].map((el) => el.textContent))`)
+  );
+  check('代码块归入段落类型下拉（不与行内代码重复）', paraItems.includes('代码块'), paraItems.join('|'));
+  await exec(`document.querySelector('.tb-dd-btn').click()`);
+
+  /** 按 title 点工具栏按钮（title 是稳定标识，不依赖按钮顺序） */
+  const clickToolbar = (title) =>
+    exec(`(() => {
+      const btn = [...document.querySelectorAll('.toolbar .tb-btn')].find((b) => b.title === ${JSON.stringify(title)});
+      if (!btn) return false;
+      btn.click();
+      return true;
+    })()`);
+
+  /** 把光标放进最后一段正文，块级命令才有落点 */
+  const caretToLastParagraph = async () => {
+    await clickSelector('.ProseMirror > p:last-child');
+    await focusEditor();
+  };
+
+  // 表格：默认 3 行 × 3 列（表头 + 两行数据）
+  await resetDoc('工具栏表格\n');
+  await caretToLastParagraph();
+  check('表格按钮存在且可点', (await clickToolbar('表格（3 行 × 3 列）')) === true);
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table'))`), {
+    label: '工具栏插入表格',
+    timeout: 12000
+  });
+  const tbShape = JSON.parse(
+    await exec(`(() => {
+      const table = document.querySelector('.ProseMirror table');
+      return JSON.stringify({
+        rows: table.querySelectorAll('tr').length,
+        cols: table.querySelectorAll('tr:first-child th, tr:first-child td').length
+      });
+    })()`)
+  );
+  check('工具栏表格默认 3 行 × 3 列', tbShape.rows === 3 && tbShape.cols === 3, JSON.stringify(tbShape));
+
+  // 公式：块级公式片段应渲染成 KaTeX，而不是一串源码文本
+  await resetDoc('工具栏公式\n');
+  await caretToLastParagraph();
+  await clickToolbar('公式');
+  await waitFor(() => exec(`Boolean(document.querySelector('.md-math-block .katex'))`), {
+    label: '工具栏插入公式',
+    timeout: 15000
+  });
+  check('工具栏公式按钮插入块级公式', true);
+
+  // 任务列表 / 有序列表：光标所在段落转成对应列表
+  await resetDoc('工具栏任务\n');
+  await caretToLastParagraph();
+  await clickToolbar('任务列表');
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror li[data-item-type="task"]'))`), {
+    label: '工具栏插入任务列表',
+    timeout: 12000
+  });
+  check('工具栏任务列表按钮生效', true);
+
+  await resetDoc('工具栏有序\n');
+  await caretToLastParagraph();
+  await clickToolbar('有序列表');
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror ol'))`), {
+    label: '工具栏插入有序列表',
+    timeout: 12000
+  });
+  check('工具栏有序列表按钮生效', true);
+
+  // 链接：弹表单，填入文本与地址后插入真实链接（不再是「链接文字」占位）
+  await resetDoc('工具栏链接\n');
+  await caretToLastParagraph();
+  await clickToolbar('链接 (Cmd/Ctrl+K)');
+  await waitFor(() => exec(`Boolean(document.querySelector('.tb-link-form'))`), {
+    label: '工具栏链接表单展开'
+  });
+  await setControlValue('.tb-link-form [data-form="text"]', '工具栏链接');
+  await setControlValue('.tb-link-form [data-form="url"]', 'https://example.com/toolbar');
+  const linkSubmitEnabled = await exec(`document.querySelector('.tb-link-form .slash-form-submit')?.disabled === false`);
+  check('链接地址填写后确定按钮可用', linkSubmitEnabled === true);
+  await exec(`document.querySelector('.tb-link-form .slash-form-submit').click()`);
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.ProseMirror a')].some((a) => a.getAttribute('href') === 'https://example.com/toolbar')`),
+    { label: '工具栏插入真实链接', timeout: 12000 }
+  );
+  const toolbarLinkText = String(
+    await exec(`(() => {
+      const a = [...document.querySelectorAll('.ProseMirror a')].find((x) => x.getAttribute('href') === 'https://example.com/toolbar');
+      return a ? a.textContent : '';
+    })()`)
+  );
+  check('工具栏链接文本与地址正确', toolbarLinkText === '工具栏链接', toolbarLinkText);
+  const linkMarkdown = await expectMarkdown('https://example.com/toolbar', '工具栏链接写回 Markdown');
+  check('工具栏链接不再插入占位地址', !linkMarkdown.includes('](url)'), linkMarkdown.slice(0, 90));
+
+  // 菜单「超链接」(Cmd/Ctrl+K)：复用同一个工具栏表单
+  menuAction('format:insert-link');
+  await waitFor(() => exec(`Boolean(document.querySelector('.tb-link-form'))`), {
+    label: '菜单超链接复用工具栏表单'
+  });
+  check('菜单「超链接」打开同一个链接表单', true);
+  await clickToolbar('链接 (Cmd/Ctrl+K)'); // 再点一次收起，避免影响后续用例
+
+  // 图片：点按钮应调起系统文件选择器，而不是插入 ![图片](url) 占位
+  await resetDoc('工具栏图片\n');
+  await caretToLastParagraph();
+  const prevShowOpenDialog = dialog.showOpenDialog;
+  let imageDialogCalls = 0;
+  dialog.showOpenDialog = async () => {
+    imageDialogCalls += 1;
+    return { canceled: true, filePaths: [] };
+  };
+  const beforeImage = String(await exec(`document.querySelector('.ProseMirror')?.textContent ?? ''`));
+  await clickToolbar('图片（选择本地文件）');
+  await waitFor(() => imageDialogCalls >= 1, { label: '图片按钮调起文件选择器', timeout: 10000 }).catch(() => false);
+  dialog.showOpenDialog = prevShowOpenDialog;
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const afterImage = String(await exec(`document.querySelector('.ProseMirror')?.textContent ?? ''`));
+  check('工具栏图片按钮走文件选择器', imageDialogCalls === 1, `调用 ${imageDialogCalls} 次`);
+  check('取消选择后不插入图片占位符', afterImage === beforeImage, JSON.stringify(afterImage));
+
+  // ===== 10.14 任务列表末尾连按两次回车：回到正文，而不是留一个无序列表项 =====
+  await resetDoc('- [ ] 第一件事\n- [ ] 第二件事\n');
+  await waitFor(
+    () => exec(`document.querySelectorAll('.ProseMirror li[data-item-type="task"]').length === 2`),
+    { label: '任务列表渲染（回车用例）', timeout: 20000 }
+  );
+  /** 点进最后一个列表项并把光标推到行尾 */
+  const caretToLastItem = async () => {
+    await clickSelector('.ProseMirror li:last-child p');
+    await focusEditor();
+    pressKey('End');
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  };
+  await caretToLastItem();
+  pressKey('Return'); // 第一次：拆出一个空的未完成任务项
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  await caretToLastItem();
+  pressKey('Return'); // 第二次：应退出列表、落到列表后的正文段落
+  await waitFor(
+    () => exec(`(() => {
+      const pm = document.querySelector('.ProseMirror');
+      if (!pm) return false;
+      const tail = pm.lastElementChild;
+      return Boolean(tail && tail.tagName.toLowerCase() === 'p' &&
+        document.querySelectorAll('.ProseMirror li:not([data-item-type])').length === 0);
+    })()`),
+    { label: '两次回车后退出为正文段落', timeout: 12000 }
+  );
+  check('任务列表两次回车不再留下无序列表项', true);
+  await focusEditor();
+  win.webContents.insertText('回车后直接写字');
+  const taskExitMd = await expectMarkdown('回车后直接写字', '回车后正文写回 Markdown');
+  check(
+    '两次回车后可直接写正文且不留空任务项',
+    taskExitMd.includes('- [ ] 第一件事') &&
+      taskExitMd.includes('回车后直接写字') &&
+      !taskExitMd.includes('- [ ] <br />') &&
+      !taskExitMd.includes('\n- <br />'),
+    JSON.stringify(taskExitMd.slice(0, 120))
+  );
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

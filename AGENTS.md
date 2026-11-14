@@ -154,7 +154,7 @@ ai-md-editor/
 | 6 | 视觉：现代极简，动效克制（CSS 过渡），去 AI 味 |
 | 7 | 包管理器：npm workspaces（已从 pnpm 迁移） |
 | 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
-| 9 | 分发：CI 打包 macOS（x64 + arm64）dmg + Windows x64 安装包 |
+| 9 | 分发：常态由 CI 打包 macOS（x64 + arm64）dmg + Windows x64 安装包；CI 额度耗尽时退化为本地出 arm64 dmg（见 #58），代码与配置不改，额度恢复后自动回到三平台流程 |
 | 10 | 顶部导航：macOS 原生应用菜单 + 标签栏右侧动作区，窗口内不保留独立功能顶栏 |
 | 11 | 原生菜单只保留「文件/编辑/段落/格式/显示」五组；主题走右上角按钮，不设主题/窗口/帮助菜单 |
 | 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
@@ -194,15 +194,17 @@ ai-md-editor/
 | 45 | 斜杠菜单（`packages/editor/src/slash.ts`）是自包含 ProseMirror 插件：触发要求光标在文本块、无选区、不在代码块/行内代码，且「/」前一字符不是字母数字/冒号/斜杠（防网址、路径误弹）；确认时先删「/过滤词」再统一走 `format()`（实例经 `formatRef` 延迟接线，不能用 callCommand 直调——插件内拿不到 Milkdown 上下文）；面板 mousedown 必须 preventDefault，否则编辑器 blur 先把菜单关掉；**面板必须挂在 `.app` 下**——主题 CSS 变量经 React style 注入在 `.app` 上，挂 body 下 `var(--bg-panel)` 解析失败会变透明底 |
 | 46 | 表格二级行列网格：`format('insertTable', '列数x行数')` 由 `instance.ts` 的 `buildTableSnippet` 动态构造片段（上限 10×20，默认 3×3）；子面板随主面板同挂 `.app`，**点行尾的 › 才展开、再点收起**（悬停不做任何事），键盘 Enter 展开后 ↑↓←→ 调行列、Esc 先收回子面板再关菜单 |
 | 47 | E2E 用 `sendInputEvent` 注入方向键时 keyCode 必须用 Chromium 键名 `Down`/`Up`/`Left`/`Right`——写 `ArrowDown` 会被静默忽略（无报错、无效果），排查注入「没生效」先查键名 |
-| 48 | 任务列表不启用 Milkdown 的 Vue 列表组件（`@milkdown/components/list-item-block`），复选框由 CSS 依据 `li[data-item-type="task"]` / `[data-checked]` 自绘，点击勾选在 `packages/editor/src/task.ts` 插件里做（mousedown 落在 li 左 padding 区才拦截）；任务项里 Enter 须重置新条目 `checked=false`（splitListItem 会原样复制勾选态），空条目 Enter 清 checked 退出任务态 |
+| 48 | 任务列表不启用 Milkdown 的 Vue 列表组件（`@milkdown/components/list-item-block`），复选框由 CSS 依据 `li[data-item-type="task"]` / `[data-checked]` 自绘，点击勾选在 `packages/editor/src/task.ts` 插件里做（mousedown 落在 li 左 padding 区才拦截）；任务项里 Enter 须重置新条目 `checked=false`（splitListItem 会原样复制勾选态）；空条目再 Enter 不能在原地留一个无序列表项，由 `listItemExit.ts` 的 `appendTransaction` 把它换成列表后的正文段落并补回焦点 |
 | 49 | E2E 里 `getBoundingClientRect` 返回 CSS 像素而 `sendInputEvent` 走 DIP 坐标，窗口 zoomFactor 非 1 时坐标注入按比例错位——任何改过 zoomPercent 的用例结束必须恢复 100%，否则后续窄目标点击（复选框、格子）稳定失败且宽目标（段落）带病通过 |
-| 50 | 斜杠菜单的链接二级表单是唯一允许焦点离开编辑器的浮层：面板 mousedown 只对**非输入框**元素 preventDefault；表单展开期（`formOpen`）编辑器 blur 不作为关闭信号，改靠 document 捕获阶段的 mousedown 关闭（点面板外整体收起）。其余浮层（菜单 / 网格）仍整体 preventDefault |
-| 51 | 斜杠菜单「图片」条目走 `onPickImage` 回调（`SlashMenuOptions` ← `CreateEditorOptions` ← `MarkdownEditor` ref 转发 ← 渲染层 `chooseImage`）：原生文件对话框无法自动化，E2E 尝试给 `window.api.chooseImage` 打桩，contextBridge 对象只读导致桩不上时**跳过点击**而不是硬等（原生对话框会卡死测试进程） |
+| 50 | 斜杠菜单的链接二级表单是**插件内**唯一允许焦点离开编辑器的浮层：面板 mousedown 只对**非输入框**元素 preventDefault；表单展开期（`formOpen`）编辑器 blur 不作为关闭信号，改靠 document 捕获阶段的 mousedown 关闭（点面板外整体收起）。其余浮层（菜单 / 网格）仍整体 preventDefault。工具栏链接表单是 React 组件，不受此规则约束 |
+| 51 | 斜杠菜单「图片」条目走 `onPickImage` 回调（`SlashMenuOptions` ← `CreateEditorOptions` ← `MarkdownEditor` ref 转发 ← 渲染层 `chooseImage`）；工具栏图片按钮与原生菜单「插入图片…」也走同一条链路，不再插占位语法。原生文件对话框在 E2E 里用**主进程侧** `dialog.showOpenDialog` 打桩（返回 canceled 并计数），别在 renderer 侧桩 contextBridge（对象只读，桩不上还会卡死测试进程） |
 | 52 | E2E 斜杠用例的锚点段落会被块级插入（表格片段）吞进单元格：后续用例若继续点首个 `p`，光标落在「列 1」单元格里，「/」前一字符是数字按设计不触发菜单——「最近使用」等用例要**单独开新文档**，别在插过表格的文档里复用首段锚点 |
 | 53 | **本地 electron-builder 打包会改写 `apps/desktop/package.json`**：剥掉全部 `scripts` 与 `devDependencies`（只留生产依赖），打包后必须 `git checkout -- apps/desktop/package.json` 恢复，否则 `npm run build` / `npm test` 直接报 Missing script |
 | 54 | 链接打开走「⌘/Ctrl + 点击」（`packages/editor/src/link.ts`）：普通单击保留光标定位；平台判定用 `navigator.userAgent`（沙箱渲染进程没有完整 process）；主进程 `shell:open-external` 只放行 http/https（渲染内容可被任意文档注入）；E2E 在主进程侧替换 `shell.openExternal` 收集调用即可断言（与 `dialog` stub 同理，别在 renderer 侧桩 contextBridge） |
 | 55 | E2E 断言 DOM 元素别假设「第一个匹配」等于「先插入的」：行内 snippet 插入会拆/并段落，多个同类元素的 DOM 顺序与插入顺序不保证一致，按文本 / href 等内容特征精确匹配目标 |
 | 56 | 编辑器内链接「⌘/Ctrl + 点击打开」必须拦在 **mousedown**：放到 click 再 preventDefault 就晚了——macOS 上修饰键点击的默认行为在 mousedown 阶段已让 ProseMirror 建出 NodeSelection（整段 `ProseMirror-selectednode` 描边框 + 文字选区，打开后残留）。另外 `getComputedStyle().outlineWidth` 在 `outline-style: none` 时也报非零值，截图诊断别把它当真边框来源 |
+| 57 | 底部工具栏、斜杠菜单、原生菜单必须共用同一条插入链路：`Toolbar` 只发 `FormatAction` / `onInsertLink(label,url)` / `onPickImage`，实际动作由 `App.tsx` → `useEditing.applyFormat` 分发；图片一律走 `chooseImage`（系统文件选择器），链接一律走表单，**任何入口都不得再插 `[链接文字](url)` / `![图片](url)` 占位**。菜单「超链接」经 `linkFormRequest` 递增信号复用工具栏表单（工具栏隐藏时先显示）；代码块只在「段落」下拉里，工具栏保留行内代码，避免重复入口。工具栏按钮增多后用 `flex-wrap` 换行，E2E 有「不溢出编辑区」断言守门 |
+| 58 | **本地出包（CI 额度耗尽时的替代路径）**：`npm run build`（`out/` 必须干净，否则旧 chunk 全被塞进 asar）→ `cd apps/desktop && env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE CSC_IDENTITY_DISABLED=1 ../../node_modules/.bin/electron-builder --mac --arm64 --dir`（**不要直出 dmg**：受限环境拦截挂载卷上 `.BC.T_*` 的删除，hdiutil 清理失败报 `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`）→ `bash scripts/make-dmg.sh <版本号> arm64`（剥签名后补 ad-hoc、HFS+ 镜像挂 `/Volumes/MarkdownNote` 写 `.DS_Store` 布局与卷图标、`COPYFILE_DISABLE=1 ditto` 复制、`hdiutil convert -format UDZO`）。交付前校验：`hdiutil verify`、卷内四点布局、`codesign -dv` 的 `Signature=adhoc`、`Info.plist` 版本、`lipo -archs`、asar 内文件与 `out/` 逐字节比对；ad-hoc 未公证要提示「访达中右键→打开」。额度耗尽期间只推 `main`、不打 `v*` tag，避免触发必然失败的 workflow |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -296,7 +298,7 @@ ai-md-editor/
    - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号四处一致（见第 9 节）。
    - 删除无用文件：构建临时配置（`electron.vite.config.*.mjs`）、`*.tsbuildinfo`、空的 `release/`、游离的测试产物与截屏、`.DS_Store`；`out/` 可整体重建后再构建，避免残留旧 chunk。
    - 全仓库检索确认无第三方产品名/品牌标识（含注释、界面示例文案、包描述）。
-4. **CI 打包**：仓库需配置 GitHub Actions workflow，自动打包 **macOS（x64 与 arm64 两种架构的 dmg）** 与 **Windows（x64 安装包）**。
+4. **CI 打包**：仓库需配置 GitHub Actions workflow，自动打包 **macOS（x64 与 arm64 两种架构的 dmg）** 与 **Windows（x64 安装包）**。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG，期间只推 `main` 不打 tag。
 
 ## 14. 参考文档
 

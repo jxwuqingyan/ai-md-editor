@@ -358,9 +358,23 @@ export default function App(): JSX.Element {
     openRenameDialog();
   }, [activeId, openRenameDialog]);
 
-  /** 插入链接 / 图片占位 */
-  const handleInsertLink = useCallback(() => applyFormat('snippet', '[链接文字](url)'), [applyFormat]);
-  const handleInsertImage = useCallback(() => applyFormat('snippet', '![图片](url)'), [applyFormat]);
+  /** 链接表单打开请求：工具栏按钮与菜单「超链接」共用，递增即触发一次展开 */
+  const [linkFormRequest, setLinkFormRequest] = useState(0);
+
+  /** 打开链接表单；工具栏被隐藏时先显示，保证菜单快捷键也能弹出表单 */
+  const openLinkForm = useCallback(() => {
+    setToolbarVisible(true);
+    setLinkFormRequest((value) => value + 1);
+  }, [setToolbarVisible]);
+
+  /** 链接表单确认：文本 + 地址组装成 Markdown（地址含空格/括号时用尖括号包裹） */
+  const insertLinkFromForm = useCallback(
+    (label: string, url: string) => {
+      const safeUrl = /[\s()]/.test(url) ? `<${url}>` : url;
+      applyFormat('snippet', `[${label}](${safeUrl})`);
+    },
+    [applyFormat]
+  );
 
   // ===== 侧栏文件树操作（⋮ 菜单） =====
 
@@ -617,8 +631,7 @@ export default function App(): JSX.Element {
     redo: () => undoRedo('redo'),
     pastePlain: () => void pastePlain(),
     format: applyFormat,
-    insertLink: handleInsertLink,
-    insertImage: handleInsertImage,
+    insertLink: openLinkForm,
     chooseImage: () => void chooseImage(),
     openFind,
     goToMatch,
@@ -747,8 +760,9 @@ export default function App(): JSX.Element {
           {toolbarVisible && !readOnly && (
             <Toolbar
               onFormat={applyFormat}
-              onInsertLink={handleInsertLink}
-              onInsertImage={handleInsertImage}
+              onInsertLink={insertLinkFromForm}
+              onPickImage={() => void chooseImage()}
+              linkFormRequest={linkFormRequest}
             />
           )}
         </main>

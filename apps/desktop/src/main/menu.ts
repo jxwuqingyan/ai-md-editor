@@ -321,13 +321,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         }),
         sep,
         item('超链接', MenuActions.InsertLink, { accelerator: 'CommandOrControl+K' }),
-        {
-          label: '图像',
-          submenu: [
-            item('插入图片占位', MenuActions.InsertImage),
-            item('从本地文件插入…', MenuActions.ChooseImage)
-          ]
-        },
+        item('插入图片…', MenuActions.ChooseImage),
         sep,
         item('清除样式', MenuActions.ClearFormat, { accelerator: 'CommandOrControl+Alt+C' })
       ]
