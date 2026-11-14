@@ -2728,14 +2728,34 @@ async function runTests() {
   );
 
   // ===== 10.19 表格行列手柄：点选整行 / 整列后浮出增删工具条 =====
+  // 表格后补一段正文：光标落在表外时手柄应隐藏
   const TABLE_HANDLE_DOC =
-    '| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n| a1 | b1 | c1 |\n| a2 | b2 | c2 |\n';
+    '| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n| a1 | b1 | c1 |\n| a2 | b2 | c2 |\n\n表格下方的正文段落。\n';
   await resetDoc(TABLE_HANDLE_DOC);
   await waitFor(() => exec(`document.querySelectorAll('.md-table-col-handle').length === 3`), {
     label: '表格列手柄出现',
     timeout: 15000
   });
 
+  /** 手柄 / 角手柄当前是否可见 */
+  const handlesVisibility = () =>
+    exec(`(() => {
+      const bar = document.querySelector('.md-table-col-bar');
+      const rowBar = document.querySelector('.md-table-row-bar');
+      const corner = document.querySelector('.md-table-block .md-table-corner');
+      if (!bar || !rowBar || !corner) return 'missing';
+      const visible = (el) => getComputedStyle(el).visibility === 'visible';
+      return JSON.stringify({
+        col: visible(bar),
+        row: visible(rowBar),
+        corner: visible(corner),
+        blockClass: document.querySelector('.md-table-block')?.className ?? null,
+        blockCount: document.querySelectorAll('.md-table-block').length,
+        barCount: document.querySelectorAll('.md-table-col-bar').length,
+        hovered: document.querySelector('.md-table-block:hover') !== null,
+        pmFocused: document.activeElement?.classList.contains('ProseMirror') === true
+      });
+    })()`);
   /** 读取表格形状与手柄 / 工具条状态 */
   const tableShape = async () =>
     JSON.parse(
@@ -2785,6 +2805,23 @@ async function runTests() {
     JSON.stringify(shape)
   );
   check('未选中时增删工具条保持隐藏', shape.toolbarVisible === false, JSON.stringify(shape));
+
+  // 光标在表外（正文段落）时手柄默认隐藏，不干扰阅读（真实鼠标点击才会移动选区）
+  await clickSelector('.ProseMirror > p:last-of-type');
+  const hiddenState = JSON.parse(await handlesVisibility());
+  check(
+    '光标不在表格内时手柄与角手柄默认隐藏',
+    hiddenState.col === false && hiddenState.row === false && hiddenState.corner === false,
+    JSON.stringify(hiddenState)
+  );
+  // 光标进入单元格后手柄浮现
+  await clickSelector('.ProseMirror table td p');
+  const shownState = JSON.parse(await handlesVisibility());
+  check(
+    '光标进入表格后手柄与角手柄浮现',
+    shownState.col === true && shownState.row === true && shownState.corner === true,
+    JSON.stringify(shownState)
+  );
 
   check('可点击第 1 列手柄', (await clickTableHandle('col', 0)) === true);
   await waitToolbar();
@@ -2843,9 +2880,39 @@ async function runTests() {
     rawRows.join(' / ')
   );
 
-  // 精简原生菜单后，「删除整个表格」只由工具条提供，不能丢
-  await clickTableHandle('col', 0);
+  // 精简原生菜单后，「删除整个表格」由左上角角手柄 + 工具条提供，不能丢
+  const cornerClicked = await exec(`(() => {
+    const el = document.querySelector('.md-table-block .md-table-corner');
+    if (!el) return false;
+    el.click();
+    return true;
+  })()`);
+  check('可点击左上角角手柄', cornerClicked === true);
   await waitToolbar();
+  shape = await tableShape();
+  check(
+    '角手柄选中整张表（全部单元格高亮）',
+    shape.selectedCells === 12 && shape.toolbarVisible,
+    JSON.stringify(shape)
+  );
+  const cornerSelected = await exec(
+    `document.querySelector('.md-table-block .md-table-corner')?.classList.contains('is-selected') === true`
+  );
+  check('角手柄本身高亮', cornerSelected === true);
+  const wholeToolbar = await exec(`(() => {
+    const btn = (action) => document.querySelector('.md-table-toolbar:not([hidden]) .md-table-tool-btn[data-table-action="' + action + '"]');
+    return JSON.stringify({
+      insertBeforeDisabled: btn('insertBefore')?.disabled === true,
+      removeDisabled: btn('remove')?.disabled === true,
+      removeTableEnabled: btn('removeTable') && btn('removeTable').disabled === false
+    });
+  })()`);
+  const wholeToolbarState = JSON.parse(wholeToolbar);
+  check(
+    '整表选中时工具条只保留「删除整张表」',
+    wholeToolbarState.insertBeforeDisabled && wholeToolbarState.removeDisabled && wholeToolbarState.removeTableEnabled,
+    wholeToolbar
+  );
   check('工具条提供「删除整张表」', (await clickTableAction('removeTable')) === true);
   await waitFor(() => exec(`!document.querySelector('.ProseMirror table')`), { label: '整张表被删除' });
   const tableHandlesGone = await exec(

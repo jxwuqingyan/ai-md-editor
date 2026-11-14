@@ -1,9 +1,12 @@
 /**
  * 表格行列手柄：选中整行 / 整列后浮出增删工具条。
  *
- * 交互：表格上方是每列一个的列手柄，左侧是每行一个的行手柄。点手柄构造
- * 整行 / 整列的 CellSelection（选中单元格由预设的表格编辑插件自动高亮），
- * 并在表格上方浮出「在前插入 / 在后插入 / 删除」三个按钮。
+ * 交互：表格上方是每列一个的列手柄，左侧是每行一个的行手柄，左上角是选中
+ * 整张表的角手柄。点手柄构造整行 / 整列 / 整表的 CellSelection（选中单元格
+ * 由预设的表格编辑插件自动高亮），并在表格上方浮出增删按钮。
+ *
+ * 手柄默认隐藏（不打扰阅读），只有鼠标悬停到表格上、或编辑光标 / 选区落在
+ * 表格内时才浮现；光标离开后自动收起。
  *
  * 为什么用 NodeView 包一层：手柄必须落在表格 DOM 之外（否则会被 ProseMirror
  * 当成内容变化），又必须跟每列宽度、每行高度对齐；自定义 NodeView 让手柄
@@ -22,12 +25,14 @@ import { findAncestor } from './commands';
 
 /** 选中的是行还是列 */
 type Axis = 'row' | 'col';
+/** 选中目标：行 / 列 / 整张表（左上角手柄） */
+type SelectedAxis = Axis | 'table';
 /** 工具条动作 */
 type HandleAction = 'insertBefore' | 'insertAfter' | 'remove' | 'removeTable';
 
 interface SelectedHandle {
-  axis: Axis;
-  /** 行 / 列在表格中的序号（0 起，0 行即表头） */
+  axis: SelectedAxis;
+  /** 行 / 列在表格中的序号（0 起，0 行即表头）；整表选中时为 -1 */
   index: number;
 }
 
@@ -103,6 +108,8 @@ class TableNodeView implements NodeView {
   private format: (action: FormatAction) => void;
   private colBar: HTMLDivElement;
   private rowBar: HTMLDivElement;
+  /** 左上角手柄：点击选中整张表 */
+  private corner: HTMLButtonElement;
   /** 工具条挂在 body 上用 fixed 定位，避免被编辑区滚动容器裁掉 */
   private toolbar: HTMLDivElement;
   private selected: SelectedHandle | null = null;
@@ -135,7 +142,18 @@ class TableNodeView implements NodeView {
     this.colBar.className = 'md-table-handle-bar md-table-col-bar';
     this.rowBar = document.createElement('div');
     this.rowBar.className = 'md-table-handle-bar md-table-row-bar';
-    this.dom.append(this.colBar, this.rowBar);
+    this.corner = document.createElement('button');
+    this.corner.type = 'button';
+    this.corner.className = 'md-table-corner';
+    this.corner.title = '选中整张表';
+    this.corner.innerHTML = `<span class="md-table-grip">${GRIP_ICON}</span>`;
+    this.corner.addEventListener('mousedown', (event) => event.preventDefault());
+    this.corner.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.selectTable();
+    });
+    this.dom.append(this.colBar, this.rowBar, this.corner);
 
     this.toolbar = document.createElement('div');
     this.toolbar.className = 'md-table-toolbar';
@@ -196,6 +214,12 @@ class TableNodeView implements NodeView {
       isCellSelection &&
       tablePos !== undefined &&
       findAncestor(selection.$anchorCell, 'table')?.pos === tablePos;
+    // 编辑光标落在表格内（含整行 / 列 / 整表选区）时手柄常显；光标离开即收起
+    const active =
+      tablePos !== undefined &&
+      selection.from >= tablePos &&
+      selection.from <= tablePos + (view.state.doc.nodeAt(tablePos)?.nodeSize ?? 0);
+    this.dom.classList.toggle('md-table-active', active);
     // 用户在别处点了一下，或命令改掉了选区：收起工具条
     if (!belongsHere && this.selected) {
       this.selected = null;
@@ -272,10 +296,32 @@ class TableNodeView implements NodeView {
     this.paint();
   }
 
+  /** 左上角手柄：选中整张表（首格到末格的 CellSelection） */
+  private selectTable(): void {
+    const tablePos = this.getPos();
+    if (tablePos === undefined) return;
+    const table = this.view.state.doc.nodeAt(tablePos);
+    if (!table || table.childCount === 0) return;
+    const firstPos = cellBeforePos(this.view, tablePos, 0, 0);
+    const lastRow = table.childCount - 1;
+    const lastRowNode = table.child(lastRow);
+    const lastPos = cellBeforePos(this.view, tablePos, lastRow, lastRowNode.childCount - 1);
+    if (firstPos === null || lastPos === null) return;
+    const selection = new CellSelection(
+      this.view.state.doc.resolve(firstPos),
+      this.view.state.doc.resolve(lastPos)
+    );
+    this.view.dispatch(this.view.state.tr.setSelection(selection));
+    this.view.focus();
+    this.selected = { axis: 'table', index: -1 };
+    this.paint();
+  }
+
   /** 刷新手柄选中态与工具条 */
   private paint(): void {
     const selected = this.selected;
     this.dom.classList.toggle('md-table-has-selection', selected !== null);
+    this.corner.classList.toggle('is-selected', selected?.axis === 'table');
     Array.from(this.dom.querySelectorAll<HTMLElement>('.md-table-handle')).forEach((handle) => {
       const active =
         selected !== null &&
@@ -285,23 +331,28 @@ class TableNodeView implements NodeView {
     });
     this.toolbar.hidden = selected === null;
     if (!selected) return;
-    const labels = ACTION_LABELS[selected.axis];
+    const labels = ACTION_LABELS[selected.axis === 'table' ? 'row' : selected.axis];
     Array.from(this.toolbar.querySelectorAll<HTMLButtonElement>('.md-table-tool-btn')).forEach((button) => {
       const action = button.dataset.tableAction as HandleAction;
+      // 整表选中时行列增删语义不明，只保留「删除整张表」
+      const tableBlocked = selected.axis === 'table' && action !== 'removeTable';
       // 表头行之上不能插数据行（表格必须以表头行开头），禁用而不是给出坏结果
-      const headerBlocked = selected.axis === 'row' && selected.index === 0 && action === 'insertBefore';
+      const headerBlocked =
+        selected.axis === 'row' && selected.index === 0 && action === 'insertBefore';
       // 只剩一列 / 只剩「表头 + 一个数据行」时，再删会产出非法表格
       const lastBlocked =
         action === 'remove' &&
         (selected.axis === 'col'
           ? (this.contentDOM.rows[0]?.cells.length ?? 0) <= 1
-          : this.contentDOM.rows.length <= 2);
-      button.disabled = headerBlocked || lastBlocked;
-      button.title = headerBlocked
-        ? '表头上方不能插入行'
-        : lastBlocked
-          ? '表格不能再缩小了'
-          : labels[action];
+          : selected.axis === 'row' && this.contentDOM.rows.length <= 2);
+      button.disabled = tableBlocked || headerBlocked || lastBlocked;
+      button.title = tableBlocked
+        ? '整表选中时请先选中一行或一列'
+        : headerBlocked
+          ? '表头上方不能插入行'
+          : lastBlocked
+            ? '表格不能再缩小了'
+            : labels[action];
     });
     this.toolbar.dataset.axis = selected.axis;
     this.positionToolbar();
@@ -321,16 +372,23 @@ class TableNodeView implements NodeView {
     const selected = this.selected;
     if (!selected) return;
     const { axis, index } = selected;
-    // 命令基于当前选区判断行列；先重设一次，避免中间被别的操作改掉
-    this.select(axis, index);
-    if (action === 'removeTable') {
+    if (axis === 'table') {
+      // 整表选中只支持删除整张表
+      if (action !== 'removeTable') return;
+      this.selectTable();
       this.format('tableDelete');
-    } else if (action === 'remove') {
-      this.format(axis === 'row' ? 'tableDeleteRow' : 'tableDeleteCol');
-    } else if (action === 'insertBefore') {
-      this.format(axis === 'row' ? 'tableAddRowBefore' : 'tableAddColBefore');
     } else {
-      this.format(axis === 'row' ? 'tableAddRow' : 'tableAddCol');
+      // 命令基于当前选区判断行列；先重设一次，避免中间被别的操作改掉
+      this.select(axis, index);
+      if (action === 'removeTable') {
+        this.format('tableDelete');
+      } else if (action === 'remove') {
+        this.format(axis === 'row' ? 'tableDeleteRow' : 'tableDeleteCol');
+      } else if (action === 'insertBefore') {
+        this.format(axis === 'row' ? 'tableAddRowBefore' : 'tableAddColBefore');
+      } else {
+        this.format(axis === 'row' ? 'tableAddRow' : 'tableAddCol');
+      }
     }
     // 收尾：命令可能留下整格选区，用户接着打字会一次清空整行 / 整列单元格。
     // 换回普通文本光标，同时让 selectedCell 高亮自然消失。

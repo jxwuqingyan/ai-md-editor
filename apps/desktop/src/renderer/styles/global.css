@@ -1237,6 +1237,18 @@ button:focus-visible {
   position: absolute;
   display: flex;
   z-index: 2;
+  /* 默认隐藏，不打扰阅读：悬停表格或光标落在表格内时才浮现。
+     visibility 立即切换不参与过渡——窗口失焦时动画帧被节流，过渡式显隐会停在起点 */
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms var(--ease-out);
+}
+
+.milkdown-container .ProseMirror .md-table-block:hover .md-table-handle-bar,
+.milkdown-container .ProseMirror .md-table-block.md-table-active .md-table-handle-bar,
+.milkdown-container .ProseMirror .md-table-block.md-table-has-selection .md-table-handle-bar {
+  visibility: visible;
+  opacity: 1;
 }
 
 .md-table-col-bar {
@@ -1271,6 +1283,46 @@ button:focus-visible {
 .md-table-row-handle {
   border-right: none;
   border-bottom: 1px solid var(--bg-panel);
+}
+
+/* 左上角角手柄：点击选中整张表，显隐规则与行列手柄一致 */
+.milkdown-container .ProseMirror .md-table-block .md-table-corner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: var(--bg-subtle);
+  color: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  visibility: hidden;
+  opacity: 0;
+  transition: background 150ms var(--ease-out), color 150ms var(--ease-out),
+    opacity 120ms var(--ease-out);
+}
+
+.milkdown-container .ProseMirror .md-table-block:hover .md-table-corner,
+.milkdown-container .ProseMirror .md-table-block.md-table-active .md-table-corner,
+.milkdown-container .ProseMirror .md-table-block.md-table-has-selection .md-table-corner {
+  visibility: visible;
+  opacity: 1;
+}
+
+.milkdown-container .ProseMirror .md-table-block .md-table-corner:hover {
+  background: var(--bg-hover);
+  color: var(--text-tertiary);
+}
+
+.milkdown-container .ProseMirror .md-table-block .md-table-corner.is-selected {
+  background: var(--accent);
+  color: #fff;
 }
 
 .md-table-handle:hover {
