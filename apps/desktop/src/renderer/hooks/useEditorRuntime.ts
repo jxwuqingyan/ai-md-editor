@@ -3,7 +3,6 @@
  *
  * - 持有 editorRef（渲染层其它模块通过它调用编辑器能力）
  * - 编辑器异步就绪后补同步内容、恢复只读状态
- * - 打字机模式：按键或点击后把光标保持在视区中部
  */
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import type { EditorInstance } from '@ai-md-editor/editor';
@@ -19,10 +18,6 @@ interface UseEditorRuntimeOptions {
   activeIdRef: MutableRefObject<string>;
   /** 只读状态 */
   readOnly: boolean;
-  /** 打字机模式 */
-  typewriterMode: boolean;
-  /** 视图模式（切换时重新挂载监听） */
-  viewMode: 'wysiwyg' | 'source';
 }
 
 /** 编辑器运行时 hook */
@@ -30,9 +25,7 @@ export function useEditorRuntime({
   editorRef,
   tabsRef,
   activeIdRef,
-  readOnly,
-  typewriterMode,
-  viewMode
+  readOnly
 }: UseEditorRuntimeOptions) {
   // 编辑器就绪版本号（异步初始化完成后刷新依赖编辑器的派生数据）
   const [editorVersion, setEditorVersion] = useState(0);
@@ -59,19 +52,6 @@ export function useEditorRuntime({
   useEffect(() => {
     editorRef.current?.setEditable(!readOnly);
   }, [readOnly, editorVersion]);
-
-  /** 打字机模式：按键或点击后把光标保持在视区中部 */
-  useEffect(() => {
-    if (!typewriterMode) return;
-    const center = (): void => editorRef.current?.centerCaret();
-    window.addEventListener('keyup', center);
-    window.addEventListener('click', center);
-    center();
-    return () => {
-      window.removeEventListener('keyup', center);
-      window.removeEventListener('click', center);
-    };
-  }, [typewriterMode, viewMode]);
 
   return { editorVersion, handleReady };
 }

@@ -64,6 +64,7 @@ ai-md-editor/
 │       │   ├── ErrorBoundary.tsx # 渲染层异常兜底（避免整窗白屏）
 │       │   ├── constants.ts      # 渲染层小常量（避免入口静态依赖编辑器内核）
 │       │   ├── Sidebar.tsx       # 左侧文件树 / 大纲面板
+│       │   ├── OutlineList.tsx   # 大纲列表（侧栏与独立窗口共用，支持拖动重排章节）
 │       │   ├── menuHandlers.ts   # 原生菜单动作分发表（纯函数）
 │       │   ├── sourceActions.ts  # 源码模式格式化（纯函数，含表格增删行列）
 │       │   └── Dialogs.tsx       # 查找/快速打开/重命名/字数统计/大纲浮层
@@ -206,6 +207,10 @@ ai-md-editor/
 | 57 | 底部工具栏、斜杠菜单、原生菜单必须共用同一条插入链路：`Toolbar` 只发 `FormatAction` / `onInsertLink(label,url)` / `onPickImage`，实际动作由 `App.tsx` → `useEditing.applyFormat` 分发；图片一律走 `chooseImage`（系统文件选择器），链接一律走表单，**任何入口都不得再插 `[链接文字](url)` / `![图片](url)` 占位**。菜单「超链接」经 `linkFormRequest` 递增信号复用工具栏表单（工具栏隐藏时先显示）；代码块在工具栏只有「代码块」一个按钮（空选区点击即转成可见代码块），段落下拉只放正文与标题 1~4，不再重复「引用」「代码块」；行内代码只走原生菜单（见 #59）。工具栏按钮增多后用 `flex-wrap` 换行，E2E 有「不溢出编辑区」断言守门 |
 | 58 | **本地出包（CI 额度耗尽时的替代路径）**：`npm run build`（`out/` 必须干净，否则旧 chunk 全被塞进 asar）→ `cd apps/desktop && env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE CSC_IDENTITY_DISABLED=1 ../../node_modules/.bin/electron-builder --mac --arm64 --dir`（**不要直出 dmg**：受限环境拦截挂载卷上 `.BC.T_*` 的删除，hdiutil 清理失败报 `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`）→ `bash scripts/make-dmg.sh <版本号> arm64`（剥签名后补 ad-hoc、HFS+ 镜像挂 `/Volumes/MarkdownNote` 写 `.DS_Store` 布局与卷图标、`COPYFILE_DISABLE=1 ditto` 复制、`hdiutil convert -format UDZO`）。交付前校验：`hdiutil verify`、卷内四点布局、`codesign -dv` 的 `Signature=adhoc`、`Info.plist` 版本、`lipo -archs`、asar 内文件与 `out/` 逐字节比对；ad-hoc 未公证要提示「访达中右键→打开」。额度耗尽期间只推 `main`、不打 `v*` tag，避免触发必然失败的 workflow |
 | 59 | 预设的 `toggleInlineCodeCommand` 在**空选区直接返回 false**（官方界面层也要手动处理），任何「点按钮没反应」的行内代码入口都改用 ProseMirror `toggleMark(schema.marks.inlineCode)`：空选区切换 storedMark，与加粗/斜体一致，下一次输入即生效；有选区也照常切换。代码块用 `createCodeBlockCommand`（内部 `setBlockType`），空选区同样有效，末尾由 `trailing.ts` 补段落 |
+| 60 | 警告框插入必须**选中占位文字**：`insertSnippet(..., placeholder)` 只在新插入区间内查找文本并 `TextSelection.create` 选中，源码模式对应 `insertAndSelect`。否则光标落在 `[!NOTE]` 前，用户一输入就得到 `77[!NOTE] 内容`，装饰认不出首行标记、警告框退化成普通文本。所有入口统一发 `insertCallout` + 类型 payload（工具栏下拉与原生菜单共用），不要再各自拼 `snippet` 字符串 |
+| 61 | 大纲拖动重排：`OutlineList.tsx` 由侧栏与独立大纲窗口共用，HTML5 drag 的落点按指针在目标条目上 / 下半部决定 before / after，拖到列表空白落到末节之后，插入指示线用 `box-shadow: inset` 画。文本搬运交给 `packages/shared/src/text.ts` 的 `moveOutlineSection`（纯按行切片，章节范围取「下一个层级不高于当前标题的行」之前），目标落在自身章节内 / 拖到自己 / 越界返回 `moved=false`。拖动前必须 `flushEditor()` 并按**最新源码**重新 `extractOutline`（渲染用的 `useDeferredValue` 大纲可能滞后），再 `setActiveContent` + `setMarkdown`；源码模式额外压撤销栈，只读模式拒绝 |
+| 62 | 侧栏底栏与编辑区工具栏各自都有 `border-top`，必须**同高**才能让两条线对齐：共用 `--bottom-bar-height: 39px` 的 `min-height`（不要用 `height` 硬卡，工具栏换行会被压扁）。底栏文字用 `.filetree-root-name` 包一层保留省略号，⋮ 按钮 `align-self: stretch` 让竖线贯通。E2E 用两者 `rect.top` 差值 ≤1px 守门 |
+| 63 | macOS 会往「编辑」菜单自动追加「自动填充 / 开始听写… / 表情与符号」，它们不在模板里、`Menu.getApplicationMenu()` 也看不到，只能在主进程入口、菜单构建**之前**用 `systemPreferences.setUserDefault('NSDisabled*MenuItem', 'boolean', true)` 关闭（E2E 用 `getUserDefault` 校验开关已写入）。删菜单项要连带清理状态 / 快捷键 / 持久化 / 实现，别留死逻辑；打字机模式按用户要求连 `centerCaret`、F9、光标居中监听一起删干净 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -214,9 +219,10 @@ ai-md-editor/
 | `<u>…</u>` 下划线 | `packages/editor/src/underline.ts` | remark 折叠 html 节点 + mark schema + stringify handler |
 | YAML Front Matter | `packages/editor/src/frontmatter.ts` | `$remark(..., 'yaml')` 必须传第三个参数 `initialOptions`，否则 remark-frontmatter 抛 `Missing type in matter {}` |
 | 序列化 handler 汇总 | `packages/editor/src/stringify.ts` | `underline` / `yaml` / `text` 三个 handler 统一注册；`text` 仅放行 `[TOC]` 与 `[!NOTE]` 的方括号 |
-| 警告框 / 目录渲染 | `packages/editor/src/decorations.ts` | 纯 ProseMirror 装饰，不改 Markdown 文本；目录块在文档变化时重建 |
+| 警告框 / 目录渲染 | `packages/editor/src/decorations.ts` | 纯 ProseMirror 装饰，不改 Markdown 文本；目录块在文档变化时重建；警告框必须靠首行 `[!NOTE]` 识别，插入链路见 #60 |
 | 大纲解析 | `packages/markdown-core/src/index.ts` | 必须启用 remark-frontmatter，否则文件头 `---` 会被当 Setext 标题 |
-| 片段插入 | `packages/editor/src/commands.ts` `insertSnippet` | 行内片段替换选区；块级片段插到当前顶层块之后（空段落直接替换），否则定义类节点会拆坏段落 |
+| 大纲章节搬运 | `packages/shared/src/text.ts` `moveOutlineSection` | 纯按行切片；渲染层 `renderer/OutlineList.tsx` 负责拖放交互，接线见 #61 |
+| 片段插入 | `packages/editor/src/commands.ts` `insertSnippet` | 行内片段替换选区；块级片段插到当前顶层块之后（空段落直接替换），否则定义类节点会拆坏段落；`placeholder` 会选中新片段里的占位文字（警告框必需） |
 | 表格行/列增删 | `packages/editor/src/commands.ts` | 删行：正文行直接删，表头行整表重建；删列：`table_row` 与 `table_header_row` 都要遍历 |
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |

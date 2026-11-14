@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { OutlineItem } from '@ai-md-editor/markdown-core';
 import { isImeKey } from './ime';
+import OutlineList, { type OutlineDropPosition } from './OutlineList';
 
 /** 查找栏属性 */
 export interface FindBarProps {
@@ -276,6 +277,8 @@ export interface FloatPanelsProps {
   wordCountVisible: boolean;
   outlineWindowVisible: boolean;
   onOutlineClick: (line: number, index: number) => void;
+  /** 独立大纲窗口同样支持拖动重排 */
+  onOutlineMove: (fromIndex: number, toIndex: number, position: OutlineDropPosition) => void;
   onCloseWordCount: () => void;
   onCloseOutline: () => void;
 }
@@ -306,22 +309,12 @@ export function FloatPanels(props: FloatPanelsProps): JSX.Element | null {
             <span>大纲窗口</span>
             <button onClick={props.onCloseOutline} title="关闭">×</button>
           </div>
-          <div className="float-outline-list">
-            {props.outline.length === 0 ? (
-              <div className="quick-open-empty">暂无标题</div>
-            ) : (
-              props.outline.map((item) => (
-                <button
-                  key={`${item.line}-${item.index}`}
-                  className="float-outline-item"
-                  style={{ paddingLeft: 10 + (item.level - 1) * 12 }}
-                  onClick={() => props.onOutlineClick(item.line, item.index)}
-                >
-                  {item.text}
-                </button>
-              ))
-            )}
-          </div>
+          <OutlineList
+            items={props.outline}
+            variant="float"
+            onClick={props.onOutlineClick}
+            onMove={props.onOutlineMove}
+          />
         </div>
       )}
     </div>

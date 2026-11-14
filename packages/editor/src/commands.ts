@@ -252,11 +252,42 @@ export function deleteTableColumn(view: EditorView): void {
  *
  * @param parse Markdown → ProseMirror 节点的解析函数（parserCtx）
  */
+/**
+ * 在新插入区间内查找一段占位文字，返回其绝对位置。
+ * 只查插入区间，避免选中文档别处恰好相同的文字。
+ */
+function findInsertedText(
+  doc: ProseNode,
+  from: number,
+  to: number,
+  text: string
+): { from: number; to: number } | null {
+  let found: { from: number; to: number } | null = null;
+  doc.nodesBetween(from, to, (node, pos) => {
+    if (found || !node.isText || !node.text) return !found;
+    const index = node.text.indexOf(text);
+    if (index >= 0) {
+      const start = pos + index;
+      if (start >= from && start + text.length <= to) {
+        found = { from: start, to: start + text.length };
+      }
+    }
+    return !found;
+  });
+  return found;
+}
+
+/**
+ * 插入 Markdown 片段。
+ * placeholder 传入时选中新片段里的占位文字（如警告框的「内容」），
+ * 用户插完直接打字就替换掉它，而不是把字敲进 `[!NOTE]` 语法标记前面。
+ */
 export function insertSnippet(
   view: EditorView,
   parse: (markdown: string) => ProseNode,
   markdown: string,
-  atStart: boolean
+  atStart: boolean,
+  placeholder?: string
 ): void {
   const { state } = view;
   const fragment = parse(markdown).content;
@@ -270,13 +301,16 @@ export function insertSnippet(
 
   let tr;
   let caret: number;
+  let insertStart: number;
 
   if (atStart) {
     tr = state.tr.insert(0, fragment);
     caret = 1;
+    insertStart = 0;
   } else if (inline) {
     tr = state.tr.replaceRange(state.selection.from, state.selection.to, new Slice(fragment, 0, 0));
     caret = state.selection.from + fragment.size;
+    insertStart = state.selection.from;
   } else {
     // 定位光标所在顶层块，块级片段插到它后面（定义类节点只能存在于顶层）
     const $from = state.selection.$from;
@@ -289,12 +323,18 @@ export function insertSnippet(
     tr = emptyParagraph
       ? state.tr.replaceWith(blockStart, blockEnd, fragment)
       : state.tr.insert(blockEnd, fragment);
-    caret = (emptyParagraph ? blockStart : blockEnd) + 1;
+    insertStart = emptyParagraph ? blockStart : blockEnd;
+    caret = insertStart + 1;
   }
 
   const safeCaret = Math.max(0, Math.min(caret, tr.doc.content.size));
-  // 片段可能包含脚注定义等纯块容器，near 保证光标落在合法的内联位置
-  tr = tr.setSelection(TextSelection.near(tr.doc.resolve(safeCaret)));
+  const placeholderRange = placeholder
+    ? findInsertedText(tr.doc, insertStart, insertStart + fragment.size, placeholder)
+    : null;
+  // 有占位文字就选中它；否则 near 保证光标落在合法的内联位置
+  tr = placeholderRange
+    ? tr.setSelection(TextSelection.create(tr.doc, placeholderRange.from, placeholderRange.to))
+    : tr.setSelection(TextSelection.near(tr.doc.resolve(safeCaret)));
   view.dispatch(tr.scrollIntoView());
   view.focus();
 }

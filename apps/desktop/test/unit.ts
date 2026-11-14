@@ -12,7 +12,8 @@ import {
   dirNameOf,
   encodeText,
   stripMarkdown,
-  toFileUrl
+  toFileUrl,
+  moveOutlineSection
 } from '@ai-md-editor/shared';
 import { applySourceFormat, sourceTableContext } from '../src/renderer/sourceActions';
 import { extractMath, restoreMath } from '../src/main/mathExport';
@@ -290,6 +291,87 @@ const deletedOnlyTable = applySourceFormat('tableDelete', undefined, {
   selectionEnd: onlyTable.indexOf('| 1 | 2 |') + 2
 });
 ok('文档末尾的表格同样能整表删除', !deletedOnlyTable.content.includes('| --- |'), deletedOnlyTable.content);
+
+// ===== 大纲拖动：标题连同整节内容一起搬运 =====
+const chapterDoc = [
+  '# 第一章',
+  '正文一',
+  '',
+  '## 1.1',
+  '小节内容',
+  '',
+  '### 1.1.1',
+  '细节 A',
+  '',
+  '### 1.1.2',
+  '细节 B',
+  '',
+  '## 1.2',
+  '小节二',
+  '',
+  '# 第二章',
+  '正文二',
+  ''
+].join('\n');
+const chapterOutline: { level: number; line: number; index: number; text: string }[] = [
+  { level: 1, line: 1, index: 0, text: '第一章' },
+  { level: 2, line: 4, index: 1, text: '1.1' },
+  { level: 3, line: 7, index: 2, text: '1.1.1' },
+  { level: 3, line: 10, index: 3, text: '1.1.2' },
+  { level: 2, line: 13, index: 4, text: '1.2' },
+  { level: 1, line: 16, index: 5, text: '第二章' }
+];
+const toFirst = moveOutlineSection(chapterDoc, chapterOutline, 3, 0, 'before');
+ok('三级标题能整节搬到文档最前', toFirst.moved && toFirst.text.startsWith('### 1.1.2\n细节 B\n\n# 第一章'), toFirst.text.slice(0, 40));
+ok('搬走后原位置不再残留该标题', toFirst.text.indexOf('### 1.1.2') === toFirst.text.lastIndexOf('### 1.1.2'), toFirst.text);
+ok('搬运不丢正文', toFirst.text.includes('正文一') && toFirst.text.includes('细节 A') && toFirst.text.includes('正文二'), toFirst.text);
+ok('搬运保留结尾换行', toFirst.text.endsWith('\n'), JSON.stringify(toFirst.text.slice(-6)));
+
+const swapSiblings = moveOutlineSection(chapterDoc, chapterOutline, 4, 1, 'before');
+ok(
+  '同级标题能插到另一个章节之前',
+  swapSiblings.moved && swapSiblings.text.indexOf('## 1.2') < swapSiblings.text.indexOf('## 1.1'),
+  swapSiblings.text.slice(0, 60)
+);
+
+const wholeSection = moveOutlineSection(chapterDoc, chapterOutline, 1, 5, 'after');
+ok(
+  '带子标题的整节一起搬运',
+  wholeSection.moved &&
+    wholeSection.text.includes('### 1.1.1') &&
+    wholeSection.text.indexOf('# 第二章') < wholeSection.text.indexOf('## 1.1'),
+  wholeSection.text.slice(0, 60)
+);
+ok(
+  '整节搬运后子标题紧跟父标题',
+  wholeSection.text.includes('## 1.1\n小节内容\n\n### 1.1.1\n细节 A\n\n### 1.1.2\n细节 B'),
+  wholeSection.text.slice(-90)
+);
+
+equal('拖到自己不改变文档', moveOutlineSection(chapterDoc, chapterOutline, 3, 3, 'after'), {
+  text: chapterDoc,
+  moved: false
+});
+equal('拖进自己的父章节内部不改变文档', moveOutlineSection(chapterDoc, chapterOutline, 3, 1, 'after'), {
+  text: chapterDoc,
+  moved: false
+});
+equal('越界下标不改变文档', moveOutlineSection(chapterDoc, chapterOutline, 99, 0, 'before'), {
+  text: chapterDoc,
+  moved: false
+});
+
+const frontMatterDoc = '---\ntitle: 示例\n---\n\n# 开头\n\n正文\n\n# 结尾\n';
+const frontMatterOutline = [
+  { level: 1, line: 5, index: 0, text: '开头' },
+  { level: 1, line: 9, index: 1, text: '结尾' }
+];
+const frontMatterMoved = moveOutlineSection(frontMatterDoc, frontMatterOutline, 1, 0, 'before');
+ok(
+  'front matter 之后插入而不破坏 YAML 头',
+  frontMatterMoved.text.startsWith('---\ntitle: 示例\n---\n\n# 结尾'),
+  frontMatterMoved.text.slice(0, 40)
+);
 
 // ===== 结果 =====
 console.log(`\n单元测试：${total - failed}/${total} 通过`);

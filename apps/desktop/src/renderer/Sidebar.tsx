@@ -6,6 +6,7 @@ import { useState } from 'react';
 import type { OutlineItem } from '@ai-md-editor/markdown-core';
 import FileTree from './FileTree';
 import SidebarSearch from './SidebarSearch';
+import OutlineList, { type OutlineDropPosition } from './OutlineList';
 
 /** 侧栏属性 */
 interface SidebarProps {
@@ -19,6 +20,8 @@ interface SidebarProps {
   outline: OutlineItem[];
   /** 点击大纲项跳转 */
   onOutlineClick: (line: number, index: number) => void;
+  /** 拖动大纲项重排章节（标题连同整节内容一起移动） */
+  onOutlineMove: (fromIndex: number, toIndex: number, position: OutlineDropPosition) => void;
   /** 文件树根目录 */
   treeRoot: string | null;
   /** 当前活动文件路径（高亮） */
@@ -56,6 +59,7 @@ export default function Sidebar({
   onPanelChange,
   outline,
   onOutlineClick,
+  onOutlineMove,
   treeRoot,
   activePath,
   onOpenFile,
@@ -120,31 +124,7 @@ export default function Sidebar({
               refreshToken={refreshToken}
             />
           ) : (
-            <div className="outline-list">
-              {outline.length === 0 ? (
-                <div className="outline-empty">暂无标题</div>
-              ) : (
-                outline.map((item) => (
-                  <div
-                    key={`${item.line}-${item.index}`}
-                    className="outline-item"
-                    style={{ paddingLeft: 16 + (item.level - 1) * 14 }}
-                    onClick={() => onOutlineClick(item.line, item.index)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        onOutlineClick(item.line, item.index);
-                      }
-                    }}
-                    role="button"
-                    tabIndex={0}
-                    title={`跳转到「${item.text}」`}
-                  >
-                    {item.text}
-                  </div>
-                ))
-              )}
-            </div>
+            <OutlineList items={outline} variant="sidebar" onClick={onOutlineClick} onMove={onOutlineMove} />
           )}
         </>
       ) : null}

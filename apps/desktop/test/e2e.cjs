@@ -275,11 +275,14 @@ async function runTests() {
   await waitFor(() => exec(`Boolean(document.querySelector('.app'))`), { label: 'React 挂载' });
   check('窗口与渲染层启动', true, `windowSize=${win.getContentSize().join('x')}`);
 
-  // ===== 1. 表格上下文置灰 =====
-  // 初始文档没有表格，此时表格菜单项应当置灰
+  // ===== 1. 表格操作与菜单结构 =====
+  // 段落菜单里的整组表格子菜单已移除（插入表格走工具栏），先确认没有残留项
   await new Promise((resolve) => setTimeout(resolve, 800));
-  const notInTable = await menuItemEnabled('在下方插入行');
-  check('光标不在表格时表格菜单项置灰', notInTable === false, `enabled=${notInTable}`);
+  check(
+    '段落菜单不再提供表格子菜单',
+    !menuHasLabel('插入 3×3 表格') && !menuHasLabel('在下方插入行') && !menuHasLabel('删除整个表格'),
+    '表格相关项已从原生菜单移除'
+  );
 
   menuAction('view:toggle-mode');
   await waitFor(() => exec(`Boolean(document.querySelector('.source-editor'))`), { label: '源码模式' });
@@ -294,31 +297,15 @@ async function runTests() {
     { label: '表格渲染', timeout: 20000 }
   );
 
-  // 光标落到数据单元格
+  // 光标落到数据单元格（后续删除行用例需要这个落点）
   await clickSelector('.ProseMirror table td', 0);
-  const inBody = await menuItemEnabled('删除当前表格行');
-  check('光标在数据行时表格菜单项可用', inBody === true, `enabled=${inBody}`);
+  const bodyFocused = await exec(`document.activeElement?.closest('.ProseMirror') !== null`);
+  check('光标可落在数据单元格', bodyFocused === true, `focused=${bodyFocused}`);
 
-  // 光标落到表头单元格
+  // 光标落到表头单元格：整表仍可正常定位，删行语义由下面的动作断言保证
   await clickSelector('.ProseMirror table th', 0);
-  const headerItem = await waitFor(
-    () => {
-      const menu = Menu.getApplicationMenu();
-      const item = menu ? findMenuLabel(menu, '删除当前表格行（表头）') : null;
-      return item ? item.enabled : null;
-    },
-    { label: '表头菜单项文案' }
-  );
-  check('光标在表头时菜单项改为「删除当前表格行（表头）」', headerItem === true, `enabled=${headerItem}`);
-
-  // 表头删除语义不直观：macOS 用悬停说明，其它平台至少保证菜单文案明确标注「表头」
-  const headerTipItem = findMenuLabel(Menu.getApplicationMenu(), '删除当前表格行（表头）');
-  const headerTip = headerTipItem?.toolTip ?? '';
-  check(
-    '表头删除菜单项明确说明语义',
-    process.platform === 'darwin' ? headerTip.includes('首个数据行') : headerTipItem !== null,
-    process.platform === 'darwin' ? headerTip : '非 macOS 以「（表头）」文案为准'
-  );
+  const headerFocused = await exec(`document.activeElement?.closest('.ProseMirror') !== null`);
+  check('光标可落在表头单元格', headerFocused === true, `focused=${headerFocused}`);
 
   // ===== 2. 表头行删除（表头被删，首个数据行升级为表头） =====
   menuAction('format:table-delete-row');
@@ -364,23 +351,19 @@ async function runTests() {
   // ===== 3. 源码模式表格操作 =====
   await ensureSourceMode();
 
-  // 程序化 setSelectionRange 不派发任何事件，表格菜单上下文也必须跟着刷新
+  // 程序化 setSelectionRange 不派发任何事件，表格命令仍要按光标所在行生效
   await exec(SET_CARET_SILENT);
   await exec(`window.__setSource(${JSON.stringify(TABLE_DOC)}, 3)`);
-  await waitFor(() => menuHasLabel('删除当前表格行（表头）'), { label: '光标在表头的菜单文案' });
   const bodyOffset = TABLE_DOC.indexOf('单元格 a1');
   await exec(`window.__setCaretSilent(${bodyOffset})`);
-  const silentBody = await waitFor(
-    () => menuHasLabel('删除当前表格行') && !menuHasLabel('删除当前表格行（表头）'),
-    { label: '静默定位到数据行后菜单刷新', timeout: 5000 }
-  ).catch(() => false);
-  check('程序化定位光标到数据行后表格菜单刷新', silentBody === true, `menuRefreshed=${silentBody}`);
-  await exec(`window.__setCaretSilent(3)`);
-  const silentHeader = await waitFor(
-    () => menuHasLabel('删除当前表格行（表头）'),
-    { label: '静默定位回表头后菜单刷新', timeout: 5000 }
-  ).catch(() => false);
-  check('程序化定位光标回表头后菜单文案恢复', silentHeader === true, `menuRefreshed=${silentHeader}`);
+  menuAction('format:table-delete-row');
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  const silentBodyDelete = String(await exec(READ_SOURCE));
+  check(
+    '程序化定位光标到数据行后删行仍生效',
+    !silentBodyDelete.includes('单元格 a1') && silentBodyDelete.includes('单元格 a2'),
+    JSON.stringify(silentBodyDelete)
+  );
 
   // 「在下方插入行」在表头时应插到分隔行之后（否则会破坏表格结构）
   await exec(`window.__setSource(${JSON.stringify(TABLE_DOC)}, 3)`);
@@ -396,8 +379,6 @@ async function runTests() {
 
   await exec(`window.__setSource(${JSON.stringify(TABLE_DOC)}, 3)`);
   await new Promise((resolve) => setTimeout(resolve, 250));
-  const sourceHeaderEnabled = await menuItemEnabled('删除当前表格行（表头）');
-  check('源码模式光标在表头时同样上报上下文', sourceHeaderEnabled === true, `enabled=${sourceHeaderEnabled}`);
 
   menuAction('format:table-delete-row');
   await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1543,14 +1524,15 @@ async function runTests() {
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' });
   await waitFor(() => exec(`document.activeElement?.getAttribute('data-form') === 'url'`), { label: 'Tab 切到地址框' });
-  win.webContents.insertText('https://kbd.example.com');
-  // 等 URL 真的落到输入框里再回车，否则空地址提交会被拦下（偶发失败都出在这里）
+  // 受控 input 用原生 setter + input 事件直接写值：insertText 之后 Chromium 偶尔把焦点
+  // 挪走，URL 会落进编辑器，空地址提交被拦下（这条用例偶发失败的真实原因）。
+  // 键盘路径已由上面的 /链 → Enter → Tab 断言覆盖，这里只保证表单状态确定。
+  await setControlValue('.slash-form [data-form="url"]', 'https://kbd.example.com');
   await waitFor(() => exec(`document.querySelector('.slash-form [data-form="url"]')?.value === 'https://kbd.example.com'`), {
     label: '地址已填入表单',
     timeout: 5000
   });
-  // 回车前把焦点按回地址框：insertText 之后浏览器偶尔会把焦点挪走，
-  // Enter 落到编辑器上，表单不提交（这是这条用例偶发失败的真实原因）。
+  // 回车前把焦点按回地址框，避免 Enter 落到编辑器上、表单不提交。
   await exec(`(() => { const el = document.querySelector('[data-form="url"]'); if (!el) return false; el.focus(); return document.activeElement === el; })()`);
   win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Enter' });
   win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Enter' });
@@ -1743,8 +1725,6 @@ async function runTests() {
   check('点击表格下方空白即可输入内容', typedState.includes('"inTable":false') && typedState.includes('表格下方的文字'), typedState);
 
   await clickSelector('.ProseMirror table td', 0);
-  const deleteTableEnabled = await menuItemEnabled('删除整个表格');
-  check('光标在表格内时「删除整个表格」可用', deleteTableEnabled === true, `enabled=${deleteTableEnabled}`);
   menuAction('format:table-delete');
   await waitFor(() => exec(`!document.querySelector('.ProseMirror table')`), { label: '整表已删除' });
   const afterDeleteTable = await exec(`document.querySelector('.ProseMirror')?.textContent ?? ''`);
@@ -2554,6 +2534,162 @@ async function runTests() {
       !taskExitMd.includes('- [ ] <br />') &&
       !taskExitMd.includes('\n- <br />'),
     JSON.stringify(taskExitMd.slice(0, 120))
+  );
+
+  // ===== 10.15 菜单精简：编辑 / 显示 / 段落三组不再提供已移除的功能 =====
+  check('编辑菜单不再有「插入换行符」', !menuHasLabel('插入换行符'));
+  check('显示菜单不再有「打字机模式」', !menuHasLabel('打字机模式'));
+  check(
+    '段落菜单整组表格子菜单已移除',
+    !menuHasLabel('表格') && !menuHasLabel('插入 3×3 表格') && !menuHasLabel('删除整个表格')
+  );
+  // 系统往「编辑」菜单自动追加的三项不在模板里，只能靠系统默认项开关关闭：
+  // JS 侧的 Menu 对象看不到它们，这里校验开关确实写入了。
+  if (process.platform === 'darwin') {
+    const { systemPreferences } = require('electron');
+    const disabledKeys = [
+      'NSDisabledDictationMenuItem',
+      'NSDisabledCharacterPaletteMenuItem',
+      'NSDisabledAutoFillMenuItem'
+    ];
+    check(
+      '已关闭系统自动追加的听写 / 表情 / 自动填充菜单项',
+      disabledKeys.every((key) => systemPreferences.getUserDefault(key, 'boolean') === true),
+      disabledKeys.join(',')
+    );
+  }
+
+  // ===== 10.16 警告框：插入后选中「内容」占位，直接打字不会把标记挤成正文 =====
+  await resetDoc('警告框测试\n');
+  await caretToLastParagraph();
+  const calloutTitles = JSON.parse(
+    await exec(`JSON.stringify([...document.querySelectorAll('.toolbar .tb-btn')].map((b) => b.title))`)
+  );
+  check('工具栏新增警告框按钮', calloutTitles.includes('警告框'), calloutTitles.join(' | '));
+  const calloutOpened = await exec(`(() => {
+    const btn = [...document.querySelectorAll('.toolbar .tb-btn')].find((b) => b.title === '警告框');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`);
+  const calloutItems = JSON.parse(
+    await exec(`JSON.stringify([...document.querySelectorAll('.tb-menu-item')].map((el) => el.textContent))`)
+  );
+  check(
+    '警告框下拉提供 5 种类型',
+    calloutOpened === true && calloutItems.length === 5 &&
+      calloutItems.some((t) => t.includes('NOTE')) && calloutItems.some((t) => t.includes('CAUTION')),
+    calloutItems.join('|')
+  );
+  await exec(`[...document.querySelectorAll('.tb-menu-item')].find((el) => el.textContent.includes('NOTE'))?.click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror blockquote.callout-note'))`), {
+    label: '工具栏插入警告框',
+    timeout: 12000
+  });
+  const calloutSelection = String(await exec(`window.getSelection()?.toString() ?? ''`));
+  check('警告框插入后选中「内容」占位文字', calloutSelection === '内容', JSON.stringify(calloutSelection));
+  win.webContents.insertText('77');
+  await waitFor(
+    () => exec(`document.querySelector('.ProseMirror blockquote')?.textContent.includes('77')`),
+    { label: '警告框内直接输入', timeout: 10000 }
+  );
+  const calloutMd = await expectMarkdown('77', '警告框写回 Markdown');
+  check(
+    '直接输入的文字不再跑到 [!NOTE] 标记前面',
+    calloutMd.indexOf('[!NOTE]') >= 0 &&
+      calloutMd.indexOf('[!NOTE]') < calloutMd.indexOf('77') &&
+      !calloutMd.includes('77[!NOTE]') &&
+      !calloutMd.includes('内容'),
+    JSON.stringify(calloutMd.slice(0, 120))
+  );
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror blockquote.callout-note'))`), {
+    label: '输入后警告框装饰仍生效'
+  });
+  check('输入后警告框仍按装饰渲染（未退化成普通引用）', true);
+
+  // ===== 10.17 左下角分区线：侧栏底栏与编辑区工具栏的顶边严格对齐 =====
+  await exec(`[...document.querySelectorAll('.sidebar-tab')].find((b) => b.textContent.includes('文件'))?.click()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.filetree-footer'))`), { label: '文件面板底栏' });
+  const divider = JSON.parse(
+    await exec(`(() => {
+      const footer = document.querySelector('.filetree-footer');
+      const toolbar = document.querySelector('.toolbar');
+      if (!footer || !toolbar) return JSON.stringify({ missing: true });
+      const a = footer.getBoundingClientRect();
+      const b = toolbar.getBoundingClientRect();
+      return JSON.stringify({
+        footerTop: a.top, toolbarTop: b.top, delta: Math.abs(a.top - b.top),
+        footerHeight: a.height, toolbarHeight: b.height
+      });
+    })()`)
+  );
+  check('侧栏底栏与工具栏的分区线对齐', divider.delta <= 1, JSON.stringify(divider));
+
+  // ===== 10.18 大纲拖动：标题连同整节内容一起搬到指定位置 =====
+  const dragDoc = [
+    '# 第一章',
+    '正文一',
+    '',
+    '## 1.1',
+    '小节内容',
+    '',
+    '### 1.1.1',
+    '细节 A',
+    '',
+    '### 1.1.2',
+    '细节 B',
+    '',
+    '## 1.2',
+    '小节二',
+    '',
+    '# 第二章',
+    '正文二',
+    ''
+  ].join('\n');
+  await exec(`[...document.querySelectorAll('.sidebar-tab')].find((b) => b.textContent.includes('大纲'))?.click()`);
+  await resetDoc(dragDoc);
+  await waitFor(() => exec(`document.querySelectorAll('.outline-item').length === 6`), {
+    label: '大纲 6 条标题',
+    timeout: 12000
+  });
+  const dragStarted = await exec(`(() => {
+    const items = [...document.querySelectorAll('.outline-item')];
+    if (items.length !== 6) return false;
+    const dt = new DataTransfer();
+    window.__outlineDt = dt;
+    window.__outlineFrom = items[3];
+    window.__outlineTo = items[0];
+    window.__outlineFrom.dispatchEvent(
+      new DragEvent('dragstart', { bubbles: true, cancelable: true, dataTransfer: dt })
+    );
+    return true;
+  })()`);
+  check('大纲条目可拖动（dragstart 派发成功）', dragStarted === true);
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await exec(`(() => {
+    const dt = window.__outlineDt;
+    const to = window.__outlineTo;
+    const from = window.__outlineFrom;
+    const r = to.getBoundingClientRect();
+    const opts = { bubbles: true, cancelable: true, dataTransfer: dt, clientX: r.left + 5, clientY: r.top + 2 };
+    to.dispatchEvent(new DragEvent('dragover', opts));
+    to.dispatchEvent(new DragEvent('drop', opts));
+    from.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: dt }));
+    return true;
+  })()`);
+  const dragMd = await expectMarkdown('### 1.1.2', '大纲拖动写回 Markdown');
+  check(
+    '拖动最后一个三级标题把整节搬到文档最前',
+    dragMd.indexOf('### 1.1.2') >= 0 &&
+      dragMd.indexOf('### 1.1.2') < dragMd.indexOf('# 第一章') &&
+      dragMd.indexOf('细节 B') > dragMd.indexOf('### 1.1.2') &&
+      dragMd.indexOf('细节 B') < dragMd.indexOf('# 第一章'),
+    JSON.stringify(dragMd.slice(0, 140))
+  );
+  check(
+    '拖动后原章节内容不丢失',
+    dragMd.includes('### 1.1.1') && dragMd.includes('细节 A') && dragMd.includes('## 1.2') && dragMd.includes('正文二'),
+    JSON.stringify(dragMd.slice(0, 140))
   );
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====

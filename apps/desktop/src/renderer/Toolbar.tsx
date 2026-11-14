@@ -26,10 +26,19 @@ const PARAGRAPH_OPTIONS: { label: string; action: FormatAction; level?: number }
   { label: '标题 4', action: 'heading', level: 4 }
 ];
 
+/** 警告框类型（与原生菜单一致） */
+const CALLOUT_OPTIONS: { label: string; kind: string }[] = [
+  { label: 'NOTE 提示', kind: 'NOTE' },
+  { label: 'TIP 技巧', kind: 'TIP' },
+  { label: 'IMPORTANT 重要', kind: 'IMPORTANT' },
+  { label: 'WARNING 警告', kind: 'WARNING' },
+  { label: 'CAUTION 注意', kind: 'CAUTION' }
+];
+
 /** 工具栏图标名称 */
 type ToolbarIcon =
   | 'code' | 'link' | 'image' | 'quote' | 'bulletList' | 'orderedList'
-  | 'taskList' | 'table' | 'formula' | 'hr';
+  | 'taskList' | 'table' | 'formula' | 'hr' | 'callout';
 
 /** 统一的本地 SVG 图标，避免 Emoji 在不同平台缺字、变形或基线不齐 */
 function ToolbarSvg({ name }: { name: ToolbarIcon }): JSX.Element {
@@ -43,7 +52,8 @@ function ToolbarSvg({ name }: { name: ToolbarIcon }): JSX.Element {
     taskList: <><rect x="3.5" y="5" width="7" height="7" rx="1.5" /><path d="m5 8.4 1.8 1.8 3-3.4" /><path d="M14 8.5h6M14 16h6" /><rect x="3.5" y="12.5" width="7" height="7" rx="1.5" /></>,
     table: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9.5h18M3 15h18M9.5 4v16M15.5 4v16" /></>,
     formula: <path d="M18 5H8l6 7-6 7h10" />,
-    hr: <path d="M3 12h18" />
+    hr: <path d="M3 12h18" />,
+    callout: <><path d="M12 3 2.5 20h19L12 3Z" /><path d="M12 9v5" /><path d="M12 17.5h.01" /></>
   };
   return (
     <svg className="tb-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -65,6 +75,8 @@ export default function Toolbar({
 }: ToolbarProps): JSX.Element {
   // 段落下拉展开状态
   const [paraOpen, setParaOpen] = useState(false);
+  // 警告框类型下拉展开状态
+  const [calloutOpen, setCalloutOpen] = useState(false);
   // 链接表单展开状态
   const [linkOpen, setLinkOpen] = useState(false);
   // 链接表单内容
@@ -80,6 +92,7 @@ export default function Toolbar({
     const onDown = (e: MouseEvent): void => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setParaOpen(false);
+        setCalloutOpen(false);
         setLinkOpen(false);
       }
     };
@@ -96,12 +109,14 @@ export default function Toolbar({
   useEffect(() => {
     if (linkFormRequest === 0) return;
     setParaOpen(false);
+    setCalloutOpen(false);
     setLinkOpen(true);
   }, [linkFormRequest]);
 
   /** 应用格式：统一交给 App 分发，菜单与工具栏共享同一入口 */
   const apply = (action: FormatAction, payload?: number | string): void => {
     setParaOpen(false);
+    setCalloutOpen(false);
     setLinkOpen(false);
     onFormat(action, payload);
   };
@@ -155,6 +170,7 @@ export default function Toolbar({
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
             setParaOpen((v) => !v);
+            setCalloutOpen(false);
             setLinkOpen(false);
           }}
         >
@@ -190,6 +206,7 @@ export default function Toolbar({
           onClick={() => {
             setLinkOpen((v) => !v);
             setParaOpen(false);
+            setCalloutOpen(false);
           }}
         >
           <ToolbarSvg name="link" />
@@ -240,6 +257,7 @@ export default function Toolbar({
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => {
           setParaOpen(false);
+          setCalloutOpen(false);
           setLinkOpen(false);
           onPickImage();
         }}
@@ -247,6 +265,36 @@ export default function Toolbar({
         <ToolbarSvg name="image" />
       </button>
       {btn(<ToolbarSvg name="quote" />, '引用', 'quote')}
+
+      {/* 警告框：类型下拉，插入后光标直接落在「内容」占位文字上 */}
+      <div className="tb-dd-wrap">
+        <button
+          className="tb-btn"
+          title="警告框"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            setCalloutOpen((v) => !v);
+            setParaOpen(false);
+            setLinkOpen(false);
+          }}
+        >
+          <ToolbarSvg name="callout" />
+        </button>
+        {calloutOpen && (
+          <div className="tb-menu tb-menu-up">
+            {CALLOUT_OPTIONS.map((opt) => (
+              <div
+                key={opt.kind}
+                className="tb-menu-item"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => apply('insertCallout', opt.kind)}
+              >
+                {opt.label}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <span className="tb-sep" />
 

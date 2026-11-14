@@ -1,7 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { extractOutline } from '@ai-md-editor/markdown-core';
 import type { EditorInstance, TableContext } from '@ai-md-editor/editor';
-import { TEXT_ENCODING_LABELS } from '@ai-md-editor/shared';
+import { TEXT_ENCODING_LABELS, moveOutlineSection } from '@ai-md-editor/shared';
 import { NO_TABLE_CONTEXT } from './constants';
 import MarkdownEditor from './MarkdownEditor';
 import Tabs from './Tabs';
@@ -17,6 +17,7 @@ import { useEditing } from './hooks/useEditing';
 import { useFindReplace } from './hooks/useFindReplace';
 import { useSourceTableContext } from './hooks/useSourceTableContext';
 import { useMenuBridge } from './hooks/useMenuBridge';
+import type { OutlineDropPosition } from './OutlineList';
 
 /**
  * 应用根组件。
@@ -119,8 +120,6 @@ export default function App(): JSX.Element {
     setReadOnly,
     focusMode,
     setFocusMode,
-    typewriterMode,
-    setTypewriterMode,
     toolbarVisible,
     setToolbarVisible,
     wordCountVisible,
@@ -150,9 +149,7 @@ export default function App(): JSX.Element {
     editorRef,
     tabsRef,
     activeIdRef,
-    readOnly,
-    typewriterMode,
-    viewMode
+    readOnly
   });
 
   useEffect(() => {
@@ -292,6 +289,30 @@ export default function App(): JSX.Element {
       editorRef.current?.scrollToHeading(index);
     },
     [viewModeRef, tabsRef, activeIdRef, editorRef]
+  );
+
+  /**
+   * 大纲拖动重排：把标题连同整节内容搬到目标标题之前 / 之后。
+   *
+   * 侧栏渲染用的大纲来自延迟值，可能比刚敲入的内容旧；拖动前先同步编辑器回写，
+   * 再按最新源码重新解析一次大纲，保证行号与待搬运的文本严格对应。
+   */
+  const handleOutlineMove = useCallback(
+    (fromIndex: number, toIndex: number, position: OutlineDropPosition) => {
+      if (readOnlyRef.current) {
+        showNotice('只读模式下不能调整章节顺序');
+        return;
+      }
+      const active = tabsRef.current.find((tab) => tab.id === activeIdRef.current);
+      if (!active) return;
+      const current = (viewModeRef.current === 'wysiwyg' ? flushEditor() : undefined) ?? active.content;
+      const result = moveOutlineSection(current, extractOutline(current), fromIndex, toIndex, position);
+      if (!result.moved) return;
+      if (viewModeRef.current === 'source') history.push(current);
+      setActiveContent(result.text);
+      if (viewModeRef.current === 'wysiwyg') editorRef.current?.setMarkdown(result.text);
+    },
+    [readOnlyRef, tabsRef, activeIdRef, viewModeRef, flushEditor, history, setActiveContent, editorRef, showNotice]
   );
 
   /** 快速打开：载入最近文件 + 文件树两层内的 Markdown 文件 */
@@ -639,7 +660,6 @@ export default function App(): JSX.Element {
     toggleTabbar: () => setTabbarVisible((v) => !v),
     toggleReadOnly: () => setReadOnly((v) => !v),
     toggleFocus: () => setFocusMode((v) => !v),
-    toggleTypewriter: () => setTypewriterMode((v) => !v),
     toggleToolbar: () => setToolbarVisible((v) => !v),
     toggleSidebar: () => setSidebarOpen((v) => !v),
     showPanel: (panel) => {
@@ -662,7 +682,7 @@ export default function App(): JSX.Element {
 
   return (
     <div
-      className={`app ${tabbarVisible ? '' : 'app-no-tabbar'} ${focusMode ? 'focus-mode' : ''} ${typewriterMode ? 'typewriter-mode' : ''}`}
+      className={`app ${tabbarVisible ? '' : 'app-no-tabbar'} ${focusMode ? 'focus-mode' : ''}`}
       style={cssVars}
     >
       {/* 标签栏：文档标签在左，主题/侧栏动作固定在右上角 */}
@@ -699,6 +719,7 @@ export default function App(): JSX.Element {
           onPanelChange={setSidebarPanel}
           outline={outline}
           onOutlineClick={handleOutlineClick}
+          onOutlineMove={handleOutlineMove}
           treeRoot={treeRoot}
           activePath={activeTab?.path ?? null}
           onOpenFile={(path, name) => void openPath(path, name)}
@@ -775,6 +796,7 @@ export default function App(): JSX.Element {
         wordCountVisible={wordCountVisible}
         outlineWindowVisible={outlineWindowVisible}
         onOutlineClick={handleOutlineClick}
+        onOutlineMove={handleOutlineMove}
         onCloseWordCount={() => setWordCountVisible(false)}
         onCloseOutline={() => setOutlineWindowVisible(false)}
       />

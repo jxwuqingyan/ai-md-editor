@@ -69,8 +69,6 @@ export interface MenuHandlerDeps {
   toggleReadOnly: () => void;
   /** 切换专注模式 */
   toggleFocus: () => void;
-  /** 切换打字机模式 */
-  toggleTypewriter: () => void;
   /** 切换工具栏 */
   toggleToolbar: () => void;
   /** 切换侧栏 */
@@ -164,7 +162,7 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.InsertParagraphBelow]: () => deps.format('insertParagraphBelow'),
     [MenuActions.InsertLinkReference]: () => deps.format('snippet', '[链接文字][ref]\n\n[ref]: https://example.com'),
     [MenuActions.InsertFootnote]: () => deps.format('snippet', '正文[^1]\n\n[^1]: 脚注内容'),
-    [MenuActions.InsertCallout]: (payload) => deps.format('snippet', `\n> [!${payload ?? 'NOTE'}]\n> 内容\n`),
+    [MenuActions.InsertCallout]: (payload) => deps.format('insertCallout', payload ?? 'NOTE'),
     [MenuActions.InsertToc]: () => deps.format('snippet', '\n[TOC]\n'),
     [MenuActions.FormatHorizontalRule]: () => deps.format('hr'),
 
@@ -184,7 +182,6 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.ToggleMode]: deps.toggleMode,
     [MenuActions.ToggleReadOnly]: deps.toggleReadOnly,
     [MenuActions.ToggleFocusMode]: deps.toggleFocus,
-    [MenuActions.ToggleTypewriter]: deps.toggleTypewriter,
     [MenuActions.ToggleToolbar]: deps.toggleToolbar,
     [MenuActions.ToggleSidebar]: deps.toggleSidebar,
     [MenuActions.ShowFiles]: () => deps.showPanel('files'),

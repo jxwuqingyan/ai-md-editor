@@ -213,12 +213,12 @@ export async function createEditor(
   };
 
   /** 插入 Markdown 片段（委派给命令层，解析器从上下文取） */
-  const insertFragment = (markdown: string, atStart: boolean): void => {
+  const insertFragment = (markdown: string, atStart: boolean, placeholder?: string): void => {
     editor.action((ctx) => {
       const view = ctx.get(editorViewCtx);
       const parser = ctx.get(parserCtx);
       if (!view || !parser) return;
-      insertSnippet(view, parser, markdown, atStart);
+      insertSnippet(view, parser, markdown, atStart, placeholder);
     });
   };
 
@@ -425,6 +425,14 @@ export async function createEditor(
         case 'snippetAtStart':
           if (typeof payload === 'string') insertFragment(payload, action === 'snippetAtStart');
           break;
+        case 'insertCallout': {
+          // 警告框是引用块 + 行首语法标记，插入后必须选中「内容」占位文字：
+          // 否则光标停在 `[!NOTE]` 前，用户直接打字会把标记挤到中间，装饰失效、源码标记外露。
+          const kinds = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'];
+          const kind = typeof payload === 'string' ? payload.toUpperCase() : 'NOTE';
+          insertFragment(`\n> [!${kinds.includes(kind) ? kind : 'NOTE'}]\n> 内容\n`, false, '内容');
+          break;
+        }
       }
     },
 
@@ -513,18 +521,6 @@ export async function createEditor(
         const tr = view.state.tr.insertText(text, from, to);
         view.dispatch(tr.scrollIntoView());
         view.focus();
-      });
-    },
-
-    centerCaret(): void {
-      withView((view) => {
-        const scroller = view.dom.closest('.editor-wrap');
-        if (!(scroller instanceof HTMLElement)) return;
-        const coords = view.coordsAtPos(view.state.selection.from);
-        const rect = scroller.getBoundingClientRect();
-        const target = rect.top + rect.height * 0.45;
-        const delta = coords.top - target;
-        if (Math.abs(delta) > 2) scroller.scrollTop += delta;
       });
     },
 

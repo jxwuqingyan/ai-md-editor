@@ -14,11 +14,11 @@ export type FormatAction =
   | 'indentList' | 'outdentList'
   | 'insertParagraphAbove' | 'insertParagraphBelow'
   | 'moveLineUp' | 'moveLineDown' | 'deleteLine' | 'selectLine'
-  | 'snippet' | 'snippetAtStart';
+  | 'snippet' | 'snippetAtStart' | 'insertCallout';
 
 /**
  * 光标所在的表格上下文。
- * 供原生菜单判断「表格」子菜单项是否可用（不在表格内时置灰）。
+ * 由编辑器插件上报，供渲染层与自动化测试读取当前是否在表格 / 表头内。
  */
 export interface TableContext {
   /** 光标在表格内 */
@@ -71,8 +71,6 @@ export interface EditorInstance {
   setSearchHighlight(ranges: { start: number; end: number }[], active: number): void;
   /** 清除查找命中高亮 */
   clearSearchHighlight(): void;
-  /** 把光标保持在可视区域中部（打字机模式） */
-  centerCaret(): void;
   /** 查询当前光标是否在表格 / 表头内 */
   getTableContext(): TableContext;
   /**

@@ -65,6 +65,21 @@ function insert(ctx: SourceContext, text: string, atStart = false): SourceResult
   };
 }
 
+/**
+ * 插入文本并选中其中的占位文字。
+ * 警告框这类带语法标记的片段必须让用户一打字就替换「内容」，
+ * 否则光标停在 `[!NOTE]` 前面会把标记写成正文。
+ */
+function insertAndSelect(ctx: SourceContext, text: string, placeholder: string): SourceResult {
+  const { content, selectionStart: start, selectionEnd: end } = ctx;
+  const at = start + text.indexOf(placeholder);
+  return {
+    content: content.slice(0, start) + text + content.slice(end),
+    selectionStart: at,
+    selectionEnd: at + placeholder.length
+  };
+}
+
 /** 对选区涉及的每一行做变换，光标落在变换后文本末尾 */
 function transformLines(ctx: SourceContext, transform: (lines: string[]) => string[]): SourceResult {
   const { content, selectionStart, selectionEnd } = ctx;
@@ -354,6 +369,11 @@ export function applySourceFormat(
       return transformLines(ctx, (lines) => lines.map((line) => line.replace(/^ {1,2}/, '')));
     case 'codeBlock':
       return wrap(ctx, '\n```\n', '\n```\n');
+    case 'insertCallout': {
+      const kinds = ['NOTE', 'TIP', 'IMPORTANT', 'WARNING', 'CAUTION'];
+      const kind = typeof payload === 'string' ? payload.toUpperCase() : 'NOTE';
+      return insertAndSelect(ctx, `\n> [!${kinds.includes(kind) ? kind : 'NOTE'}]\n> 内容\n`, '内容');
+    }
     case 'hr':
       return insert(ctx, '\n---\n');
     case 'hardBreak':

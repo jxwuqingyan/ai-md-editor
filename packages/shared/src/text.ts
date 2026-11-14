@@ -133,3 +133,69 @@ export function dirNameOf(targetPath: string): string {
   const index = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'));
   return index > 0 ? targetPath.slice(0, index) : '';
 }
+
+/** 大纲条目的最小信息：解析层产出的 OutlineItem 可直接传入 */
+export interface OutlineSectionItem {
+  /** 标题层级 1-6 */
+  level: number;
+  /** 标题在源码中的行号（1 起） */
+  line: number;
+}
+
+/** 章节重排结果：moved=false 表示目标位置无意义（拖到自己或自己的子章节里） */
+export interface OutlineMoveResult {
+  text: string;
+  moved: boolean;
+}
+
+/**
+ * 把一个标题连同其下所有子标题与正文整体搬到另一个标题之前 / 之后。
+ *
+ * 章节范围：从该标题所在行，到下一个「层级不高于它」的标题行之前；没有下一个
+ * 同级或更高层级标题时延伸到文档末尾。行号由解析层给出（remark 已排除代码围栏、
+ * 引用块里的伪标题），这里只做纯文本行搬运，不改动任何一行的内容。
+ *
+ * @param outline 按文档顺序排列的大纲条目；fromIndex / toIndex 是数组下标
+ * @param position before 插到目标章节第一行之前，after 插到目标章节最后一行之后
+ */
+export function moveOutlineSection(
+  source: string,
+  outline: OutlineSectionItem[],
+  fromIndex: number,
+  toIndex: number,
+  position: 'before' | 'after'
+): OutlineMoveResult {
+  const unchanged: OutlineMoveResult = { text: source, moved: false };
+  if (fromIndex < 0 || toIndex < 0 || fromIndex >= outline.length || toIndex >= outline.length) {
+    return unchanged;
+  }
+  if (fromIndex === toIndex) return unchanged;
+
+  const lines = source.split('\n');
+  const ranges = outline.map((item, i) => {
+    let end = lines.length;
+    for (let j = i + 1; j < outline.length; j += 1) {
+      if (outline[j].level <= item.level) {
+        end = outline[j].line - 1;
+        break;
+      }
+    }
+    return { start: Math.max(1, item.line), end: Math.max(item.line, Math.min(end, lines.length)) };
+  });
+
+  const fromRange = ranges[fromIndex];
+  const toRange = ranges[toIndex];
+  const insertAt = position === 'before' ? toRange.start - 1 : toRange.end;
+  // 落点在被搬章节内部（含紧邻边界）意味着「原地不动」或「搬进自己的子章节」，都拒绝
+  if (insertAt >= fromRange.start - 1 && insertAt <= fromRange.end) return unchanged;
+
+  const block = lines.slice(fromRange.start - 1, fromRange.end);
+  const rest = [...lines.slice(0, fromRange.start - 1), ...lines.slice(fromRange.end)];
+  const target = insertAt > fromRange.start - 1 ? insertAt - block.length : insertAt;
+  rest.splice(target, 0, ...block);
+
+  let text = rest.join('\n');
+  // 原文以换行收尾时，别因为搬走了末尾空行而丢掉结尾换行
+  if (source.endsWith('\n') && !text.endsWith('\n')) text += '\n';
+  return { text, moved: text !== source };
+}

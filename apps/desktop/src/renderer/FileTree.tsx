@@ -307,7 +307,7 @@ export default function FileTree({
         <div className="filetree-empty">打开文件夹以浏览文件</div>
         <div className="filetree-footer">
           <button className="filetree-open-btn" onClick={onChooseFolder} title="打开文件夹">
-            打开文件夹…
+            <span className="filetree-root-name">打开文件夹…</span>
           </button>
         </div>
       </div>
@@ -323,7 +323,7 @@ export default function FileTree({
       </div>
       <div className="filetree-footer" ref={menuRef}>
         <button className="filetree-open-btn" onClick={onChooseFolder} title={`切换文件夹：${rootDir}`}>
-          {rootName}
+          <span className="filetree-root-name">{rootName}</span>
         </button>
         <button
           type="button"

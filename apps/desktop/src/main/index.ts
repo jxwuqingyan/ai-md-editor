@@ -1,9 +1,28 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, systemPreferences } from 'electron';
 import { registerIpcHandlers } from './ipc';
 import { setupApplicationMenu } from './menu';
 import { loadRecent } from './recent';
 import { flushSettings, loadSettings } from './settings';
 import { createWindow, openFileInRenderer } from './window';
+
+/**
+ * macOS 会往「编辑」菜单自动追加「自动填充 / 开始听写… / 表情与符号」三项，
+ * 它们不在菜单模板里，也不是本应用功能。系统只提供未公开的默认项开关来关掉，
+ * 且必须在菜单构建之前写入，所以放在主进程入口最顶部。
+ */
+if (process.platform === 'darwin') {
+  for (const key of [
+    'NSDisabledDictationMenuItem',
+    'NSDisabledCharacterPaletteMenuItem',
+    'NSDisabledAutoFillMenuItem'
+  ]) {
+    try {
+      systemPreferences.setUserDefault(key, 'boolean', true);
+    } catch {
+      // 系统版本不识别该键时忽略，不影响其它菜单项
+    }
+  }
+}
 
 // 设置应用显示名（macOS 菜单栏 / 关于面板 / 默认窗口标题）
 app.setName('MarkdownNote');

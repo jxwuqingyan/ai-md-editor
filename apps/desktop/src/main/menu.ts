@@ -178,7 +178,6 @@ function buildTemplate(): MenuItemConstructorOptions[] {
             item('公式块', MenuActions.InsertMathBlock)
           ]
         },
-        item('插入换行符', MenuActions.InsertHardBreak),
         sep,
         {
           label: '查找',
@@ -207,28 +206,7 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('提升标题级别', MenuActions.UpgradeHeading, { accelerator: 'CommandOrControl+=' }),
         item('降低标题级别', MenuActions.DowngradeHeading, { accelerator: 'CommandOrControl+-' }),
         sep,
-        {
-          label: '表格',
-          submenu: [
-            item('插入 3×3 表格', MenuActions.InsertTable),
-            sep,
-            // 增删行列只在光标位于表格内时可用：渲染层把光标上下文同步到 inTable / inTableHeader
-            item('在下方插入行', MenuActions.TableAddRow, { enabled: s.inTable }),
-            item('在右侧插入列', MenuActions.TableAddCol, { enabled: s.inTable }),
-            // 表头行也能删：编辑器会删掉旧表头并把首个数据行升级为新表头。
-            // 语义不直观，菜单文案与悬停说明都写清楚，避免用户以为会删掉整张表。
-            item(s.inTableHeader ? '删除当前表格行（表头）' : '删除当前表格行', MenuActions.TableDeleteRow, {
-              enabled: s.inTable,
-              toolTip: s.inTableHeader
-                ? '删除表头行后，首个数据行会成为新表头；表格只有表头时会删除整张表'
-                : undefined
-            }),
-            item('删除当前表格列', MenuActions.TableDeleteCol, { enabled: s.inTable }),
-            sep,
-            // 整表删除：文档末尾的表格后面没有可选中的光标位置，必须提供显式动作
-            item('删除整个表格', MenuActions.TableDelete, { enabled: s.inTable })
-          ]
-        },
+        // 表格相关操作不再放进原生菜单：插入表格走底部工具栏，整组菜单只会与工具栏重复。
         item('公式块', MenuActions.InsertMathBlock, {
           accelerator: key('Ctrl+Command+B', 'Ctrl+Alt+B')
         }),
@@ -343,10 +321,6 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('只读模式', MenuActions.ToggleReadOnly, { checked: s.readOnly }),
         sep,
         item('专注模式', MenuActions.ToggleFocusMode, { accelerator: 'F8', checked: s.focusMode }),
-        item('打字机模式', MenuActions.ToggleTypewriter, {
-          accelerator: 'F9',
-          checked: s.typewriterMode
-        }),
         item('工具栏', MenuActions.ToggleToolbar, { checked: s.toolbarVisible }),
         sep,
         item('显示 / 隐藏侧边栏', MenuActions.ToggleSidebar, {

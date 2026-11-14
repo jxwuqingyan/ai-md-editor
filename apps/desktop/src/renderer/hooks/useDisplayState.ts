@@ -28,7 +28,6 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
   const [tabbarVisible, setTabbarVisible] = useState(true);
   const [readOnly, setReadOnly] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
-  const [typewriterMode, setTypewriterMode] = useState(false);
   const [toolbarVisible, setToolbarVisible] = useState(true);
   const [wordCountVisible, setWordCountVisible] = useState(false);
   const [outlineWindowVisible, setOutlineWindowVisible] = useState(false);
@@ -135,7 +134,6 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
       sourceMode: viewMode === 'source',
       readOnly,
       focusMode,
-      typewriterMode,
       // 专注模式与只读模式会临时隐藏工具栏/侧栏，菜单勾选状态跟随实际可见性
       toolbarVisible: toolbarVisible && !readOnly,
       sidebarVisible: sidebarOpen && !focusMode,
@@ -151,7 +149,7 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
     };
     window.api.updateMenuState(state);
   }, [
-    tabbarVisible, viewMode, readOnly, focusMode, typewriterMode, toolbarVisible,
+    tabbarVisible, viewMode, readOnly, focusMode, toolbarVisible,
     sidebarOpen, sidebarPanel, wordCountVisible, outlineWindowVisible, alwaysOnTop,
     fullscreen, hasPath, tableContext, zoomPercent
   ]);
@@ -172,8 +170,6 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
     setReadOnly,
     focusMode,
     setFocusMode,
-    typewriterMode,
-    setTypewriterMode,
     toolbarVisible,
     setToolbarVisible,
     wordCountVisible,

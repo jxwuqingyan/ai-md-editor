@@ -2,6 +2,36 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.27 - 2026-11-14
+
+### 修复：警告框插入后直接打字把语法标记写成正文
+
+- **现象**：插入 `> [!NOTE]` 后光标停在标记前，直接输入得到 `77[!NOTE] 内容`——标记不再是引用块首行文本，装饰识别不到，警告框退化成一段带源码标记的普通文字。
+- **修法**：`insertSnippet` 增加 `placeholder` 参数，插入后在**新片段区间内**查找占位文字并选中；源码模式对应新增 `insertAndSelect`。原生菜单与工具栏统一走 `FormatAction` 的 `insertCallout`，插入 `\n> [!KIND]\n> 内容\n` 并选中「内容」，用户一打字就替换占位，`[!NOTE]` 始终留在首行。
+- **工具栏入口**：新增警告框按钮与 5 种类型下拉（NOTE / TIP / IMPORTANT / WARNING / CAUTION），与原生菜单一致；按钮增多后仍靠 `flex-wrap` 不溢出编辑区。
+
+### 新增：大纲视图拖动标题重排章节
+
+- 侧栏「大纲」面板与独立大纲窗口共用新增的 `OutlineList.tsx`：拖动标题条目，把该标题及其下所有子标题、正文整体搬到目标标题之前 / 之后；指针落在条目上半部为「之前」、下半部为「之后」，落在列表空白处为文末，落点用插入指示线标出。
+- 纯函数 `moveOutlineSection`（`packages/shared/src/text.ts`）按「下一个层级不高于当前标题的行」切分章节，按行搬运文本，不改任何一行内容；目标落在自身章节内、拖到自己或下标越界时返回 `moved=false`。front matter、结尾换行与带子标题的整节搬运均有单测覆盖。
+- 拖动前先 `flushEditor()` 同步回写、再按最新源码重新解析大纲（渲染用大纲来自 `useDeferredValue`，可能滞后于刚敲的内容），随后 `setActiveContent` + `setMarkdown`；源码模式额外压入撤销栈，只读模式拒绝并在状态栏给出原因。
+
+### 修复：左下角分区线未对齐
+
+- `.filetree-footer` 与 `.toolbar` 各自高度不同（约 34px / 39px），底边对齐导致两条 `border-top` 相差数像素。统一 `--bottom-bar-height: 39px` 的 `min-height`；底栏文字用 `.filetree-root-name` 包一层保留省略号，⋮ 按钮 `align-self: stretch` 让竖线贯通。E2E 断言两者 `rect.top` 差值 ≤1px（实测 0）。
+
+### 精简：原生菜单
+
+- 编辑菜单删「插入换行符」；macOS 自动追加的「自动填充 / 开始听写… / 表情与符号」不在菜单模板里，改在主进程入口用系统默认项开关（`NSDisabledDictationMenuItem` / `NSDisabledCharacterPaletteMenuItem` / `NSDisabledAutoFillMenuItem`）关闭，且必须在菜单构建之前写入。
+- 显示菜单删「打字机模式」，并连实现一起清掉：状态、F9 快捷键、持久化字段、`centerCaret`、光标居中监听与相关样式。
+- 段落菜单删除整组「表格」子菜单（插入 3×3、增删行列、删整表）。表格插入走工具栏 / 斜杠菜单；行列编辑命令本身保留在分发链路里，仍可由其它入口调用。
+
+### 验证与出包
+
+- `tsc --noEmit`、`npm run build` 通过；单测新增 11 条章节搬运用例，共 **61/61**；菜单运行时 3/3；E2E 新增 13 条断言、移除 5 条随菜单删去的旧断言，共 **169/169**（全屏 / 最小化 2 项按环境跳过）。
+- 斜杠菜单链接表单的键盘路径改用原生 setter + input 事件写入受控 input，消除焦点抖动导致的「地址已填入表单」偶发超时。
+- 代码变更后重打 `MarkdownNote-0.14.27-arm64.dmg`（166250602 字节 / 约 159 MB，Apple Silicon，ad-hoc 签名，未公证）；SHA-256 `b855dfe0eaf8865f46a3f1c5653307b36c8a2bde8e00db0a736ac7baeab95c6d`。`hdiutil verify` 校验和有效、卷内三点布局齐全、`Info.plist` 版本 0.14.27、`lipo -archs` 为 arm64，`app.asar` 内 416 个文件与 `out/` 逐字节一致，包内确认含警告框、大纲拖动与菜单精简代码。首次打开仍需「访达中右键→打开」。
+
 ## 0.14.26 - 2026-11-14
 
 ### 修复：工具栏「代码」按钮点不动、段落下拉重复

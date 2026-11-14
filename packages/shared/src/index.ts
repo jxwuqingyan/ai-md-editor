@@ -12,9 +12,12 @@ export {
   dirNameOf,
   encodeText,
   isRelativeImagePath,
+  moveOutlineSection,
   stripMarkdown,
   toFileUrl,
   writeEncoding,
+  type OutlineMoveResult,
+  type OutlineSectionItem,
   type TextEncoding
 } from './text';
 
@@ -425,8 +428,6 @@ export interface MenuViewState {
   readOnly: boolean;
   /** 专注模式 */
   focusMode: boolean;
-  /** 打字机模式 */
-  typewriterMode: boolean;
   /** 底部工具栏可见 */
   toolbarVisible: boolean;
   /** 侧栏可见 */
@@ -457,7 +458,6 @@ export const DEFAULT_MENU_VIEW_STATE: MenuViewState = {
   sourceMode: false,
   readOnly: false,
   focusMode: false,
-  typewriterMode: false,
   toolbarVisible: true,
   sidebarVisible: true,
   sidebarPanel: 'files',
@@ -563,7 +563,6 @@ export const MenuActions = {
   ToggleMode: 'view:toggle-mode',
   ToggleReadOnly: 'view:toggle-read-only',
   ToggleFocusMode: 'view:toggle-focus',
-  ToggleTypewriter: 'view:toggle-typewriter',
   ToggleToolbar: 'view:toggle-toolbar',
   ToggleSidebar: 'view:toggle-sidebar',
   ShowFiles: 'view:show-files',
