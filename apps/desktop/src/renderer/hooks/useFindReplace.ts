@@ -33,6 +33,22 @@ export interface MatchRange {
   end: number;
 }
 
+/** 在一段纯文本里找出所有命中（不区分大小写，允许重叠推进） */
+function computeMatches(query: string, text: string): MatchRange[] {
+  if (!query) return [];
+  const needle = query.toLowerCase();
+  const haystack = text.toLowerCase();
+  const result: MatchRange[] = [];
+  let from = 0;
+  while (from < haystack.length) {
+    const index = haystack.indexOf(needle, from);
+    if (index === -1) break;
+    result.push({ start: index, end: index + needle.length });
+    from = index + Math.max(1, needle.length);
+  }
+  return result;
+}
+
 /** 查找替换 hook */
 export function useFindReplace({
   editorRef,
@@ -54,6 +70,20 @@ export function useFindReplace({
   const findIndexRef = useRef(0);
   const replaceTextRef = useRef(replaceText);
   replaceTextRef.current = replaceText;
+  const activeContentRef = useRef(activeContent);
+  activeContentRef.current = activeContent;
+
+  /**
+   * 立刻按编辑器当前内容重算搜索文本。
+   * 替换之后不能等 React 状态回写（200ms 防抖 + 一次渲染）——那段时间里命中偏移是旧的，
+   * 高亮会飘到隔壁文字上。这里直接读编辑器。
+   */
+  const refreshSearchText = useCallback(() => {
+    const editor = editorRef.current;
+    const text =
+      viewModeRef.current === 'wysiwyg' && editor ? editor.getPlainText() : activeContentRef.current;
+    setSearchText(text);
+  }, [editorRef, viewModeRef]);
 
   // 搜索文本：wysiwyg 用纯文本，源码模式用 Markdown 原文。
   // 只在查找栏打开时才取纯文本——getPlainText 会遍历整篇文档，
@@ -66,20 +96,10 @@ export function useFindReplace({
     setSearchText(text);
   }, [findOpen, activeContent, activeId, viewMode, editorVersion, editorRef]);
 
-  const matches = useMemo<MatchRange[]>(() => {
-    if (!findQuery) return [];
-    const needle = findQuery.toLowerCase();
-    const haystack = searchText.toLowerCase();
-    const result: MatchRange[] = [];
-    let from = 0;
-    while (from < haystack.length) {
-      const index = haystack.indexOf(needle, from);
-      if (index === -1) break;
-      result.push({ start: index, end: index + needle.length });
-      from = index + Math.max(1, needle.length);
-    }
-    return result;
-  }, [findQuery, searchText]);
+  const matches = useMemo<MatchRange[]>(
+    () => computeMatches(findQuery, searchText),
+    [findQuery, searchText]
+  );
 
   const matchesRef = useRef(matches);
   matchesRef.current = matches;
@@ -88,6 +108,14 @@ export function useFindReplace({
     findIndexRef.current = 0;
     setCurrentMatch(0);
   }, [findQuery]);
+
+  // 替换后命中变少时，当前项可能越界：夹回最后一个，避免「4/3」这种计数
+  useEffect(() => {
+    if (currentMatch < matches.length) return;
+    const next = Math.max(0, matches.length - 1);
+    findIndexRef.current = next;
+    setCurrentMatch(next);
+  }, [matches, currentMatch]);
 
   /** 跳到第 N 个匹配项并选中 */
   const goToMatch = useCallback(
@@ -99,7 +127,8 @@ export function useFindReplace({
       setCurrentMatch(next);
       const target = list[next];
       if (viewModeRef.current === 'wysiwyg' && editorRef.current) {
-        editorRef.current.selectTextRange(target.start, target.end);
+        // 只把当前命中滚到可见并放光标，高亮由装饰负责（整段选中会糊一大片）
+        editorRef.current.placeCaretAtTextOffset(target.start);
         return;
       }
       const ta = document.querySelector<HTMLTextAreaElement>('.source-editor');
@@ -119,14 +148,14 @@ export function useFindReplace({
     const target = list[findIndexRef.current] ?? list[0];
     const replacement = replaceTextRef.current;
     if (viewModeRef.current === 'wysiwyg' && editorRef.current) {
-      editorRef.current.selectTextRange(target.start, target.end);
-      editorRef.current.replaceSelection(replacement);
+      editorRef.current.replaceTextRange(target.start, target.end, replacement);
+      refreshSearchText();
       return;
     }
     setActiveContent(
       activeContent.slice(0, target.start) + replacement + activeContent.slice(target.end)
     );
-  }, [readOnlyRef, viewModeRef, editorRef, activeContent, setActiveContent]);
+  }, [readOnlyRef, viewModeRef, editorRef, activeContent, setActiveContent, refreshSearchText]);
 
   /** 替换全部：从后往前替换，避免偏移变化 */
   const replaceAll = useCallback(() => {
@@ -136,9 +165,9 @@ export function useFindReplace({
     const replacement = replaceTextRef.current;
     if (viewModeRef.current === 'wysiwyg' && editorRef.current) {
       list.forEach((target) => {
-        editorRef.current?.selectTextRange(target.start, target.end);
-        editorRef.current?.replaceSelection(replacement);
+        editorRef.current?.replaceTextRange(target.start, target.end, replacement);
       });
+      refreshSearchText();
       return;
     }
     let content = activeContent;
@@ -147,6 +176,28 @@ export function useFindReplace({
     });
     setActiveContent(content);
   }, [readOnlyRef, viewModeRef, editorRef, activeContent, setActiveContent]);
+
+  /** 最近一次应用到编辑器的「命中集合 + 当前项」，避免每帧重复派发 */
+  const appliedRef = useRef('');
+
+  // 命中变化时刷新高亮；关闭查找时清掉
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!findOpen) {
+      appliedRef.current = '';
+      editor?.clearSearchHighlight();
+      return;
+    }
+    if (viewMode !== 'wysiwyg' || !editor) return;
+    // 替换后命中数量可能不变、但位置整体前移，所以签名要包含每处命中的位置
+    const signature = `${findQuery}|${currentMatch}|${matches.map((m) => `${m.start}-${m.end}`).join(',')}|${editorVersion}`;
+    if (appliedRef.current === signature) return;
+    appliedRef.current = signature;
+    const activeIndex = Math.min(currentMatch, Math.max(0, matches.length - 1));
+    editor.setSearchHighlight(matches, matches.length ? activeIndex : -1);
+    const active = matches[activeIndex];
+    if (active) editor.placeCaretAtTextOffset(active.start);
+  }, [findOpen, findQuery, matches, currentMatch, viewMode, editorVersion, editorRef]);
 
   /** 打开查找栏（可同时展开替换） */
   const openFind = useCallback((withReplace: boolean) => {

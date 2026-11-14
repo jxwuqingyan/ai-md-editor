@@ -23,26 +23,44 @@ export interface FindBarProps {
   onClose: () => void;
 }
 
-/** 查找 / 替换浮动栏 */
+/**
+ * 查找 / 替换栏：固定在编辑区顶部的一行，展开替换后变两行（桌面写法）。
+ *
+ *   查找  [____________]  3/12  ↑  ↓  替换   ×
+ *   替换  [____________]           替换  全部替换
+ */
 export function FindBar(props: FindBarProps): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  // 展开替换后直接把焦点放到替换框，省一次点击
+  useEffect(() => {
+    if (props.showReplace) replaceInputRef.current?.focus();
   }, [props.showReplace]);
+
+  const countText = props.query
+    ? props.matchCount === 0
+      ? '无结果'
+      : `${props.currentMatch + 1}/${props.matchCount}`
+    : '';
+  const noMatch = props.matchCount === 0;
 
   return (
     <div className="find-bar" role="search">
-      <button className="find-toggle" onClick={props.onToggleReplace} title={props.showReplace ? '收起替换' : '展开替换'}>
-        {props.showReplace ? '⌄' : '›'}
-      </button>
       <div className="find-fields">
         <div className="find-row">
+          <span className="find-label">查找</span>
           <input
             ref={inputRef}
             className="find-input"
+            data-find-input="query"
             value={props.query}
-            placeholder="查找"
+            placeholder="输入要查找的文字"
+            spellCheck={false}
             onChange={(event) => props.onQuery(event.target.value)}
             onKeyDown={(event) => {
               // 输入法上屏用的 Enter 不能当成「下一个」，否则中文查询会提前跳转
@@ -52,32 +70,73 @@ export function FindBar(props: FindBarProps): JSX.Element {
                 if (event.shiftKey) props.onPrev();
                 else props.onNext();
               } else if (event.key === 'Escape') {
+                event.preventDefault();
                 props.onClose();
               }
             }}
           />
-          <span className="find-count">
-            {props.matchCount === 0 ? '无结果' : `${props.currentMatch + 1}/${props.matchCount}`}
-          </span>
-          <button className="find-nav" title="上一个 (Shift+Enter)" onClick={props.onPrev}>↑</button>
-          <button className="find-nav" title="下一个 (Enter)" onClick={props.onNext}>↓</button>
-          <button className="find-close" title="关闭 (Esc)" onClick={props.onClose}>×</button>
+          <span className="find-count">{countText}</span>
+          <button
+            className="find-nav"
+            title="上一个（Shift+Enter）"
+            disabled={noMatch}
+            onClick={props.onPrev}
+          >
+            ↑
+          </button>
+          <button className="find-nav" title="下一个（Enter）" disabled={noMatch} onClick={props.onNext}>
+            ↓
+          </button>
+          <button
+            className={`find-action find-toggle${props.showReplace ? ' find-action-on' : ''}`}
+            data-find-action="toggle"
+            title={props.showReplace ? '收起替换' : '展开替换'}
+            onClick={props.onToggleReplace}
+          >
+            替换
+          </button>
+          <button className="find-close" title="关闭（Esc）" onClick={props.onClose}>
+            ×
+          </button>
         </div>
         {props.showReplace && (
           <div className="find-row">
+            <span className="find-label">替换</span>
             <input
+              ref={replaceInputRef}
               className="find-input"
+              data-find-input="replace"
               value={props.replaceText}
-              placeholder="替换为"
+              placeholder="替换为…（留空即删除）"
+              spellCheck={false}
               onChange={(event) => props.onReplaceText(event.target.value)}
               onKeyDown={(event) => {
                 if (isImeKey(event)) return;
-                if (event.key === 'Enter') props.onReplace();
-                else if (event.key === 'Escape') props.onClose();
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  props.onReplace();
+                } else if (event.key === 'Escape') {
+                  event.preventDefault();
+                  props.onClose();
+                }
               }}
             />
-            <button className="find-action" onClick={props.onReplace}>替换</button>
-            <button className="find-action" onClick={props.onReplaceAll}>全部</button>
+            <button
+              className="find-action"
+              data-find-action="replace"
+              disabled={noMatch}
+              onClick={props.onReplace}
+            >
+              替换
+            </button>
+            <button
+              className="find-action"
+              data-find-action="replace-all"
+              disabled={noMatch}
+              onClick={props.onReplaceAll}
+            >
+              全部替换
+            </button>
           </div>
         )}
       </div>

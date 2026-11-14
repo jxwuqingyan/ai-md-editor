@@ -59,6 +59,8 @@ import { selectionContextPlugin } from './selection';
 import { trailingParagraphPlugin } from './trailing';
 import { listBackspaceShortcut, listUnlistPendingPlugin } from './listBackspace';
 import { configureMathView, mathNodeViewPlugin } from './mathView';
+import { clearSearchHighlight, searchHighlightPlugin, setSearchHighlight } from './search';
+import { collectTextSegments, textOffsetToPos } from './textPos';
 import { slashMenuPlugin } from './slash';
 import { linkClickPlugin } from './link';
 import { taskListPlugin } from './task';
@@ -128,6 +130,8 @@ export async function createEditor(
     .use(gfm)
     // 末尾是非文本块（表格/分割线等）时补一个空段落，保证表格下方能点进去输入、整表也能被删除
     .use(trailingParagraphPlugin)
+    // 查找命中高亮：装饰而非改文本，不影响撤销栈
+    .use(searchHighlightPlugin)
     // 列表项开头按退格：去掉当前编号变普通段落，而不是并进上一行；连续按可一路解散列表
     .use(listUnlistPendingPlugin)
     .use(listBackspaceShortcut)
@@ -454,27 +458,45 @@ export async function createEditor(
     selectTextRange(start: number, end: number): void {
       withView((view) => {
         const { state } = view;
-        let offset = 0;
-        let from = -1;
-        let to = -1;
-        state.doc.descendants((node, pos) => {
-          if (node.isText) {
-            const length = node.text?.length ?? 0;
-            if (from < 0 && offset + length >= start) from = pos + Math.max(0, start - offset);
-            if (offset + length >= end) {
-              to = pos + Math.max(0, end - offset);
-              return false;
-            }
-            offset += length;
-            return false;
-          }
-          return true;
-        });
-        if (from < 0 || to < 0 || from > to) return;
+        const segments = collectTextSegments(state.doc);
+        const from = textOffsetToPos(segments, start);
+        const to = textOffsetToPos(segments, end, true);
+        if (from == null || to == null || from >= to) return;
         const tr = state.tr.setSelection(TextSelection.create(state.doc, from, to));
         view.dispatch(tr.scrollIntoView());
         view.focus();
       });
+    },
+
+    replaceTextRange(start: number, end: number, text: string): void {
+      withView((view) => {
+        const { state } = view;
+        const segments = collectTextSegments(state.doc);
+        const from = textOffsetToPos(segments, start);
+        const to = textOffsetToPos(segments, end, true);
+        if (from == null || to == null || from > to) return;
+        view.dispatch(state.tr.insertText(text, from, to).scrollIntoView());
+      });
+    },
+
+    placeCaretAtTextOffset(offset: number): void {
+      withView((view) => {
+        const { state } = view;
+        const segments = collectTextSegments(state.doc);
+        const pos = textOffsetToPos(segments, offset);
+        if (pos == null) return;
+        // 不抢焦点：查找框还在输入，焦点被拉走就没法继续打字了
+        const tr = state.tr.setSelection(TextSelection.near(state.doc.resolve(pos), 1)).scrollIntoView();
+        view.dispatch(tr);
+      });
+    },
+
+    setSearchHighlight(ranges: { start: number; end: number }[], active: number): void {
+      withView((view) => setSearchHighlight(view, ranges, active));
+    },
+
+    clearSearchHighlight(): void {
+      withView((view) => clearSearchHighlight(view));
     },
 
     replaceSelection(text: string): void {

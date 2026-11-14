@@ -185,6 +185,20 @@ async function clickSelector(selector, index = 0) {
   await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
+/** 给受控 input 赋值并触发 input 事件（React 受控组件只认原生 setter） */
+async function setControlValue(selector, value) {
+  await exec(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return false;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(el, ${JSON.stringify(value)});
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.focus();
+    return true;
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 300));
+}
+
 /** 按屏幕坐标点击（用于箭头这类小目标，或需要先真实移动鼠标再点的场景） */
 async function clickPoint(point) {
   const win = getWindow();
@@ -2155,6 +2169,125 @@ async function runTests() {
     JSON.stringify(tailSource)
   );
 
+
+  // ===== 10.12 查找 / 替换 =====
+  await resetDoc('苹果 香蕉 苹果\n\n橘子 苹果\n');
+  menuAction('edit:replace');
+  await waitFor(() => exec(`Boolean(document.querySelector('[data-find-input="query"]'))`), {
+    label: '查找栏打开'
+  });
+  const barShape = await exec(`(() => {
+    return JSON.stringify({
+      replaceInput: Boolean(document.querySelector('[data-find-input="replace"]')),
+      actions: [...document.querySelectorAll('[data-find-action]')].map((el) => el.textContent),
+      label: document.querySelector('.find-label')?.textContent ?? ''
+    });
+  })()`);
+  const bs = JSON.parse(barShape);
+  check(
+    '查找栏带替换行与替换 / 全部替换按钮',
+    bs.replaceInput === true && bs.actions.includes('替换') && bs.actions.includes('全部替换') && bs.label === '查找',
+    barShape
+  );
+
+  // 命中高亮：只盖住匹配文字，不能是整段选区（这里曾是「回车后一大片高亮」的现场）
+  await setControlValue('[data-find-input="query"]', '苹果');
+  const hitInfo = await waitFor(
+    () =>
+      exec(`(() => {
+        const hits = [...document.querySelectorAll('.md-find-hit')];
+        if (hits.length === 0) return '';
+        const sel = document.getSelection();
+        return JSON.stringify({
+          hits: hits.length,
+          texts: hits.map((el) => el.textContent),
+          activeHits: document.querySelectorAll('.md-find-hit-active').length,
+          selectionLength: sel ? sel.toString().length : 0,
+          count: document.querySelector('.find-count')?.textContent ?? ''
+        });
+      })()`),
+    { label: '命中高亮出现', timeout: 8000 }
+  );
+  const hi = JSON.parse(hitInfo);
+  check(
+    '命中只高亮匹配文字，不产生整段选区',
+    hi.hits === 3 && hi.texts.every((text) => text === '苹果') && hi.selectionLength === 0,
+    hitInfo
+  );
+  check('命中计数与高亮数量一致', hi.count === '1/3' && hi.activeHits === 1, hitInfo);
+
+  // 回车 = 下一个：结果不能消失，焦点留在查找框
+  await exec(`document.querySelector('[data-find-input="query"]')?.focus()`);
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+  const afterEnter = await waitFor(
+    () =>
+      exec(`(() => {
+        const count = document.querySelector('.find-count')?.textContent ?? '';
+        if (count !== '2/3') return '';
+        return JSON.stringify({
+          count,
+          hits: document.querySelectorAll('.md-find-hit').length,
+          focus: document.activeElement?.getAttribute('data-find-input') ?? ''
+        });
+      })()`),
+    { label: '回车跳到下一处', timeout: 6000 }
+  ).catch(() => '');
+  check('回车跳到下一处且结果不消失', String(afterEnter).includes('"count":"2/3"'), String(afterEnter));
+  check('跳转后焦点仍在查找框', String(afterEnter).includes('"focus":"query"'), String(afterEnter));
+
+  // 替换当前
+  await setControlValue('[data-find-input="replace"]', '梨');
+  await exec(`document.querySelector('[data-find-action="replace"]')?.click()`);
+  const replacedOne = await waitFor(
+    () => exec(`((document.querySelector('.ProseMirror')?.textContent ?? '').match(/苹果/g) ?? []).length === 2`),
+    { label: '替换一处' }
+  ).catch(() => false);
+  check('替换当前命中生效', replacedOne === true, `剩余苹果=${await exec(`((document.querySelector('.ProseMirror')?.textContent ?? '').match(/苹果/g) ?? []).length`)}`);
+
+  // 全部替换
+  await exec(`document.querySelector('[data-find-action="replace-all"]')?.click()`);
+  const replacedAll = await waitFor(
+    () => exec(`!(document.querySelector('.ProseMirror')?.textContent ?? '').includes('苹果')`),
+    { label: '全部替换' }
+  ).catch(() => false);
+  check('全部替换生效', replacedAll === true);
+
+  // 关闭查找栏后高亮要清掉
+  await exec(`document.querySelector('.find-close')?.click()`);
+  await waitFor(() => exec(`!document.querySelector('.find-bar')`), { label: '查找栏关闭' });
+  check(
+    '关闭查找栏后高亮全部清除',
+    (await exec(`document.querySelectorAll('.md-find-hit').length`)) === 0
+  );
+  const replacedSource = await expectMarkdown('梨', '替换结果写回文档');
+  check(
+    '替换结果写回 Markdown',
+    replacedSource.includes('梨 香蕉 梨') && replacedSource.includes('橘子 梨'),
+    JSON.stringify(replacedSource)
+  );
+
+  // 源码模式：同一套查找替换走 Markdown 原文偏移
+  await ensureSourceMode();
+  menuAction('edit:replace');
+  await waitFor(() => exec(`Boolean(document.querySelector('[data-find-input="query"]'))`), {
+    label: '源码模式查找栏打开'
+  });
+  await setControlValue('[data-find-input="query"]', '香蕉');
+  const sourceCount = await waitFor(
+    () => exec(`document.querySelector('.find-count')?.textContent ?? ''`),
+    { label: '源码模式命中计数' }
+  );
+  check('源码模式能查到命中', sourceCount === '1/1', String(sourceCount));
+  await setControlValue('[data-find-input="replace"]', '芒果');
+  await exec(`document.querySelector('[data-find-action="replace"]')?.click()`);
+  const sourceReplaced = await waitFor(
+    () => exec(`(document.querySelector('.source-editor')?.value ?? '').includes('芒果')`),
+    { label: '源码模式替换生效' }
+  ).catch(() => false);
+  check('源码模式替换生效', sourceReplaced === true, String(await exec(`document.querySelector('.source-editor')?.value ?? ''`)));
+  await exec(`document.querySelector('.find-close')?.click()`);
+  await ensureWysiwygMode();
 
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });

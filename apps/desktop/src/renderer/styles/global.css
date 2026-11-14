@@ -1499,14 +1499,13 @@ button:focus-visible {
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
 }
 
-.find-toggle {
-  width: 22px;
-  border: none;
-  background: none;
-  color: var(--text-tertiary);
-  cursor: pointer;
-  font-size: 14px;
+/* 行首的「查找 / 替换」标签，固定宽度让两行输入框左对齐 */
+.find-label {
   flex-shrink: 0;
+  width: 30px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .find-fields {
@@ -1525,7 +1524,7 @@ button:focus-visible {
 
 .find-input {
   flex: 1;
-  min-width: 0;
+  min-width: 160px;
   height: 26px;
   padding: 0 8px;
   border: 1px solid var(--border);
@@ -1570,6 +1569,31 @@ button:focus-visible {
 .find-action:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.find-nav:disabled,
+.find-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+
+/* 「替换」按钮处于展开状态 */
+.find-action-on {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+/* 查找命中高亮：只覆盖匹配文字本身，当前项更深 */
+.milkdown-container .md-find-hit {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+  border-radius: 2px;
+}
+
+.milkdown-container .md-find-hit-active {
+  background: color-mix(in srgb, var(--accent) 52%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 62%, transparent);
 }
 
 /* ============ 浮层与对话框 ============ */

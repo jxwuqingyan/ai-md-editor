@@ -63,6 +63,14 @@ export interface EditorInstance {
   selectTextRange(start: number, end: number): void;
   /** 用纯文本替换当前选区（查找替换） */
   replaceSelection(text: string): void;
+  /** 替换指定纯文本区间（查找替换用，比「先选中再替换」稳） */
+  replaceTextRange(start: number, end: number, text: string): void;
+  /** 把光标放到指定纯文本偏移处并滚到可见（不抢焦点） */
+  placeCaretAtTextOffset(offset: number): void;
+  /** 设置查找命中高亮（纯文本偏移区间），active 为当前项 */
+  setSearchHighlight(ranges: { start: number; end: number }[], active: number): void;
+  /** 清除查找命中高亮 */
+  clearSearchHighlight(): void;
   /** 把光标保持在可视区域中部（打字机模式） */
   centerCaret(): void;
   /** 查询当前光标是否在表格 / 表头内 */

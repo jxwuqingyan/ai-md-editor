@@ -279,6 +279,8 @@ ai-md-editor/
 | 公式编辑态需要一个「帮助文档 + 确定」的底部条 | 公式是 atom 节点，自绘 NodeView，没有现成的编辑器外壳 | `mathView.ts` 里给块级公式加 `.md-math-footer`：左侧链接走 `configureMathView({ openLink })` 注入的外部打开通道（`shell:open-external` 白名单），右侧「确定（⌘ / Ctrl + Enter）」点击即 `commit()`；行内公式不加（空间不足） |
 | 公式插入后只有一个蓝色框、改不了 | 公式插件的 `math_inline` / `math_block` 是 **atom** 节点，只有 `toDOM` 渲染 KaTeX，没有编辑界面；点击只能拿到 NodeSelection | `mathView.ts` 提供 NodeView：点击换成文本框编辑原始 TeX、失焦或 ⌘/Ctrl+Enter 提交、Esc 取消、清空即删除；行内写节点文本、块级写 `attrs.value`；插入公式时经 `requestMathAutoEdit()` 自动进入编辑；刚展开 250ms 内的 blur 只重新聚焦（否则点开就被抢焦点关掉） |
 | 编辑行内公式提交后段落被切成两段、源码里多出 `&#x20;` | 回车/退格分支只 `preventDefault()` 没 `stopPropagation()`，事件冒泡到键位链，`baseKeymap` 的 Enter → `splitBlock` 在公式后面分段；`preventDefault()` 对 `cancelable=false` 的合成事件无效，所以偶发 | `mathView.ts` 两个提交分支都补 `stopPropagation()`；`stopEvent()` 对键盘事件无条件返回 `true`（提交后 `editing` 已为 `false`，只按编辑态判断会漏掉仍在传播的那次按键） |
+| 查找回车后整篇（多段）被高亮 | `selectTextRange` 在一个 `descendants` 遍历里边走边累加纯文本偏移，`to` 在后续每个文本节点都被重新赋值（`return false` 只阻止下钻、不阻止遍历兄弟），终点被推到最后几段 | `packages/editor/src/textPos.ts` 先建「文档位置 ↔ 纯文本偏移」段落表再查表；查找替换、光标定位统一走它，不要在遍历里就地算 |
+| 查找高亮只想要匹配文字 | 用 `setSelection` 整段选中，块多了就糊一大片，而且会把焦点从查找框抢走 | `packages/editor/src/search.ts` 用 `Decoration.inline` 加 `.md-find-hit`（当前项 `.md-find-hit-active`），`placeCaretAtTextOffset` 只放光标不 `focus()`；替换后要立刻用编辑器当前纯文本重算，不能等 React 状态防抖回写 |
 | 改完内容立刻切源码/切标签，改动丢失 | 编辑器 → 标签状态的回写走 Milkdown 变更监听，**200ms 防抖**；切模式/切标签/关标签会卸载编辑器，监听 destroy 时 `debouncedHandler.cancel()`，那次回写被取消 | 新增 `EditorInstance.flushMarkdown()`（`serializerCtx` 同步序列化当前 doc），切模式、切标签、关标签、保存 / 另存为 / 全部保存前先 flush，不能用带缓存的 `getMarkdown()` |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
