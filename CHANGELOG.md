@@ -2,6 +2,19 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.23 - 2026-11-14
+
+### 修复：块级公式默认居中
+
+- KaTeX 的 displayMode 给 `.katex-display` **和**它的子级 `.katex` 都加了 `text-align: center`，只改外层没用。现在两层一起改为左对齐，公式与正文、代码块共用同一条左边线（`global.css` 的 `[data-type='math_block']` 规则）。
+
+### 修复：公式后面的行点不进去、无法接着写
+
+- **原因**：`math_block` 的 schema 是 `content: 'text*' + atom: true`，`isTextblock` 为真，所以末尾补段落的判断（非 textblock / `spec.code`）把它当成「能写字的块」放过了；实际它由 NodeView 渲染成 `contentEditable=false` 的 KaTeX，光标进不去，后面也没有落点。
+- **修法**：`trailing.ts` 的判断补上 `type.spec.atom === true`，块级公式与表格、代码块一视同仁。
+- **同时修掉一个更早就存在的问题**：打开文件 / 切回所见即所得时，编辑器是用 defaultValue 直接建 state 的，**不产生事务**，`appendTransaction` 不会被调用——于是「以表格、代码块、公式结尾的文档」一打开就点不进下方。现在插件在 `view()` 里补一次 `queueMicrotask` 检查。
+- 验证：诊断脚本 `apps/desktop/test/math-block-layout.cjs` 打印三种结尾（公式 / 代码块 / 表格）的块结构、公式对齐边界与「点公式下方输入后是否写在公式之后」；E2E 新增 3 条断言（左对齐且与正文同左边线 / 末尾补出可输入段落 / 点下方能继续写），全套 **128 项通过**。
+
 ## 0.14.22 - 2026-11-13
 
 ### 改进：表格行列网格改成「点行尾的 › 才展开」，悬停不再触发

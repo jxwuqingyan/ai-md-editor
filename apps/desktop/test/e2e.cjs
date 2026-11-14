@@ -2112,6 +2112,50 @@ async function runTests() {
   const insertSource = await expectMarkdown('\\frac{1}{2}', '插入后输入的公式写回 Markdown');
   check('插入后直接输入的 TeX 被保存', insertSource.includes('\\frac{1}{2}'), insertSource.slice(0, 60));
 
+  // ===== 10.11 块级公式：左对齐；作为最后一块时下方要能接着写 =====
+  await resetDoc('正文一段\n\n$$\nE = mc^2\n$$\n');
+  await waitFor(() => exec(`Boolean(document.querySelector('.md-math-block .katex'))`), {
+    label: '公式渲染（排版用例）',
+    timeout: 20000
+  });
+  const mathLayout = await exec(`(() => {
+    const disp = document.querySelector('.md-math-block .katex-display');
+    // .katex 是块级、宽度等于整行，量它看不出对齐；量真正的字形盒子
+    const atom = document.querySelector('.md-math-block .katex-html .mord');
+    const para = document.querySelector('.ProseMirror p');
+    const blocks = [...document.querySelector('.ProseMirror').children];
+    const tail = blocks[blocks.length - 1];
+    return JSON.stringify({
+      align: disp ? getComputedStyle(disp).textAlign : '',
+      atomLeft: atom ? Math.round(atom.getBoundingClientRect().left) : null,
+      paraLeft: para ? Math.round(para.getBoundingClientRect().left) : null,
+      tailIsParagraph: Boolean(tail && tail.tagName === 'P')
+    });
+  })()`);
+  const ml = JSON.parse(mathLayout);
+  check(
+    '块级公式左对齐，与正文同一条左边线',
+    ml.align === 'left' && ml.atomLeft !== null && Math.abs(ml.atomLeft - ml.paraLeft) <= 2,
+    mathLayout
+  );
+  check('公式作为最后一块时末尾补出可输入段落', ml.tailIsParagraph === true, mathLayout);
+
+  const belowPoint = JSON.parse(
+    await exec(`(() => {
+      const r = document.querySelector('.md-math-block').getBoundingClientRect();
+      return JSON.stringify({ x: Math.round(r.left + 20), y: Math.round(r.bottom + 14) });
+    })()`)
+  );
+  await clickPoint(belowPoint);
+  win.webContents.insertText('公式后面的文字');
+  const tailSource = await expectMarkdown('公式后面的文字', '公式下方可继续输入');
+  check(
+    '点公式下方能继续写正文',
+    tailSource.includes('$$\nE = mc^2\n$$\n\n公式后面的文字'),
+    JSON.stringify(tailSource)
+  );
+
+
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();

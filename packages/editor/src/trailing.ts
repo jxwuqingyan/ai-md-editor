@@ -13,33 +13,52 @@
  * 补段落只改变文档结构，序列化成 Markdown 后仅影响尾部换行。
  */
 import { $prose } from '@milkdown/kit/utils';
-import { Plugin, PluginKey } from '@milkdown/kit/prose/state';
+import { Plugin, PluginKey, type EditorState, type Transaction } from '@milkdown/kit/prose/state';
 
 /**
  * 末尾节点是否需要补一个空段落。
  *
- * - 非 textblock（表格、分割线、公式块等）：后面没有合法光标位置；
+ * - `atom` 块（块级公式）：schema 上它带着 `content: 'text*'`，看起来是 textblock，
+ *   但节点视图把 DOM 设成 `contentEditable=false`、只渲染 KaTeX，光标进不去，
+ *   后面也没有可点位置——不补段落就只能看着公式、写不了下一行；
+ * - 非 textblock（表格、分割线等）：后面没有合法光标位置；
  * - `spec.code` 为真的块（代码块）：内部只能写纯文本，Enter 换不出普通段落，
  *   点它下方也没有落点。
  */
 function needsTrailingParagraph(node: {
   isTextblock: boolean;
-  type: { spec: { code?: boolean } };
+  type: { spec: { code?: boolean; atom?: boolean } };
 }): boolean {
+  if (node.type.spec.atom === true) return true;
   if (!node.isTextblock) return true;
   return node.type.spec.code === true;
+}
+
+/** 需要时返回一个「在末尾补空段落」的事务 */
+function trailingTransaction(state: EditorState): Transaction | null {
+  const last = state.doc.lastChild;
+  if (!last || !needsTrailingParagraph(last)) return null;
+  const paragraph = state.schema.nodes['paragraph'];
+  if (!paragraph) return null;
+  return state.tr.insert(state.doc.content.size, paragraph.create());
 }
 
 export const trailingParagraphPlugin = $prose(
   () =>
     new Plugin({
       key: new PluginKey('MDNOTE_TRAILING_PARAGRAPH'),
-      appendTransaction: (_transactions, _oldState, state) => {
-        const last = state.doc.lastChild;
-        if (!last || !needsTrailingParagraph(last)) return null;
-        const paragraph = state.schema.nodes['paragraph'];
-        if (!paragraph) return null;
-        return state.tr.insert(state.doc.content.size, paragraph.create());
+      appendTransaction: (_transactions, _oldState, state) => trailingTransaction(state),
+      /**
+       * 打开文件 / 切回所见即所得时，编辑器是用 defaultValue 直接建 state 的，
+       * 没有经过任何事务，`appendTransaction` 不会被调用——于是「文档以表格、
+       * 代码块、公式结尾」的文档打开后下方点不进去。这里在建视图时补一次同样的检查。
+       */
+      view: (view) => {
+        queueMicrotask(() => {
+          const tr = trailingTransaction(view.state);
+          if (tr) view.dispatch(tr);
+        });
+        return {};
       }
     })
 );
