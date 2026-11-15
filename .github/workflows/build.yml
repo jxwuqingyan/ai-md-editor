@@ -13,8 +13,11 @@ permissions:
   contents: write
 
 jobs:
+  # 省 Actions 分钟数（私有仓库 2000 分钟/月，macOS runner 10 倍计费）：
+  # push / PR 只跑测试 job；三平台打包只在打 v* tag 或手动触发时运行。
   build:
     name: Build (${{ matrix.os }} ${{ matrix.arch }})
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

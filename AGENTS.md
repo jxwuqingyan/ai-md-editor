@@ -87,7 +87,7 @@ ai-md-editor/
 │   ├── markdown-core/        # 解析/序列化/大纲（纯函数）
 │   ├── theme/                # 主题系统（design tokens）
 │   └── shared/               # 跨进程共享类型（IPC 契约）+ 纯函数工具（text.ts：编码/路径/文本）
-├── .github/workflows/        # CI 打包（macOS x64+arm64 / Windows x64）
+├── .github/workflows/        # CI：push/PR 只跑测试；v* tag / 手动触发才三平台打包
 ├── docs/                     # 文档（技术方案、设计规范）
 └── package.json              # npm workspaces
 ```
@@ -156,7 +156,7 @@ ai-md-editor/
 | 6 | 视觉：现代极简，动效克制（CSS 过渡），去 AI 味 |
 | 7 | 包管理器：npm workspaces（已从 pnpm 迁移） |
 | 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
-| 9 | 分发：常态由 CI 打包 macOS（x64 + arm64）dmg + Windows x64 安装包；CI 额度耗尽时退化为本地出 arm64 dmg（见 #58），代码与配置不改，额度恢复后自动回到三平台流程 |
+| 9 | 分发：push/PR 只跑测试 job；打 `v*` tag 或手动触发才三平台打包（macOS x64+arm64 dmg + Windows x64 exe）并传 Release——私有仓库 2000 分钟/月、macOS runner 10 倍计费，每次 push 都打包几天就会烧完额度（2026-11 额度就是这么耗尽的，此后只推 main、本地出 arm64 dmg，见 #58） |
 | 10 | 顶部导航：macOS 原生应用菜单 + 标签栏右侧动作区，窗口内不保留独立功能顶栏 |
 | 11 | 原生菜单只保留「文件/编辑/段落/格式/显示」五组；主题走右上角按钮，不设主题/窗口/帮助菜单 |
 | 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
@@ -314,7 +314,7 @@ ai-md-editor/
    - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号四处一致（见第 9 节）。
    - 删除无用文件：构建临时配置（`electron.vite.config.*.mjs`）、`*.tsbuildinfo`、空的 `release/`、游离的测试产物与截屏、`.DS_Store`；`out/` 可整体重建后再构建，避免残留旧 chunk。
    - 全仓库检索确认无第三方产品名/品牌标识（含注释、界面示例文案、包描述）。
-4. **CI 打包**：仓库需配置 GitHub Actions workflow，自动打包 **macOS（x64 与 arm64 两种架构的 dmg）** 与 **Windows（x64 安装包）**。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG，期间只推 `main` 不打 tag。
+4. **CI 打包**：`.github/workflows/build.yml` 中 push/PR 只跑测试（macOS 完整 `npm test` + Windows 单测/菜单校验）；打 `v*` tag 或手动 `workflow_dispatch` 才运行三平台打包并传 Release。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
 
 ## 14. 参考文档
 
