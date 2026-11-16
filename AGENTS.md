@@ -218,6 +218,7 @@ ai-md-editor/
 | 67 | 表格手柄的视觉细节（0.14.31）：手柄带宽度用 `--md-table-gutter: 16px` 与 block 的 padding 精确相等，手柄与表格、手柄与手柄之间必须 0 间隙（分隔用 `inset box-shadow`，不用 border）；插入图标按轴切换（列 `INSERT_ICONS.col` 左右箭头、行 `INSERT_ICONS.row` 上下箭头）；行列选中只渲染「插左/插右/删除」三键，`removeTable` 只在角手柄选中整表时出现；工具条定位以 **block**（含手柄带）为基准 `top - height - 8`，不能用 `contentDOM`（会把列手柄带盖住）。整表选中时所有手柄一起 `is-selected`（连成蓝带） |
 | 68 | 保存链路的三条硬约束：①写盘必须原子（`main/fileWrite.ts` 临时文件 + fsync + rename），不要退回 `writeFile(path)`；②关闭标签必须 `await` 写盘成功再移除标签，失败保留标签与 dirty；③关闭窗口必须按 `requestId` 等渲染层回包（`app:flush-reply`），超时/失败都要弹窗让用户选择，禁止用固定延时假定写盘完成。外部改动检测的版本记录在 `recordDiskStamp`（读成功、写成功后刷新），只有显式保存传 `force: true` 才跳过比对，自动保存永远不 force |
 | 69 | Markdown 日常写作体验（0.14.32）：新建标签初始内容必须为空；示例文档只能通过原生「帮助 → Markdown 语法示例」主动打开，打开后不能标脏；仅当标签存在同名文件时才显示父目录副标题。全文搜索 IPC 的取消控制器按 `webContents` 与请求 ID 隔离，目录遍历、文件扫描和逐行匹配都要定期让出事件循环并检查取消；命中任一结果上限、跳过超大文件或无法读取的目录/文件时都要返回 `truncated=true`，UI 明确提示结果不完整。诊断当前文档时用 `flushMarkdown` 读取编辑器快照，不触发保存/格式化/dirty 状态；未保存文档里的相对图片列为未检查，不误报丢失。往返回归需通过真实文件打开、编辑、切换源码、逐字节比较 Markdown 并检查 HTML 导出；表格夹具按当前 Milkdown 序列化格式建立基线，更新基线前先审查语法变化，不得为了通过测试弱化正文断言 |
+| 70 | 查找跳转不能依赖 ProseMirror 的 `tr.scrollIntoView()`（0.14.33）：该事务在 update 阶段调用 `scrollToSelection()`，后者要求 DOM 选区 `focusNode` 在编辑器内；查找时焦点停在查找框，滚动被整个跳过，表现为「计数在变、正文不跳」。`placeCaretAtTextOffset` 必须按 `view.coordsAtPos` 手动滚 `.editor-scroll`，且不能抢查找框焦点、不能把命中改成整段选区。E2E 要用足够长的文档（命中在视口外）断言 scrollTop 变化与 `.md-find-hit-active` 进入可视区域——短文档下不滚动是「正确」的，测不出这个 bug |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 

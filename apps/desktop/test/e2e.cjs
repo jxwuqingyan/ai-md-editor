@@ -2393,6 +2393,48 @@ async function runTests() {
   await exec(`document.querySelector('.find-close')?.click()`);
   await ensureWysiwygMode();
 
+  // 回车跳转必须真把正文滚到可见：焦点停在查找框时，
+  // ProseMirror 自带的 scrollIntoView 会被跳过（计数在变、正文不动）
+  const longFiller = Array.from({ length: 80 }, (_, i) => `第 ${i + 1} 段填充文字`).join('\n\n');
+  await resetDoc(`脚本开头\n\n${longFiller}\n\n脚本中间\n\n${longFiller}\n\n脚本结尾\n`);
+  await exec(`document.querySelector('.editor-scroll').scrollTop = 0`);
+  menuAction('edit:find');
+  await waitFor(() => exec(`Boolean(document.querySelector('[data-find-input="query"]'))`), {
+    label: '长文档查找栏打开'
+  });
+  await setControlValue('[data-find-input="query"]', '脚本');
+  await waitFor(() => exec(`document.querySelectorAll('.md-find-hit').length === 3`), {
+    label: '长文档三处命中'
+  });
+  const scrollBefore = Number(await exec(`document.querySelector('.editor-scroll').scrollTop`));
+  await exec(`document.querySelector('[data-find-input="query"]')?.focus()`);
+  win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+  win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+  await waitFor(() => exec(`document.querySelector('.find-count')?.textContent === '2/3'`), {
+    label: '长文档跳转到第二处'
+  });
+  const scrolled = await waitFor(
+    () => exec(`document.querySelector('.editor-scroll').scrollTop > ${scrollBefore} + 100`),
+    { label: '回车跳转真实滚动正文', timeout: 5000 }
+  ).catch(() => false);
+  const scrollAfter = Number(await exec(`document.querySelector('.editor-scroll').scrollTop`));
+  check('回车跳转会真实滚动正文', scrolled === true, `滚动前=${scrollBefore} 滚动后=${scrollAfter}`);
+  const activeVisible = await waitFor(
+    () =>
+      exec(`(() => {
+        const scroller = document.querySelector('.editor-scroll');
+        const active = document.querySelector('.md-find-hit-active');
+        if (!scroller || !active) return false;
+        const a = active.getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        return a.top >= s.top - 2 && a.bottom <= s.bottom + 2;
+      })()`),
+    { label: '跳转后当前命中进入视口', timeout: 5000 }
+  ).catch(() => false);
+  check('跳转后当前命中进入可视区域', activeVisible === true, String(activeVisible));
+  await exec(`document.querySelector('.find-close')?.click()`);
+  await waitFor(() => exec(`!document.querySelector('.find-bar')`), { label: '长文档查找栏关闭' });
+
   // ===== 10.13 底部工具栏：与斜杠菜单对齐（图片走文件选择器、链接走表单、块级功能平铺） =====
   // 旧行为：链接 / 图片按钮只插「链接文字」「图片」占位文本，「更多」浮层里还重复放一个代码块。
   const toolbarTitles = JSON.parse(

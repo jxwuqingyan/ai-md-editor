@@ -2,6 +2,16 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.33 - 2026-11-16
+
+### 修复：查找跳转不滚动正文
+
+- **现象**：输入关键词后命中计数正常递增（如 3/5 → 4/5），但正文完全不滚动，当前命中可能停在视口外。
+- **根因**：`placeCaretAtTextOffset` 依赖 ProseMirror 的 `tr.scrollIntoView()`，它在 update 阶段走 `scrollToSelection()`；后者要求 DOM 选区的 `focusNode` 落在编辑器内。查找时焦点停在查找输入框，`focusNode` 是输入框，滚动被整个跳过。
+- **修复**：新增 `scrollPosIntoView`，按 `view.coordsAtPos` 手动滚 `.editor-scroll`，不依赖焦点也不抢查找框焦点；仍只放光标、不做整段选区，避免高亮糊成一片。
+- **验证**：E2E 新增长文档用例——三处命中、回车跳到第二处后 scrollTop 由 0 变 2305px，当前命中进入可视区域；`tsc --noEmit`、`npm run build`、`npm test` 全通过（单测 71/71、菜单 3/3、E2E 232/232，2 项因窗口无法激活跳过）。
+- **本地出包**：`MarkdownNote-0.14.33-arm64.dmg`（约 159 MB，Apple Silicon，ad-hoc 签名、未公证），SHA-256 `2aee3fd7a21f97e6f72d7b131be92420c55781d271296ab757ba49e0143d907b`。`hdiutil verify` 通过、`lipo -archs` 为 arm64、`Info.plist` 两处版本均为 0.14.33，asar 内 416 个文件与 `out/` 逐字节一致。首次打开仍需「访达中右键→打开」。
+
 ## CI 调整 - 2026-11-15
 
 - **触发策略改为省额度模式**：私有仓库免费 Actions 额度只有 2000 分钟/月，macOS runner 按 10 倍计费（一次三平台打包约 270 计费分钟），此前每次 push 都触发打包，11 月 8 日额度耗尽后所有 run 在排队阶段失败（3~4 秒、零步骤）。现改为：push / PR 只跑测试 job（macOS 完整测试 + Windows 单测与菜单校验），三平台打包只在打 `v*` tag 或手动触发时运行。

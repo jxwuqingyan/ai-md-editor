@@ -93,6 +93,32 @@ function buildTableSnippet(cols: number, rows: number): string {
 }
 
 /**
+ * 把文档位置对应的屏幕坐标滚进编辑区可见范围。
+ *
+ * 不用 ProseMirror 的 tr.scrollIntoView()：它在 update 阶段走 scrollToSelection()，
+ * 而后者要求 DOM 选区的 focusNode 落在编辑器内。查找时焦点停在查找框，
+ * focusNode 是查找输入框，滚动会被整个跳过——现象就是「计数在变、正文不跳」。
+ * 这里按坐标手动滚 .editor-scroll，不碰焦点，查找框可以继续输入。
+ */
+function scrollPosIntoView(view: EditorView, pos: number): void {
+  const scroller = view.dom.closest<HTMLElement>('.editor-scroll');
+  if (!scroller) return;
+  try {
+    const coords = view.coordsAtPos(pos);
+    if (!coords) return;
+    const box = scroller.getBoundingClientRect();
+    const margin = 8; // 命中贴边时留一点余量，避免被容器边缘裁掉
+    if (coords.top < box.top + margin) {
+      scroller.scrollTop -= box.top + margin - coords.top;
+    } else if (coords.bottom > box.bottom - margin) {
+      scroller.scrollTop += coords.bottom - (box.bottom - margin);
+    }
+  } catch {
+    // 节点正在重建时位置可能暂不可换算，跳过即可，下次跳转会再试
+  }
+}
+
+/**
  * 创建编辑器实例（基于 Milkdown）。
  *
  * @param container 编辑器挂载的 DOM 容器
@@ -513,8 +539,10 @@ export async function createEditor(
         const pos = textOffsetToPos(segments, offset);
         if (pos == null) return;
         // 不抢焦点：查找框还在输入，焦点被拉走就没法继续打字了
-        const tr = state.tr.setSelection(TextSelection.near(state.doc.resolve(pos), 1)).scrollIntoView();
+        const tr = state.tr.setSelection(TextSelection.near(state.doc.resolve(pos), 1));
         view.dispatch(tr);
+        // 焦点不在编辑器内时 ProseMirror 自带的 scrollIntoView 会被跳过，必须显式滚动
+        scrollPosIntoView(view, pos);
       });
     },
 

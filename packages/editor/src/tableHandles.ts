@@ -346,7 +346,8 @@ class TableNodeView implements NodeView {
     if (!selected) return;
 
     const isTable = selected.axis === 'table';
-    const axis: Axis = isTable ? 'row' : selected.axis;
+    // 整表选中时 axis 取 row 仅为取文案/图标的占位，实际只显示「删除整张表」
+    const axis: Axis = selected.axis === 'table' ? 'row' : selected.axis;
     const labels = ACTION_LABELS[axis];
     Array.from(this.toolbar.querySelectorAll<HTMLButtonElement>('.md-table-tool-btn')).forEach((button) => {
       const action = button.dataset.tableAction as HandleAction;
@@ -364,7 +365,9 @@ class TableNodeView implements NodeView {
         button.title = '删除整张表';
         return;
       }
-      button.innerHTML = action === 'remove' ? REMOVE_ICON : INSERT_ICONS[axis][action];
+      // 到这里 action 只剩 insertBefore / insertAfter / remove
+      const rowColAction = action as Exclude<HandleAction, 'removeTable'>;
+      button.innerHTML = rowColAction === 'remove' ? REMOVE_ICON : INSERT_ICONS[axis][rowColAction];
       // 表头行之上不能插数据行（表格必须以表头行开头），禁用而不是给出坏结果
       const headerBlocked = axis === 'row' && selected.index === 0 && action === 'insertBefore';
       // 只剩一列 / 只剩「表头 + 一个数据行」时，再删会产出非法表格
@@ -378,7 +381,7 @@ class TableNodeView implements NodeView {
         ? '表头上方不能插入行'
         : lastBlocked
           ? '表格不能再缩小了'
-          : labels[action];
+          : labels[rowColAction];
     });
     this.toolbar.dataset.axis = selected.axis;
     this.positionToolbar();
