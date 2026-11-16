@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { OutlineItem } from '@ai-md-editor/markdown-core';
 import { isImeKey } from './ime';
 import OutlineList, { type OutlineDropPosition } from './OutlineList';
+import type { DocIssue } from './types';
 
 /** 查找栏属性 */
 export interface FindBarProps {
@@ -158,6 +159,81 @@ export interface QuickOpenProps {
   onPick: (path: string) => void;
   onClose: () => void;
 }
+
+/** 「检查链接与图片」结果对话框属性 */
+export interface CheckDocDialogProps {
+  /** 查出的问题清单（按行号升序） */
+  issues: DocIssue[];
+  /** 未保存文档中无法解析的相对图片数 */
+  uncheckableImages: number;
+  /** 点击某条问题：跳转到对应行 */
+  onJump: (issue: DocIssue) => void;
+  /** 关闭对话框 */
+  onClose: () => void;
+}
+
+/**
+ * 「检查链接与图片」结果对话框。
+ * 只读诊断：列出空链接与找不到的本地图片，点击条目跳转到对应行。
+ * 不修改文档内容。
+ */
+export function CheckDocDialog({ issues, uncheckableImages, onJump, onClose }: CheckDocDialogProps): JSX.Element {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div className="overlay-shade" onMouseDown={onClose}>
+      <div className="check-doc" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-label="检查链接与图片">
+        <div className="check-doc-title">
+          检查结果
+          <button type="button" className="check-doc-close" title="关闭（Esc）" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        {uncheckableImages > 0 && (
+          <div className="check-doc-note">
+            有 {uncheckableImages} 张相对路径图片尚未检查；先保存文档后才能确认文件是否存在。
+          </div>
+        )}
+        <div className="check-doc-list">
+          {issues.length === 0 ? (
+            <div className="quick-open-empty">
+              {uncheckableImages > 0 ? '没有发现可确认的问题' : '没有发现空链接或失效的本地图片'}
+            </div>
+          ) : (
+            issues.map((issue, index) => (
+              <button
+                key={`${issue.line}-${index}`}
+                type="button"
+                className="check-doc-item"
+                onClick={() => onJump(issue)}
+                title="点击跳转到这一行"
+              >
+                <span className={`check-doc-kind check-doc-kind-${issue.kind}`}>
+                  {issue.kind === 'empty-link' ? '空链接' : '图片丢失'}
+                </span>
+                <span className="check-doc-line">第 {issue.line} 行</span>
+                <span className="check-doc-text">
+                  {issue.kind === 'empty-link'
+                    ? issue.isImage
+                      ? '![' + issue.label + ']()'
+                      : '[' + (issue.label || '（无文字）') + ']()'
+                    : '![' + issue.label + '](' + issue.target + ')'}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /** 快速打开：模糊匹配最近文件与文件树中的 Markdown 文件 */
 export function QuickOpen({ recent, treeFiles, onPick, onClose }: QuickOpenProps): JSX.Element {

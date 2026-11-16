@@ -29,31 +29,63 @@ interface Candidate {
   path: string;
 }
 
-/** 递归收集目录下的 Markdown 文件（广度优先，受上限保护） */
-async function collectMarkdownFiles(root: string): Promise<Candidate[]> {
-  const out: Candidate[] = [];
+/** 候选文件收集结果，同时说明目录扫描是否触达上限。 */
+interface CandidateCollection {
+  files: Candidate[];
+  truncated: boolean;
+  cancelled: boolean;
+}
+
+/** 让出事件循环，使取消信号能在大目录与长文档扫描时及时生效。 */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
+/** 递归收集目录下的 Markdown 文件（广度优先，受上限保护；可被取消） */
+async function collectMarkdownFiles(root: string, signal?: AbortSignal): Promise<CandidateCollection> {
+  const files: Candidate[] = [];
   const queue: string[] = [root];
   let dirs = 0;
-  while (queue.length > 0 && dirs < MAX_DIRS && out.length < MAX_SCANNED) {
+  let scannedFiles = 0;
+  let entriesSinceYield = 0;
+  let truncated = false;
+
+  scan: while (queue.length > 0) {
+    if (signal?.aborted) return { files, truncated, cancelled: true };
+    if (dirs >= MAX_DIRS) {
+      truncated = true;
+      break;
+    }
     const dir = queue.shift() as string;
     dirs += 1;
     let entries: import('node:fs').Dirent[];
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
-      continue; // 无权限/已删除的目录直接跳过
+      truncated = true;
+      continue;
     }
+
     for (const entry of entries) {
-      if (out.length >= MAX_SCANNED) break;
-      const fullPath = join(dir, entry.name);
+      if (signal?.aborted) return { files, truncated, cancelled: true };
       if (entry.isDirectory()) {
-        if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) queue.push(fullPath);
-        continue;
+        if (!SKIP_DIRS.has(entry.name) && !entry.name.startsWith('.')) queue.push(join(dir, entry.name));
+      } else if (entry.isFile()) {
+        if (scannedFiles >= MAX_SCANNED) {
+          truncated = true;
+          break scan;
+        }
+        scannedFiles += 1;
+        if (SEARCHABLE_FILE.test(entry.name)) files.push({ path: join(dir, entry.name) });
       }
-      if (entry.isFile() && SEARCHABLE_FILE.test(entry.name)) out.push({ path: fullPath });
+      entriesSinceYield += 1;
+      if (entriesSinceYield >= 128) {
+        entriesSinceYield = 0;
+        await yieldToEventLoop();
+      }
     }
   }
-  return out;
+  return { files, truncated, cancelled: false };
 }
 
 /**
@@ -114,7 +146,7 @@ export function buildLineMatcher(input: SearchFolderInput): ((line: string) => S
         continue;
       }
       matches.push({ line: 0, column, rawColumn: column, length, text: line.trim() });
-      if (matches.length >= 3) break; // 每行最多记 3 处，行文本相同无需更多
+      if (matches.length > 3) break; // 多留一处用于判断是否需要显示截断提示
       if (m.index === re.lastIndex) re.lastIndex += 1;
     }
     return matches;
@@ -133,8 +165,8 @@ export function finalizeMatches(rawLineMatches: SearchMatch[], lineNo: number, r
   }));
 }
 
-/** 在目录内搜索 */
-export async function searchFolder(input: SearchFolderInput): Promise<SearchFolderResult> {
+/** 在目录内搜索；signal 可中断目录收集与逐行扫描。 */
+export async function searchFolder(input: SearchFolderInput, signal?: AbortSignal): Promise<SearchFolderResult> {
   const query = input.query.trim();
   if (query.length === 0) return { ok: true, files: [], truncated: false, error: null };
   const matcher = buildLineMatcher(input);
@@ -142,40 +174,68 @@ export async function searchFolder(input: SearchFolderInput): Promise<SearchFold
     return { ok: false, files: [], truncated: false, error: '正则表达式无效' };
   }
 
-  const candidates = await collectMarkdownFiles(input.root);
-  const files: SearchFileResult[] = [];
-  let truncated = false;
+  const collection = await collectMarkdownFiles(input.root, signal);
+  if (collection.cancelled || signal?.aborted) {
+    return { ok: true, files: [], truncated: collection.truncated, cancelled: true, error: null };
+  }
+  const results: SearchFileResult[] = [];
+  let truncated = collection.truncated;
 
-  for (const candidate of candidates) {
-    if (files.length >= MAX_FILES) {
-      truncated = true;
-      break;
+  for (const candidate of collection.files) {
+    if (signal?.aborted) {
+      return { ok: true, files: results, truncated, cancelled: true, error: null };
     }
     let content: string;
     try {
       const info = await stat(candidate.path);
-      if (!info.isFile() || info.size > MAX_FILE_BYTES || info.size === 0) continue;
+      if (!info.isFile()) {
+        truncated = true;
+        continue;
+      }
+      if (info.size > MAX_FILE_BYTES) {
+        truncated = true;
+        continue;
+      }
+      if (info.size === 0) continue;
       const bytes = await readFile(candidate.path);
       content = decodeBytes(new Uint8Array(bytes)).text;
     } catch {
+      truncated = true;
       continue;
     }
+
     const lineMatches: SearchMatch[] = [];
     const lines = content.split('\n');
+    let linesSinceYield = 0;
     for (let i = 0; i < lines.length; i += 1) {
+      if (signal?.aborted) {
+        return { ok: true, files: results, truncated, cancelled: true, error: null };
+      }
       const found = matcher(lines[i]);
-      if (found.length === 0) continue;
-      lineMatches.push(...finalizeMatches(found, i + 1, lines[i]));
-      if (lineMatches.length >= MAX_MATCHES_PER_FILE) break;
+      if (found.length > 3) truncated = true;
+      lineMatches.push(...finalizeMatches(found.slice(0, 3), i + 1, lines[i]));
+      if (lineMatches.length >= MAX_MATCHES_PER_FILE) {
+        lineMatches.length = MAX_MATCHES_PER_FILE;
+        truncated = true;
+        break;
+      }
+      linesSinceYield += 1;
+      if (linesSinceYield >= 128) {
+        linesSinceYield = 0;
+        await yieldToEventLoop();
+      }
     }
     if (lineMatches.length === 0) continue;
+    if (results.length >= MAX_FILES) {
+      truncated = true;
+      break;
+    }
     const segments = candidate.path.split(/[\\/]/);
-    files.push({
+    results.push({
       path: candidate.path,
       name: segments[segments.length - 1],
-      matches: lineMatches.slice(0, MAX_MATCHES_PER_FILE)
+      matches: lineMatches
     });
   }
-  if (candidates.length >= MAX_SCANNED || files.length >= MAX_FILES) truncated = true;
-  return { ok: true, files, truncated, error: null };
+  return { ok: true, files: results, truncated, error: null };
 }

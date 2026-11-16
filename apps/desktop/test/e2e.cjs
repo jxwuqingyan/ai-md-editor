@@ -3044,6 +3044,347 @@ async function runTests() {
   );
   check('删除整张表后手柄与工具条一并收起', tableHandlesGone === true);
 
+  // ===== 10.20 新建文档默认空白（不再预置示例文章），空文档有占位提示 =====
+  menuAction('file:new-tab');
+  await waitFor(() => exec(`document.querySelector('.tab-active .tab-name')?.textContent === '未命名.md'`), {
+    label: '新建标签', timeout: 8000
+  });
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror'))`), { label: '新标签编辑器', timeout: 8000 });
+  const blankState = JSON.parse(await exec(`(() => {
+    const pm = document.querySelector('.ProseMirror');
+    const p = pm?.querySelector('p');
+    const before = p ? getComputedStyle(p, '::before').content : '';
+    return JSON.stringify({ text: pm ? pm.textContent.trim() : '(no editor)', placeholder: before });
+  })()`));
+  check('新建文档默认为空白', blankState.text === '', `text=${blankState.text.slice(0, 40)}`);
+  check(
+    '空文档显示占位提示',
+    blankState.placeholder.includes('输入正文'),
+    `placeholder=${blankState.placeholder}`
+  );
+  // 帮助菜单按需打开示例，不占用新建文档的空白默认值。
+  menuAction('help:markdown-example');
+  await waitFor(
+    () => exec("document.querySelector('.tab-active .tab-name')?.textContent === 'Markdown 语法示例.md'"),
+    { label: '帮助菜单打开 Markdown 示例', timeout: 8000 }
+  );
+  await ensureSourceMode();
+  const helpExample = String(await exec("document.querySelector('.source-editor')?.value ?? ''"));
+  check('帮助示例覆盖常用 Markdown 写法', helpExample.includes('**粗体**') && helpExample.includes('- [ ] 未完成任务') && helpExample.includes('x = \\frac{1}{2}'));
+  await ensureWysiwygMode();
+  const helpExampleClean = await exec("!document.querySelector('.tab-active .tab-dirty')");
+  check('帮助示例初次打开保持未修改状态', helpExampleClean === true);
+  await exec("window.__helpConfirm = window.confirm; window.confirm = () => true; document.querySelector('.tab-active .tab-close')?.click(); window.confirm = window.__helpConfirm; delete window.__helpConfirm");
+  await waitFor(
+    () => exec("document.querySelector('.tab-active .tab-name')?.textContent !== 'Markdown 语法示例.md'"),
+    { label: '关闭 Markdown 示例标签', timeout: 8000 }
+  );
+
+  // 关掉这个干净的空白标签，回到之前的文档
+  await exec(`document.querySelector('.tab-active .tab-close')?.click()`);
+  await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent !== '未命名.md'`),
+    { label: '关闭空白标签', timeout: 8000 }
+  );
+
+  // ===== 10.21 同名标签显示父目录副标题 =====
+  const dupA = join(root, 'dup-a');
+  const dupB = join(root, 'dup-b');
+  mkdirSync(dupA, { recursive: true });
+  mkdirSync(dupB, { recursive: true });
+  writeFileSync(join(dupA, 'note.md'), '# A 目录的笔记\n', 'utf-8');
+  writeFileSync(join(dupB, 'note.md'), '# B 目录的笔记\n', 'utf-8');
+  menuAction('file:open-recent-path', join(dupA, 'note.md'));
+  await waitFor(
+    () => exec(`[...document.querySelectorAll('.tab .tab-name')].some((el) => el.textContent === 'note.md')`),
+    { label: '打开第一个同名文件', timeout: 8000 }
+  );
+  check('单个文件名不显示多余父目录副标题', await exec("document.querySelectorAll('.tab-dir').length === 0") === true);
+  menuAction('file:open-recent-path', join(dupB, 'note.md'));
+  await waitFor(
+    () =>
+      exec(
+        `[...document.querySelectorAll('.tab .tab-name')].filter((el) => el.textContent === 'note.md').length === 2`
+      ),
+    { label: '两个同名标签并存', timeout: 8000 }
+  );
+  const dupDirs = JSON.parse(
+    await exec(`JSON.stringify([...document.querySelectorAll('.tab .tab-dir')].map((el) => el.textContent))`)
+  );
+  check(
+    '同名标签显示父目录副标题',
+    dupDirs.includes('dup-a/') && dupDirs.includes('dup-b/'),
+    JSON.stringify(dupDirs)
+  );
+  // 关掉两个同名标签（磁盘文件且未改动，不会弹确认）
+  for (let i = 0; i < 2; i += 1) {
+    await exec(`(() => {
+      const tab = [...document.querySelectorAll('.tab')].find((el) => el.querySelector('.tab-name')?.textContent === 'note.md');
+      tab?.querySelector('.tab-close')?.click();
+      return true;
+    })()`);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  await waitFor(
+    () =>
+      exec(
+        `[...document.querySelectorAll('.tab .tab-name')].every((el) => el.textContent !== 'note.md')`
+      ),
+    { label: '同名标签已关闭', timeout: 8000 }
+  );
+
+  // ===== 10.22 文件夹搜索：可取消 + 超上限有截断提示 =====
+  // 大目录用于「取消」：文件足够多，搜索不会瞬间结束
+  const bigDir = join(root, 'search-big');
+  mkdirSync(bigDir, { recursive: true });
+  for (let i = 0; i < 400; i += 1) {
+    writeFileSync(join(bigDir, `big-${String(i).padStart(3, '0')}.md`), `# 文件 ${i}\n\n${'内容行\n'.repeat(100)}`, 'utf-8');
+  }
+  // IPC 层取消：发出搜索立刻取消，回包必须带 cancelled 标记而不是跑完
+  const cancelResult = await exec(`(async () => {
+    const promise = window.api.searchFolder({
+      root: ${JSON.stringify(bigDir)},
+      query: '内容行',
+      caseSensitive: false, wholeWord: false, regex: false,
+      requestId: 'e2e-cancel-1'
+    });
+    window.api.cancelSearch('e2e-cancel-1');
+    return JSON.stringify(await promise);
+  })()`);
+  check('搜索可被中途取消（IPC 层）', JSON.parse(cancelResult).cancelled === true, cancelResult.slice(0, 80));
+  // 截断提示：超过 50 个文件命中时必须告诉用户结果不完整
+  const truncDir = join(root, 'search-trunc');
+  mkdirSync(truncDir, { recursive: true });
+  for (let i = 0; i < 60; i += 1) {
+    writeFileSync(join(truncDir, `t-${String(i).padStart(2, '0')}.md`), `# 截断样例 ${i}\n\n这里有 截断关键词\n`, 'utf-8');
+  }
+  const truncResult = JSON.parse(
+    await exec(`window.api.searchFolder({
+      root: ${JSON.stringify(truncDir)},
+      query: '截断关键词',
+      caseSensitive: false, wholeWord: false, regex: false
+    }).then((r) => JSON.stringify({ files: r.files.length, truncated: r.truncated }))`)
+  );
+  check(
+    '命中超上限时结果带截断标记',
+    truncResult.truncated === true && truncResult.files === 50,
+    JSON.stringify(truncResult)
+  );
+
+  const largeFileDir = join(root, 'search-large-file');
+  mkdirSync(largeFileDir, { recursive: true });
+  writeFileSync(join(largeFileDir, 'oversized.md'), 'large-marker\n' + 'x'.repeat(2 * 1024 * 1024), 'utf-8');
+  const largeFileResult = JSON.parse(
+    await exec(`window.api.searchFolder({ root: ${JSON.stringify(largeFileDir)}, query: 'large-marker', caseSensitive: false, wholeWord: false, regex: false }).then(JSON.stringify)`)
+  );
+  check('跳过超限文件时也提示结果可能不完整', largeFileResult.truncated === true && largeFileResult.files.length === 0);
+  if (!(await exec("Boolean(document.querySelector('.sidebar-search-btn')?.getClientRects().length)"))) {
+    menuAction('view:toggle-sidebar');
+  }
+  await waitFor(
+    () => exec("Boolean(document.querySelector('.sidebar-search-btn')?.getClientRects().length)"),
+    { label: '文件夹搜索按钮可见', timeout: 8000 }
+  );
+  await exec("document.querySelector('.sidebar-search-btn')?.click()");
+  await waitFor(() => exec("Boolean(document.querySelector('.search-input'))"), { label: '搜索截断提示面板', timeout: 8000 });
+  await typeSearch('截断关键词');
+  const truncNotice = await waitFor(
+    () => exec("document.querySelector('.search-truncated')?.textContent ?? ''").then((text) => text.includes('结果可能不完整，已截断') ? text : null),
+    { label: '搜索界面显示结果截断提示', timeout: 12000 }
+  ).catch(() => null);
+  check('搜索界面明确告知结果可能不完整', typeof truncNotice === 'string', String(truncNotice));
+  await typeSearch('内容行');
+  await waitFor(() => exec("Boolean(document.querySelector('.search-cancel'))"), { label: '搜索取消按钮出现', timeout: 3000 });
+  await exec("document.querySelector('.search-cancel')?.click()");
+  const cancelledNotice = await waitFor(
+    () => exec("document.querySelector('.search-status-row')?.textContent.includes('已取消') === true"),
+    { label: '搜索取消状态显示', timeout: 3000 }
+  ).catch(() => false);
+  check('搜索面板的 × 可取消当前请求', cancelledNotice === true);
+  await exec("document.querySelector('.search-close')?.click()");
+
+  // ===== 10.23 检查链接与图片 =====
+  const linkImgDir = join(root, 'img');
+  mkdirSync(linkImgDir, { recursive: true });
+  writeFileSync(join(linkImgDir, 'ok.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47])); // 只要求文件存在
+  const linkDocPath = join(root, 'linkcheck.md');
+  writeFileSync(
+    linkDocPath,
+    '# 链接检查\n\n正常 [官网](https://example.com)，坏掉 [空链接]()。\n\n![存在](img/ok.png?raw=1#preview)\n\n![丢失](<img/missing image.png?raw=1#preview>)\n',
+    'utf-8'
+  );
+  menuAction('file:open-recent-path', linkDocPath);
+  await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent === 'linkcheck.md'`),
+    { label: '打开链接检查文档', timeout: 8000 }
+  );
+  menuAction('file:check-doc-links');
+  await waitFor(() => exec("Boolean(document.querySelector('.check-doc'))"), { label: '所见即所得检查结果', timeout: 8000 });
+  const wysiwygIssueCount = await exec("document.querySelectorAll('.check-doc-item').length");
+  const wysiwygStillClean = await exec("!document.querySelector('.tab-active .tab-dirty')");
+  check('所见即所得模式只读诊断不修改文档', wysiwygIssueCount === 2 && wysiwygStillClean === true);
+  await exec("document.querySelector('.check-doc-close')?.click()");
+  await ensureSourceMode();
+  menuAction('file:check-doc-links');
+  await waitFor(() => exec("Boolean(document.querySelector('.check-doc'))"), { label: '源码模式检查结果', timeout: 8000 });
+  const issueSummary = JSON.parse(
+    await exec(`JSON.stringify({
+      count: document.querySelectorAll('.check-doc-item').length,
+      kinds: [...document.querySelectorAll('.check-doc-kind')].map((el) => el.textContent)
+    })`)
+  );
+  check(
+    '空链接与失效图片各报一条（忽略有效图片的查询参数）',
+    issueSummary.count === 2 && issueSummary.kinds.includes('空链接') && issueSummary.kinds.includes('图片丢失'),
+    JSON.stringify(issueSummary)
+  );
+  check('只读诊断不把干净文档标记为已修改', await exec("!document.querySelector('.tab-active .tab-dirty')") === true);
+  // 点击条目跳转到对应行（源码模式选中文本）并关闭对话框
+  await exec(`document.querySelector('.check-doc-item')?.click()`);
+  const jumped = await waitFor(
+    () =>
+      exec(`(() => {
+        const ta = document.querySelector('.source-editor');
+        const gone = !document.querySelector('.check-doc');
+        return gone && ta && ta.selectionEnd > ta.selectionStart ? true : null;
+      })()`),
+    { label: '点击问题跳转并关闭对话框', timeout: 8000 }
+  ).catch(() => null);
+  check('点击检查结果跳转对应行并关闭对话框', jumped === true, String(jumped));
+  // 关掉该标签（有路径且自动保存已覆盖内容，不会弹确认）
+  await exec(`document.querySelector('.tab-active .tab-close')?.click()`);
+  await waitFor(
+    () => exec(`document.querySelector('.tab-active .tab-name')?.textContent !== 'linkcheck.md'`),
+    { label: '关闭链接检查标签', timeout: 8000 }
+  );
+
+  const untitledBeforeRelativeCheck = await exec("[...document.querySelectorAll('.tab .tab-name')].filter((el) => el.textContent === '未命名.md').length");
+  menuAction('file:new-tab');
+  await waitFor(() => exec("document.querySelector('.tab-active .tab-name')?.textContent === '未命名.md'"), { label: '新建未保存诊断文档', timeout: 8000 });
+  await resetDoc('![尚未保存](img/not-saved.png)');
+  menuAction('file:check-doc-links');
+  await waitFor(() => exec("Boolean(document.querySelector('.check-doc'))"), { label: '未保存文档图片诊断', timeout: 8000 });
+  const uncheckableImageState = JSON.parse(await exec("JSON.stringify({ count: document.querySelectorAll('.check-doc-item').length, note: document.querySelector('.check-doc-note')?.textContent ?? '' })"));
+  check('未保存文档的相对图片显示为未检查，不误报丢失', uncheckableImageState.count === 0 && uncheckableImageState.note.includes('1 张相对路径图片尚未检查'), JSON.stringify(uncheckableImageState));
+  await exec("document.querySelector('.check-doc-close')?.click()");
+  await exec("window.__previousConfirm = window.confirm; window.confirm = () => true; document.querySelector('.tab-active .tab-close')?.click(); window.confirm = window.__previousConfirm; delete window.__previousConfirm");
+  await waitFor(() => exec("[...document.querySelectorAll('.tab .tab-name')].filter((el) => el.textContent === '未命名.md').length === " + String(untitledBeforeRelativeCheck)), { label: '关闭未保存诊断标签', timeout: 8000 });
+
+  // ===== 10.24 Markdown 往返保真矩阵：一轮「解析 → 编辑 → 序列化」不改变原文 =====
+  // 夹具按编辑器序列化器的归一化形式书写（- 列表、| -- | 分隔线），
+  // 目标是恒等往返；任何差异都意味着用户原文被悄悄改写。
+  const ROUNDTRIP_DOC = [
+    '---',
+    'title: 往返测试',
+    '---',
+    '',
+    '# 一级标题',
+    '',
+    '## 二级标题',
+    '',
+    '正文段落，含 **加粗**、*斜体*、`行内代码`、~~删除线~~、<u>下划线</u> 与 [链接](https://example.com)。',
+    '',
+    '![图片](img/pic.png)',
+    '',
+    '- 无序项一',
+    '- 无序项二',
+    '  - 嵌套项',
+    '',
+    '1. 有序项一',
+    '2. 有序项二',
+    '',
+    '- [ ] 未完成任务',
+    '- [x] 已完成任务',
+    '',
+    '> 引用段落',
+    '>',
+    '> 第二行',
+    '',
+    '> [!NOTE]',
+    '> 提示框内容',
+    '',
+    '```js',
+    'const a = 1;',
+    '```',
+    '',
+    '| 列一 | 列二 |',
+    '| -- | -- |',
+    '| a  | b  |',
+    '',
+    '行内公式 $E=mc^2$ 结尾。',
+    '',
+    '$$',
+    'x = \\frac{1}{2}',
+    '$$',
+    '',
+    '[TOC]',
+    '',
+    '脚注引用[^1]。',
+    '',
+    '[^1]: 脚注内容',
+    '',
+    '---',
+    '',
+    '末尾段落。',
+    ''
+  ].join('\n');
+  const roundtripPath = join(root, 'roundtrip.md');
+  writeFileSync(join(root, 'img', 'pic.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  writeFileSync(roundtripPath, ROUNDTRIP_DOC, 'utf-8');
+  menuAction('file:open-recent-path', roundtripPath);
+  await waitFor(
+    () => exec("document.querySelector('.tab-active .tab-name')?.textContent === 'roundtrip.md'"),
+    { label: '从磁盘打开 Markdown 往返夹具', timeout: 8000 }
+  );
+  await ensureWysiwygMode();
+  const caretReady = await exec("(() => { const ps = [...document.querySelectorAll('.ProseMirror p')]; const p = ps.find((item) => item.textContent.includes('末尾段落。')); const editor = document.querySelector('.ProseMirror'); if (!p || !editor) return false; const node = p.lastChild; if (!node || typeof node.textContent !== 'string') return false; editor.focus(); const range = document.createRange(); range.setStart(node, node.textContent.length); range.collapse(true); const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range); return document.activeElement === editor && selection.anchorNode === node; })()");
+  check('往返夹具在所见即所得模式打开且光标位于末尾', caretReady === true);
+  win.webContents.insertText(' 本轮编辑。');
+  await waitFor(
+    () => exec("[...document.querySelectorAll('.ProseMirror p')].find((item) => item.textContent.includes('末尾段落。'))?.textContent.includes('本轮编辑。') === true"),
+    { label: '往返夹具真实编辑', timeout: 8000 }
+  );
+  await ensureSourceMode();
+  const roundtripOut = await exec("document.querySelector('.source-editor').value");
+  const expectedRoundtrip = ROUNDTRIP_DOC.replace('末尾段落。', '末尾段落。 本轮编辑。');
+  if (roundtripOut === expectedRoundtrip) {
+    check('往返保真：打开、编辑、切源码后完整语法逐字节保留', true);
+  } else {
+    const a = expectedRoundtrip.split('\n');
+    const b = String(roundtripOut).split('\n');
+    let first = -1;
+    for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+      if (a[i] !== b[i]) { first = i; break; }
+    }
+    check(
+      '往返保真：打开、编辑、切源码后完整语法逐字节保留',
+      false,
+      '首个差异行 ' + (first + 1) + '：期望 ' + JSON.stringify(a[first]) + ' 实际 ' + JSON.stringify(b[first])
+    );
+  }
+  check(
+    '往返编辑标记为未保存',
+    await exec("Boolean(document.querySelector('.tab-active .tab-dirty'))") === true
+  );
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  const matrixHtml = join(root, 'roundtrip.html');
+  dialog.showSaveDialog = async () => ({ canceled: false, filePath: matrixHtml });
+  menuAction('file:export-html');
+  const exportedMatrix = await waitFor(
+    () => (existsSync(matrixHtml) ? readFileSync(matrixHtml, 'utf-8') : null),
+    { label: '往返矩阵导出 HTML', timeout: 15000 }
+  ).catch(() => null);
+  check(
+    '往返导出 HTML 保留标题、粗体、表格与本轮编辑',
+    typeof exportedMatrix === 'string' &&
+      /<h1(?:\s[^>]*)?>一级标题<\/h1>/.test(exportedMatrix) &&
+      exportedMatrix.includes('<strong>加粗</strong>') &&
+      exportedMatrix.includes('<table>') &&
+      exportedMatrix.includes('本轮编辑。'),
+    typeof exportedMatrix === 'string' ? exportedMatrix.slice(0, 120) : String(exportedMatrix)
+  );
+  await ensureWysiwygMode();
+
   // ===== 11. 全屏 / 最小化（放在最后：窗口状态变化可能影响后续渲染） =====
   app.focus({ steal: true });
   win.show();

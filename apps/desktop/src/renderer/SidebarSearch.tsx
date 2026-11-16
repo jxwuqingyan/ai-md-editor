@@ -36,16 +36,52 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
   const inputRef = useRef<HTMLInputElement>(null);
   // 请求序号：快速改关键词时，先发出去的请求可能后返回，不能让它覆盖新结果
   const requestSeq = useRef(0);
+  // 进行中的主进程搜索请求 id：换关键词 / 点取消时中止磁盘扫描
+  const inflightId = useRef<string | null>(null);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [cancelled, setCancelled] = useState(false);
 
   // 打开时聚焦输入框
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  /** 中止主进程里还在跑的搜索（如果它还没来得及回包） */
+  const cancelInflight = (): void => {
+    const requestId = inflightId.current;
+    if (requestId) {
+      void window.api.cancelSearch(requestId).catch(() => undefined);
+      inflightId.current = null;
+    }
+  };
+
+  /** 手动取消当前搜索：同时取消尚未开始的防抖任务，并清掉旧结果 */
+  const handleCancel = (): void => {
+    requestSeq.current += 1;
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+    cancelInflight();
+    setResults([]);
+    setTruncated(false);
+    setError(null);
+    setSearching(false);
+    setCancelled(true);
+  };
+
+  // 卸载时取消进行中的搜索
+  useEffect(() => () => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    cancelInflight();
+  }, []);
+
   // 查询条件变化：300ms 防抖自动搜索
   useEffect(() => {
     requestSeq.current += 1;
     const seq = requestSeq.current;
+    cancelInflight();
+    setCancelled(false);
     if (!rootDir || query.trim().length === 0) {
       setResults([]);
       setError(null);
@@ -53,31 +89,51 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
       setSearching(false);
       return;
     }
+    setResults([]);
+    setError(null);
+    setTruncated(false);
     setSearching(true);
     const timer = setTimeout(() => {
+      debounceTimer.current = null;
+      const requestId = 'search-' + seq + '-' + Date.now();
+      inflightId.current = requestId;
       void (async () => {
-        const result = await window.api.searchFolder({
-          root: rootDir,
-          query,
-          caseSensitive,
-          wholeWord,
-          regex
-        });
-        // 回包时确认自己仍是最新一次请求，否则丢弃（否则旧关键词的结果会盖掉新结果）
-        if (seq !== requestSeq.current) return;
-        setSearching(false);
-        if (!result.ok) {
-          setError(result.error ?? '搜索失败');
+        try {
+          const result = await window.api.searchFolder({
+            root: rootDir,
+            query,
+            caseSensitive,
+            wholeWord,
+            regex,
+            requestId
+          });
+          if (inflightId.current === requestId) inflightId.current = null;
+          if (seq !== requestSeq.current) return;
+          setSearching(false);
+          if (result.cancelled) return;
+          if (!result.ok) {
+            setError(result.error ?? '搜索失败');
+            setResults([]);
+            setTruncated(false);
+            return;
+          }
+          setError(null);
+          setResults(result.files);
+          setTruncated(result.truncated);
+        } catch (err) {
+          if (seq !== requestSeq.current) return;
+          setSearching(false);
+          setError(err instanceof Error ? err.message : '搜索失败');
           setResults([]);
           setTruncated(false);
-          return;
         }
-        setError(null);
-        setResults(result.files);
-        setTruncated(result.truncated);
       })();
     }, 300);
-    return () => clearTimeout(timer);
+    debounceTimer.current = timer;
+    return () => {
+      clearTimeout(timer);
+      if (debounceTimer.current === timer) debounceTimer.current = null;
+    };
   }, [rootDir, query, caseSensitive, wholeWord, regex]);
 
   /** 在高亮行里渲染匹配片段 */
@@ -154,12 +210,31 @@ export default function SidebarSearch({ rootDir, onOpenMatch, onClose }: Sidebar
       </div>
       {(error || searching || query.trim().length > 0) && (
         <div className="search-status-row">
-          {error ? '正则表达式无效' : searching ? '搜索中…' : `${results.length} 个文件 · ${totalMatches} 处匹配`}
+          {error ? (
+            error
+          ) : cancelled ? (
+            '已取消'
+          ) : searching ? (
+            <>
+              <span>搜索中…</span>
+              <button
+                type="button"
+                className="search-cancel"
+                aria-label="取消搜索"
+                title="取消搜索"
+                onClick={handleCancel}
+              >
+                ×
+              </button>
+            </>
+          ) : (
+            `${results.length} 个文件 · ${totalMatches} 处匹配`
+          )}
         </div>
       )}
       {error && <div className="search-error">{error}</div>}
       {truncated && !error && (
-        <div className="search-truncated">结果较多，仅显示前一部分（打开文件夹根目录可缩小范围）</div>
+        <div className="search-truncated">结果可能不完整，已截断；请缩小搜索范围或调整关键词。</div>
       )}
       <div className="search-results">
         {results.map((file) => (

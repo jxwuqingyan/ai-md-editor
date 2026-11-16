@@ -14,6 +14,8 @@ export type MenuHandler = (payload?: string) => void;
 export interface MenuHandlerDeps {
   /** 新建标签 */
   newTab: () => void;
+  /** 按需打开 Markdown 语法示例 */
+  showMarkdownExample: () => void;
   /** 新建独立窗口 */
   newWindow: () => void;
   /** 打开文件对话框 */
@@ -36,6 +38,8 @@ export interface MenuHandlerDeps {
   duplicate: () => void;
   /** 从磁盘重新加载 */
   reloadFromDisk: () => void;
+  /** 检查当前文档的空链接与失效图片（只读诊断） */
+  checkDocLinks: () => void;
   /** 打开重命名对话框 */
   openRename: () => void;
   /** 在文件管理器中显示 */
@@ -107,11 +111,13 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.RenameFile]: deps.openRename,
     [MenuActions.DuplicateFile]: deps.duplicate,
     [MenuActions.ReloadFromDisk]: deps.reloadFromDisk,
+    [MenuActions.CheckDocLinks]: deps.checkDocLinks,
     [MenuActions.RevealInFolder]: deps.revealInFolder,
     [MenuActions.ExportHtml]: () => deps.exportAs('html'),
     [MenuActions.ExportPdf]: () => deps.exportAs('pdf'),
     [MenuActions.ExportWord]: () => deps.exportAs('word'),
     [MenuActions.Print]: deps.print,
+    [MenuActions.ShowMarkdownExample]: deps.showMarkdownExample,
 
     // ===== 编辑 =====
     [MenuActions.Undo]: deps.undo,

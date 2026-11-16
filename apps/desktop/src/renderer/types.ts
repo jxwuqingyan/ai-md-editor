@@ -3,6 +3,7 @@
  */
 
 import type { TextEncoding } from '@ai-md-editor/shared';
+import type { DocLinkRef } from '@ai-md-editor/shared';
 
 /** 单个标签的数据模型 */
 export interface Tab {
@@ -33,4 +34,10 @@ export interface SaveState {
   kind: SaveStateKind;
   /** 失败原因 / 冲突说明 */
   message?: string;
+}
+
+/** 「检查链接与图片」查出的问题（在扫描结果上补一个类型标记） */
+export interface DocIssue extends DocLinkRef {
+  /** 空链接 / 本地图片文件不存在 */
+  kind: 'empty-link' | 'missing-image';
 }

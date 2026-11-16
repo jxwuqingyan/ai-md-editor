@@ -12,10 +12,14 @@ export {
   dirNameOf,
   encodeText,
   isRelativeImagePath,
+  localImagePath,
   moveOutlineSection,
+  scanDocLinks,
   stripMarkdown,
   toFileUrl,
   writeEncoding,
+  type DocLinkRef,
+  type DocLinkScan,
   type OutlineMoveResult,
   type OutlineSectionItem,
   type TextEncoding
@@ -90,7 +94,9 @@ export const IpcChannel = {
   /** 在目录里新建 Markdown 文件（自动避让重名） */
   CreateFile: 'fs:create-file',
   /** 在目录内搜索所有 Markdown 文件内容 */
-  SearchFolder: 'search:folder'
+  SearchFolder: 'search:folder',
+  /** 取消一次进行中的文件夹搜索（按请求 id） */
+  SearchCancel: 'search:cancel'
 } as const;
 
 /** 导出类型 */
@@ -163,6 +169,8 @@ export interface SearchFolderInput {
   wholeWord: boolean;
   /** 正则表达式模式 */
   regex: boolean;
+  /** 请求 id：用于取消（不填则不可取消） */
+  requestId?: string;
 }
 
 /** 单条搜索匹配 */
@@ -197,6 +205,8 @@ export interface SearchFolderResult {
   files: SearchFileResult[];
   /** 结果是否被截断（超出上限） */
   truncated: boolean;
+  /** 是否被取消（取消时 files 为已搜到的部分结果） */
+  cancelled?: boolean;
   /** 错误信息（成功为 null） */
   error: string | null;
 }
@@ -532,11 +542,15 @@ export const MenuActions = {
   RenameFile: 'file:rename-file',
   DuplicateFile: 'file:duplicate-file',
   ReloadFromDisk: 'file:reload',
+  CheckDocLinks: 'file:check-doc-links',
   RevealInFolder: 'file:reveal',
   ExportHtml: 'file:export-html',
   ExportPdf: 'file:export-pdf',
   ExportWord: 'file:export-word',
   Print: 'file:print',
+
+  // ===== 帮助 =====
+  ShowMarkdownExample: 'help:markdown-example',
 
   // ===== 编辑 =====
   Undo: 'edit:undo',

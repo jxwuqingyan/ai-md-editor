@@ -108,6 +108,10 @@ const api = {
   searchFolder: (input: SearchFolderInput): Promise<SearchFolderResult> =>
     ipcRenderer.invoke(IpcChannel.SearchFolder, input),
 
+  /** 取消一次进行中的文件夹搜索（按请求 id） */
+  cancelSearch: (requestId: string): Promise<void> =>
+    ipcRenderer.invoke(IpcChannel.SearchCancel, requestId),
+
   /** 弹出文件夹选择对话框（文件树打开目录用） */
   chooseFolder: (): Promise<{ canceled: boolean; path: string | null }> =>
     ipcRenderer.invoke(IpcChannel.ChooseFolder),

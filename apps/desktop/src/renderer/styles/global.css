@@ -223,6 +223,13 @@ button:focus-visible {
   text-overflow: ellipsis;
 }
 
+/* 同名标签的父目录副标题（仅重名时出现） */
+.tab-dir {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
 /* 未保存标记：圆点 */
 .tab-dirty {
   color: var(--accent);
@@ -533,6 +540,23 @@ button:focus-visible {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 搜索进行中的取消按钮 */
+.search-cancel {
+  border: none;
+  background: none;
+  padding: 0;
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.search-cancel:hover {
+  text-decoration: underline;
 }
 
 .search-error,
@@ -923,6 +947,14 @@ button:focus-visible {
   outline: none;
   min-height: 60vh;
   word-break: break-word;
+}
+
+/* 空文档占位提示：整篇只剩一个空段落时显示，一开始输入即消失 */
+.milkdown-container .ProseMirror > p:first-child:last-child:has(> br:only-child)::before {
+  content: '输入正文，或敲 / 唤起插入菜单';
+  position: absolute;
+  color: var(--text-tertiary);
+  pointer-events: none;
 }
 
 /* 标题层级（克制的字号差，去 AI 味的夸张对比） */
@@ -1881,6 +1913,101 @@ button:focus-visible {
   border-radius: var(--radius-lg);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
   overflow: hidden;
+}
+
+/* 未保存文档中无法验证的相对图片说明 */
+.check-doc-note {
+  padding: 8px 14px;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* 「检查链接与图片」结果对话框 */
+.check-doc {
+  width: min(640px, 88vw);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+
+.check-doc-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.check-doc-close {
+  border: none;
+  background: none;
+  font-size: 16px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.check-doc-close:hover {
+  color: var(--text-primary);
+}
+
+.check-doc-list {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.check-doc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  transition: background 150ms var(--ease-out);
+}
+
+.check-doc-item:hover {
+  background: var(--bg-hover);
+}
+
+.check-doc-kind {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+}
+
+.check-doc-kind-missing-image {
+  color: var(--accent);
+}
+
+.check-doc-line {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.check-doc-text {
+  font-size: 12.5px;
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .quick-open-input,

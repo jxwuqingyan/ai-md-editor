@@ -98,8 +98,8 @@ async function runTests() {
   const items = collectItems(menu);
   const labels = new Set(items.map((item) => item.label));
   check(
-    '应用菜单包含文件/编辑/段落/格式/显示五组',
-    ['文件', '编辑', '段落', '格式', '显示'].every((label) => labels.has(label)),
+    '应用菜单包含文件/编辑/段落/格式/显示/帮助六组',
+    ['文件', '编辑', '段落', '格式', '显示', '帮助'].every((label) => labels.has(label)),
     `菜单项共 ${items.length} 个`
   );
 

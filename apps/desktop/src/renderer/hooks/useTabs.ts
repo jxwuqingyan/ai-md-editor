@@ -10,26 +10,7 @@ import type { EditorInstance } from '@ai-md-editor/editor';
 import type { SaveState, Tab } from '../types';
 import type { QuickEntry } from '../Dialogs';
 import type { SourceHistory } from './useSourceHistory';
-
-/** 默认文档内容（首次启动时的示例） */
-const DEFAULT_DOC = `# MarkdownNote
-
-跨平台的本地 Markdown 编辑器，所见即所得。
-
-## 核心特性
-
-- 输入即渲染（WYSIWYG）
-- 克制动效，专注内容
-- 现代极简，去 AI 味
-- 支持数学公式：$c = \\pm\\sqrt{a^2 + b^2}$
-
-## 技术栈
-
-- Electron + React + TypeScript
-- Milkdown（ProseMirror + remark）
-
-> 支持多标签页、打开 .md 文件、Cmd/Ctrl+S 保存、粘贴图片自动存到同级 img/ 目录。
-`;
+import { MARKDOWN_EXAMPLE } from '../markdownExample';
 
 /** 生成唯一标签 id（时间戳 + 自增序号） */
 let tabSeq = 0;
@@ -71,7 +52,8 @@ interface UseTabsOptions {
  * 所有会修改标签内容的操作都在这里收口，避免多处 setState 竞争。
  */
 export function useTabs({ editorRef, history, onSessionRestored, onNotice }: UseTabsOptions) {
-  const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', DEFAULT_DOC)]);
+  // 新建标签默认空白文档，不再预置示例文章
+  const [tabs, setTabs] = useState<Tab[]>(() => [createTab('未命名.md', '')]);
   const [activeId, setActiveId] = useState<string>(() => tabs[0]?.id ?? '');
   const [treeRoot, setTreeRoot] = useState<string | null>(null);
   /** 当前文档的保存状态（状态栏展示，比脏点更明确） */
@@ -156,6 +138,30 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     },
     [editorRef, history, flushEditor]
   );
+
+  /** 打开按需查看的 Markdown 示例；已打开时切回现有示例标签。 */
+  const showMarkdownExample = useCallback(() => {
+    const existing = tabsRef.current.find((tab) => !tab.path && tab.name === 'Markdown 语法示例.md');
+    if (existing) {
+      selectTab(existing.id);
+      return;
+    }
+    const tab = createTab('Markdown 语法示例.md', MARKDOWN_EXAMPLE);
+    history.reset();
+    setTabs((prev) => [...prev, tab]);
+    setActiveId(tab.id);
+    const editor = editorRef.current;
+    editor?.setMarkdown(MARKDOWN_EXAMPLE);
+    // 示例首载时以编辑器序列化结果作为干净基线，避免格式规范化被误判成用户编辑。
+    const normalized = editor?.flushMarkdown();
+    if (typeof normalized === 'string') {
+      setTabs((prev) =>
+        prev.map((current) =>
+          current.id === tab.id ? { ...current, content: normalized, dirty: false } : current
+        )
+      );
+    }
+  }, [editorRef, history, selectTab]);
 
   /**
    * 关闭标签：先算出下一个活动标签，再一次性更新状态（避免在 setState 回调里做副作用）。
@@ -675,6 +681,7 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     flushEditor,
     setActiveContent,
     newTab,
+    showMarkdownExample,
     selectTab,
     closeTab,
     openFileContent,

@@ -111,6 +111,9 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         item('重新命名…', MenuActions.RenameFile),
         item('复制一份到…', MenuActions.DuplicateFile),
         item('从磁盘重新加载', MenuActions.ReloadFromDisk, { enabled: s.hasPath }),
+        item('检查链接与图片', MenuActions.CheckDocLinks, {
+          toolTip: '只读扫描当前文档，列出空链接与找不到的本地图片'
+        }),
         sep,
         item('关闭', MenuActions.CloseTab, { accelerator: 'CommandOrControl+W' }),
         item('保存', MenuActions.Save, { accelerator: 'CommandOrControl+S' }),
@@ -364,6 +367,10 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         }),
         item('最小化', MenuActions.MinimizeWindow, { accelerator: 'CommandOrControl+M' })
       ]
+    },
+    {
+      label: '帮助',
+      submenu: [item('Markdown 语法示例', MenuActions.ShowMarkdownExample)]
     }
   ];
 }

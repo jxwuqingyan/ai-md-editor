@@ -1,14 +1,14 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { extractOutline } from '@ai-md-editor/markdown-core';
 import type { EditorInstance, TableContext } from '@ai-md-editor/editor';
-import { TEXT_ENCODING_LABELS, moveOutlineSection } from '@ai-md-editor/shared';
+import { TEXT_ENCODING_LABELS, dirNameOf, localImagePath, moveOutlineSection, scanDocLinks } from '@ai-md-editor/shared';
 import { NO_TABLE_CONTEXT } from './constants';
 import MarkdownEditor from './MarkdownEditor';
 import Tabs from './Tabs';
 import TopbarActions from './TopbarActions';
 import Sidebar from './Sidebar';
 import Toolbar from './Toolbar';
-import { FindBar, QuickOpen, RenameDialog, FloatPanels, type DocStats, type QuickEntry } from './Dialogs';
+import { FindBar, QuickOpen, RenameDialog, FloatPanels, CheckDocDialog, type DocStats, type QuickEntry } from './Dialogs';
 import { useSourceHistory } from './hooks/useSourceHistory';
 import { useTabs } from './hooks/useTabs';
 import { useDisplayState } from './hooks/useDisplayState';
@@ -18,6 +18,7 @@ import { useFindReplace } from './hooks/useFindReplace';
 import { useSourceTableContext } from './hooks/useSourceTableContext';
 import { useMenuBridge } from './hooks/useMenuBridge';
 import type { OutlineDropPosition } from './OutlineList';
+import type { DocIssue } from './types';
 
 /**
  * 应用根组件。
@@ -80,6 +81,7 @@ export default function App(): JSX.Element {
     flushEditor,
     setActiveContent,
     newTab,
+    showMarkdownExample,
     selectTab,
     closeTab,
     chooseFolder,
@@ -528,6 +530,55 @@ export default function App(): JSX.Element {
     return () => window.clearTimeout(timer);
   }, [activeTab?.path, editorVersion, jumpToSearchMatch]);
 
+  // ===== 文档链接与图片检查（只读诊断，不改文档） =====
+
+  const [docIssues, setDocIssues] = useState<DocIssue[] | null>(null);
+  const [docUncheckableImages, setDocUncheckableImages] = useState(0);
+
+  /** 扫描当前文档：只读取编辑器快照，不触发内容回写或 dirty 状态变化。 */
+  const checkDocLinks = useCallback(async () => {
+    const active = tabsRef.current.find((tab) => tab.id === activeIdRef.current);
+    if (!active) return;
+    const markdown =
+      viewModeRef.current === 'wysiwyg'
+        ? editorRef.current?.flushMarkdown() ?? active.content
+        : active.content;
+    const scan = scanDocLinks(markdown);
+    const issues: DocIssue[] = scan.emptyTargets.map((ref) => ({ ...ref, kind: 'empty-link' as const }));
+    const docDir = active.path ? dirNameOf(active.path) : null;
+    let uncheckableImages = 0;
+
+    for (const ref of scan.localImages) {
+      const imagePath = localImagePath(ref.target);
+      if (!imagePath) continue;
+      const absolute = imagePath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(imagePath);
+      if (!absolute && !docDir) {
+        uncheckableImages += 1;
+        continue;
+      }
+      const fullPath = absolute ? imagePath : docDir + '/' + imagePath;
+      try {
+        const stat = await window.api.statPath(fullPath);
+        if (!stat.exists || !stat.isFile) issues.push({ ...ref, kind: 'missing-image' });
+      } catch {
+        issues.push({ ...ref, kind: 'missing-image' });
+      }
+    }
+    issues.sort((a, b) => a.line - b.line);
+    setDocUncheckableImages(uncheckableImages);
+    setDocIssues(issues);
+  }, [tabsRef, activeIdRef, viewModeRef, editorRef]);
+
+  /** 点击检查结果：跳到对应行并关掉对话框 */
+  const jumpToIssue = useCallback(
+    (issue: DocIssue) => {
+      const length = (issue.label || issue.target).length;
+      jumpToSearchMatch(issue.line, issue.column, Math.max(1, length), issue.text, issue.rawColumn);
+      setDocIssues(null);
+    },
+    [jumpToSearchMatch]
+  );
+
   // 图片粘贴：保存到文档同级 img/ 并插入相对路径
   useEffect(() => {
     const onPaste = (event: ClipboardEvent): void => void handlePaste(event);
@@ -649,6 +700,7 @@ export default function App(): JSX.Element {
   // ===== 原生菜单动作分发 =====
   useMenuBridge({
     newTab,
+    showMarkdownExample,
     newWindow: () => void window.api.newWindow(),
     openFile: () => void openFile(),
     openMostRecent: () => void handleOpenMostRecent(),
@@ -660,6 +712,7 @@ export default function App(): JSX.Element {
     saveAs: () => void saveAs(),
     duplicate: () => void duplicate(),
     reloadFromDisk: () => void reloadFromDisk(),
+    checkDocLinks: () => void checkDocLinks(),
     openRename: openRenameDialog,
     revealInFolder: () => {
       const path = tabsRef.current.find((tab) => tab.id === activeIdRef.current)?.path;
@@ -838,6 +891,9 @@ export default function App(): JSX.Element {
           onSubmit={(name) => void handleRename(name)}
           onClose={() => setRenameMode(null)}
         />
+      )}
+      {docIssues !== null && (
+        <CheckDocDialog issues={docIssues} uncheckableImages={docUncheckableImages} onJump={jumpToIssue} onClose={() => setDocIssues(null)} />
       )}
 
       {/* 状态栏 */}

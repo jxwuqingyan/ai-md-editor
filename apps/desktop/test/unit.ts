@@ -10,10 +10,12 @@ import {
   baseNameOf,
   decodeBytes,
   dirNameOf,
+  localImagePath,
   encodeText,
   stripMarkdown,
   toFileUrl,
-  moveOutlineSection
+  moveOutlineSection,
+  scanDocLinks
 } from '@ai-md-editor/shared';
 import { applySourceFormat, sourceTableContext } from '../src/renderer/sourceActions';
 import { extractMath, restoreMath } from '../src/main/mathExport';
@@ -372,6 +374,59 @@ ok(
   frontMatterMoved.text.startsWith('---\ntitle: 示例\n---\n\n# 结尾'),
   frontMatterMoved.text.slice(0, 40)
 );
+
+// ===== 文档链接 / 图片扫描（「检查链接与图片」的纯函数部分） =====
+
+const scanDoc = [
+  '# 标题',
+  '',
+  '正常链接 [官网](https://example.com) 和 [空链接]() 并排',
+  '',
+  '![本地图](img/photo.png)',
+  '',
+  '![远程图](https://example.com/a.png) 与 ![data图](data:image/png;base64,xx)',
+  '',
+  '```md',
+  '代码块里的 [假链接]() 不该被扫到',
+  '```',
+  '',
+  '行内代码 `[也不该扫]()` 外面的 [真空]() 要扫到',
+  '',
+  '[ref]: https://example.com 引用式定义行跳过',
+  '',
+  '- 列表里的 ![缩进图片](img/inside.png)'
+].join('\n');
+const scanResult = scanDocLinks(scanDoc);
+
+equal(
+  '空链接扫出 2 处（行内代码里的不算）',
+  scanResult.emptyTargets.map((r) => `${r.line}:${r.label}`),
+  ['3:空链接', '13:真空']
+);
+equal(
+  '本地图片只含相对路径（远程/data/代码块不进来）',
+  scanResult.localImages.map((r) => `${r.line}:${r.target}`),
+  ['5:img/photo.png', '17:img/inside.png']
+);
+{
+  const ref = scanResult.localImages[0];
+  equal('图片引用的行文本与行号', [ref.line, ref.text], [5, '![本地图](img/photo.png)']);
+  ok('空 alt 图片用文件名做定位锚', scanResult.localImages[1].rawColumn > 4, `rawColumn=${scanResult.localImages[1].rawColumn}`);
+}
+{
+  // 绝对路径图片也要进待检查列表（Windows 盘符与 POSIX 根路径都算）
+  const absScan = scanDocLinks('![mac](/tmp/a.png)\n![win](C:\\img\\b.png)\n');
+  equal('绝对路径图片同样待检查', absScan.localImages.length, 2);
+}
+equal(
+  '带空格尖括号图片路径去掉查询参数后待检查',
+  scanDocLinks('![空格](<img/missing image.png?raw=1#view>)').localImages.map((ref) => ref.target),
+  ['img/missing image.png?raw=1#view']
+);
+equal('图片目标解析会去掉查询参数与片段', localImagePath('img/photo%20one.png?raw=1#view'), 'img/photo one.png');
+equal('协议相对图片不当作本地文件', localImagePath('//cdn.example.com/photo.png'), null);
+equal('远程图片地址不当作本地文件', localImagePath('https://example.com/photo.png'), null);
+equal('空文档扫描结果为空', scanDocLinks(''), { emptyTargets: [], localImages: [] });
 
 // ===== 结果 =====
 console.log(`\n单元测试：${total - failed}/${total} 通过`);

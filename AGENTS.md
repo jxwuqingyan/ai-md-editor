@@ -158,7 +158,7 @@ ai-md-editor/
 | 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
 | 9 | 分发：push/PR 只跑测试 job；打 `v*` tag 或手动触发才三平台打包（macOS x64+arm64 dmg + Windows x64 exe）并传 Release——私有仓库 2000 分钟/月、macOS runner 10 倍计费，每次 push 都打包几天就会烧完额度（2026-11 额度就是这么耗尽的，此后只推 main、本地出 arm64 dmg，见 #58） |
 | 10 | 顶部导航：macOS 原生应用菜单 + 标签栏右侧动作区，窗口内不保留独立功能顶栏 |
-| 11 | 原生菜单只保留「文件/编辑/段落/格式/显示」五组；主题走右上角按钮，不设主题/窗口/帮助菜单 |
+| 11 | 原生菜单为「文件/编辑/段落/格式/显示/帮助」六组；主题走右上角按钮，不单独增加主题或窗口菜单。「帮助」目前只放 Markdown 语法示例入口，示例文档打开后应保持未修改 |
 | 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
 | 13 | 格式化命令 WYSIWYG 走 ProseMirror，源码模式走 `sourceActions.ts`，两者共用同一 MenuAction 分发入口 |
 | 14 | 非 CommonMark 语法（下划线、YAML Front Matter、`[TOC]`、`> [!NOTE]`）通过自定义 remark 插件 / Milkdown 节点 / 装饰器实现，不在文本层做字符串替换 |
@@ -217,6 +217,7 @@ ai-md-editor/
 | 66 | 表格手柄必须默认隐藏（阅读不被干扰）：`.md-table-handle-bar` 与角手柄 `visibility: hidden`，仅表格 hover 或存在整行 / 整列 / 整表选区（`md-table-has-selection`）时浮现；光标在表内但没选中时不常驻。**坑**：`visibility` 不能参与 CSS transition——窗口失焦时 Chromium 节流动画帧，过渡停在起点导致永不隐藏，必须立即切换、只留 opacity 过渡。E2E 验证显隐必须用真实鼠标点击（`clickSelector`，`sendInputEvent` mouse 事件）移动选区，合成 `el.click()` 不动 ProseMirror 选区；且断言用 `visibility` 而非 opacity（失焦时 opacity 过渡同样不推进）；hover 状态在 E2E 里不可靠，改断言「选中后鼠标移开手柄仍显示」 |
 | 67 | 表格手柄的视觉细节（0.14.31）：手柄带宽度用 `--md-table-gutter: 16px` 与 block 的 padding 精确相等，手柄与表格、手柄与手柄之间必须 0 间隙（分隔用 `inset box-shadow`，不用 border）；插入图标按轴切换（列 `INSERT_ICONS.col` 左右箭头、行 `INSERT_ICONS.row` 上下箭头）；行列选中只渲染「插左/插右/删除」三键，`removeTable` 只在角手柄选中整表时出现；工具条定位以 **block**（含手柄带）为基准 `top - height - 8`，不能用 `contentDOM`（会把列手柄带盖住）。整表选中时所有手柄一起 `is-selected`（连成蓝带） |
 | 68 | 保存链路的三条硬约束：①写盘必须原子（`main/fileWrite.ts` 临时文件 + fsync + rename），不要退回 `writeFile(path)`；②关闭标签必须 `await` 写盘成功再移除标签，失败保留标签与 dirty；③关闭窗口必须按 `requestId` 等渲染层回包（`app:flush-reply`），超时/失败都要弹窗让用户选择，禁止用固定延时假定写盘完成。外部改动检测的版本记录在 `recordDiskStamp`（读成功、写成功后刷新），只有显式保存传 `force: true` 才跳过比对，自动保存永远不 force |
+| 69 | Markdown 日常写作体验（0.14.32）：新建标签初始内容必须为空；示例文档只能通过原生「帮助 → Markdown 语法示例」主动打开，打开后不能标脏；仅当标签存在同名文件时才显示父目录副标题。全文搜索 IPC 的取消控制器按 `webContents` 与请求 ID 隔离，目录遍历、文件扫描和逐行匹配都要定期让出事件循环并检查取消；命中任一结果上限、跳过超大文件或无法读取的目录/文件时都要返回 `truncated=true`，UI 明确提示结果不完整。诊断当前文档时用 `flushMarkdown` 读取编辑器快照，不触发保存/格式化/dirty 状态；未保存文档里的相对图片列为未检查，不误报丢失。往返回归需通过真实文件打开、编辑、切换源码、逐字节比较 Markdown 并检查 HTML 导出；表格夹具按当前 Milkdown 序列化格式建立基线，更新基线前先审查语法变化，不得为了通过测试弱化正文断言 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 

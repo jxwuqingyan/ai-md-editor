@@ -50,6 +50,9 @@ import { createWindow } from './window';
 import { markSelfWrite, watchDocumentFile, unwatchDocumentFile } from './fileWatcher';
 import { assertDiskUnchanged, forgetDiskStamp, recordDiskStamp, writeFileAtomic } from './fileWrite';
 
+/** 按渲染进程隔离的活动搜索请求，避免不同窗口互相取消。 */
+const searchControllers = new Map<string, AbortController>();
+
 /** Markdown 文件扩展名过滤 */
 const MD_FILTERS = [
   { name: 'Markdown', extensions: ['md', 'markdown', 'txt'] },
@@ -591,7 +594,21 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(IpcChannel.CreateFile, (event, dirPath: string, name?: string) =>
     handleCreateFile(BrowserWindow.fromWebContents(event.sender), dirPath, name)
   );
-  ipcMain.handle(IpcChannel.SearchFolder, (_event, input: SearchFolderInput) => searchFolder(input));
+  ipcMain.handle(IpcChannel.SearchFolder, async (event, input: SearchFolderInput) => {
+    if (!input.requestId) return searchFolder(input);
+    const key = String(event.sender.id) + ':' + input.requestId;
+    searchControllers.get(key)?.abort();
+    const controller = new AbortController();
+    searchControllers.set(key, controller);
+    try {
+      return await searchFolder(input, controller.signal);
+    } finally {
+      if (searchControllers.get(key) === controller) searchControllers.delete(key);
+    }
+  });
+  ipcMain.handle(IpcChannel.SearchCancel, (event, requestId: string) => {
+    searchControllers.get(String(event.sender.id) + ':' + requestId)?.abort();
+  });
   ipcMain.handle(IpcChannel.ChooseFolder, (event) =>
     handleChooseFolder(BrowserWindow.fromWebContents(event.sender))
   );

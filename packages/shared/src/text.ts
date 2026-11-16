@@ -104,6 +104,41 @@ export function isRelativeImagePath(src: string): boolean {
 }
 
 /**
+ * 从 Markdown 图片目标中取出本地路径。
+ *
+ * 去掉尖括号、查询参数与片段，并解码百分号转义；远程地址与协议相对地址返回 null。
+ */
+export function localImagePath(target: string): string | null {
+  let path = target.trim();
+  if (path.startsWith('<') && path.endsWith('>')) path = path.slice(1, -1).trim();
+  if (!path || path.startsWith('//')) return null;
+  if (/^[A-Za-z]:[\\/]/.test(path)) return decodePath(path);
+  if (/^file:\/\//i.test(path)) {
+    try {
+      const url = new URL(path);
+      let local = decodeURIComponent(url.pathname);
+      if (/^\/[A-Za-z]:\//.test(local)) local = local.slice(1);
+      return local;
+    } catch {
+      return null;
+    }
+  }
+  if (/^[a-z][a-z0-9+.-]*:/i.test(path)) return null;
+  const suffix = path.search(/[?#]/);
+  if (suffix >= 0) path = path.slice(0, suffix);
+  return path ? decodePath(path) : null;
+}
+
+/** 解码文件路径；遇到不完整百分号编码时保留原文。 */
+function decodePath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
+/**
  * 把相对图片路径解析成绝对 file:// 地址。
  *
  * @param baseDir 文档所在目录（绝对路径，mac/linux 用 /，Windows 用 \）
@@ -132,6 +167,86 @@ export function baseNameOf(targetPath: string): string {
 export function dirNameOf(targetPath: string): string {
   const index = Math.max(targetPath.lastIndexOf('/'), targetPath.lastIndexOf('\\'));
   return index > 0 ? targetPath.slice(0, index) : '';
+}
+
+/** 文档里的一处链接 / 图片引用（「检查链接与图片」功能的扫描结果） */
+export interface DocLinkRef {
+  /** 1 起的行号 */
+  line: number;
+  /** 链接文字或图片替代文本（可能为空） */
+  label: string;
+  /** 目标地址（空链接为 ''） */
+  target: string;
+  /** 是否图片（![alt](target)） */
+  isImage: boolean;
+  /** 所在行原文（首尾裁剪，用于跳转定位） */
+  text: string;
+  /** label 在裁剪行文本中的起点（跳转用） */
+  column: number;
+  /** label 在原始行文本中的起点（源码模式定位用） */
+  rawColumn: number;
+}
+
+/** 文档链接 / 图片扫描结果 */
+export interface DocLinkScan {
+  /** 空链接（[文字]() / []()）：不依赖文件系统即可确定 */
+  emptyTargets: DocLinkRef[];
+  /** 本地图片引用：需要调用方逐个检查文件是否存在 */
+  localImages: DocLinkRef[];
+}
+
+/**
+ * 扫描 Markdown 文档里的行内链接与图片。
+ *
+ * 跳过围栏代码、行内代码与引用式链接定义；支持尖括号包裹的含空格路径和链接标题。
+ * 扫描只提供诊断位置，不会改写文档内容。
+ */
+export function scanDocLinks(markdown: string): DocLinkScan {
+  const emptyTargets: DocLinkRef[] = [];
+  const localImages: DocLinkRef[] = [];
+  const lines = markdown.split('\n');
+  let inFence = false;
+  const tick = String.fromCharCode(96);
+  const fencePattern = new RegExp('^(' + tick.repeat(3) + '|~~~)');
+  const inlineCode = new RegExp('(' + tick + '+)(.*?)\\1', 'g');
+  const pattern = /(!?)\[([^\]]*)\]\(\s*(?:<([^>]*)>|((?:\\.|[^)\s])+))?(?:\s+["'][^)]*["'])?\s*\)/g;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const rawLine = lines[i];
+    const trimmedStart = rawLine.trimStart();
+    if (fencePattern.test(trimmedStart)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (/^\s*\[[^\]]+\]:\s*\S+/.test(rawLine)) continue;
+    // 用等长空格屏蔽行内代码，保持后续诊断列号不偏移。
+    const line = rawLine.replace(inlineCode, (code) => ' '.repeat(code.length));
+    pattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(line)) !== null) {
+      const isImage = match[1] === '!';
+      const label = match[2];
+      const target = match[3] ?? match[4] ?? '';
+      const trimmed = rawLine.trim();
+      const rawColumn = label ? rawLine.indexOf(label, match.index) : Math.max(0, match.index);
+      const ref: DocLinkRef = {
+        line: i + 1,
+        label,
+        target,
+        isImage,
+        text: trimmed,
+        column: Math.max(0, rawColumn - (rawLine.length - rawLine.trimStart().length)),
+        rawColumn
+      };
+      if (target.trim() === '') {
+        emptyTargets.push(ref);
+        continue;
+      }
+      if (isImage && localImagePath(target) !== null) localImages.push(ref);
+    }
+  }
+  return { emptyTargets, localImages };
 }
 
 /** 大纲条目的最小信息：解析层产出的 OutlineItem 可直接传入 */
