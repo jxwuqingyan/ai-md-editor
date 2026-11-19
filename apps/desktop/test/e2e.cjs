@@ -1896,6 +1896,130 @@ async function runTests() {
   );
   check('末尾段落转成代码块后仍自动补出可输入段落', converted === true, `converted=${converted}`);
 
+  // ===== 10.7b 表格 / 代码块同行末尾点击落光标并回车换行 =====
+  // 这些块占满整行，点「同行最后面」（行末右侧空白）时 ProseMirror 默认把光标
+  // 解析进块内部——表格落进单元格、代码块落进代码文本，回车只在块内换行。
+  // 现在点行末空白处应把光标放到块后，回车在块后新建正文段落；
+  // 而点块内文字仍要能正常编辑（不能一刀切把所有点击都挪到块后）。
+  await resetDoc('# 行末换行\n\n' +
+    '![红块](img/a.png)\n\n图片后正文\n\n' +
+    '| A | B |\n| --- | --- |\n| 1 | 2 |\n\n表格后正文\n\n' +
+    '```js\nconst a = 1;\n```\n\n代码后正文\n');
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table') && document.querySelector('.ProseMirror pre'))`), {
+    label: '行末换行用例渲染', timeout: 20000
+  });
+  const pressReturn = () => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Return' });
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Return' });
+  };
+  // 先滚动让目标块进入视口中部再取坐标，避免长文档里块在视口外导致点击落空
+  const scrollIntoView = (selector) => exec(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return false;
+    el.scrollIntoView({ block: 'center' });
+    return true;
+  })()`);
+  // 返回某个块「最后一行右侧空白」的点击坐标：x 取块右缘内 2px、y 取块底部内 6px
+  const lineEndPoint = (selector) => exec(`(() => {
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.right - 2), y: Math.round(r.bottom - 6) };
+  })()`);
+
+  // 代码块：点行末空白 → 回车应在块后新建段落，代码内容不变
+  {
+    await scrollIntoView('.ProseMirror pre'); await new Promise((r) => setTimeout(r, 200));
+    const point = await lineEndPoint('.ProseMirror pre');
+    if (!point) throw new Error('代码块行末坐标不存在');
+    await clickPoint(point);
+    await focusEditor();
+    const beforePre = await exec(`document.querySelector('.ProseMirror pre')?.textContent ?? ''`);
+    const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
+    pressReturn();
+    await waitFor(
+      () => exec(`document.querySelectorAll('.ProseMirror > p').length > ${beforePCount}`),
+      { label: '代码块行末回车在块后建段落' }
+    );
+    const codeState = await exec(`(() => ({
+      pre: document.querySelector('.ProseMirror pre')?.textContent ?? '',
+      p: document.querySelectorAll('.ProseMirror > p').length
+    }))()`);
+    check('代码块同行末尾点击回车在块后换行', codeState.p === beforePCount + 1 && codeState.pre === beforePre,
+      `点击(${point.x},${point.y}) p:${beforePCount}->${codeState.p} pre="${codeState.pre}"`);
+    menuAction('edit:undo');
+    await waitFor(() => exec(`document.querySelectorAll('.ProseMirror > p').length === ${beforePCount}`), { label: '撤销块后换行' });
+  }
+
+  // 表格：点行末空白 → 回车应在表格后新建段落，表格行数不变
+  {
+    await scrollIntoView('.ProseMirror table'); await new Promise((r) => setTimeout(r, 200));
+    const point = await lineEndPoint('.ProseMirror table');
+    if (!point) throw new Error('表格行末坐标不存在');
+    await clickPoint(point);
+    await focusEditor();
+    const beforeRows = await exec(`document.querySelectorAll('.ProseMirror table tr').length`);
+    const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
+    pressReturn();
+    await waitFor(
+      () => exec(`document.querySelectorAll('.ProseMirror > p').length > ${beforePCount}`),
+      { label: '表格行末回车在表后建段落' }
+    );
+    const tableState = await exec(`(() => ({
+      rows: document.querySelectorAll('.ProseMirror table tr').length,
+      p: document.querySelectorAll('.ProseMirror > p').length
+    }))()`);
+    check('表格同行末尾点击回车在表后换行', tableState.p === beforePCount + 1 && tableState.rows === beforeRows,
+      `点击(${point.x},${point.y}) p:${beforePCount}->${tableState.p} rows:${beforeRows}->${tableState.rows}`);
+    menuAction('edit:undo');
+    await waitFor(() => exec(`document.querySelectorAll('.ProseMirror > p').length === ${beforePCount}`), { label: '撤销表后换行' });
+  }
+
+  // 图片：inline 图片同行右侧空白点击即落在段落内，回车正常换行
+  {
+    await scrollIntoView('.ProseMirror img'); await new Promise((r) => setTimeout(r, 200));
+    const point = await exec(`(() => {
+      const img = document.querySelector('.ProseMirror img');
+      if (!img) return null;
+      const r = img.getBoundingClientRect();
+      return { x: Math.round(r.right + 30), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    if (!point) throw new Error('图片同行坐标不存在');
+    await clickPoint(point);
+    await focusEditor();
+    const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
+    pressReturn();
+    await waitFor(
+      () => exec(`document.querySelectorAll('.ProseMirror > p').length > ${beforePCount}`),
+      { label: '图片同行末尾回车换行' }
+    );
+    check('图片同行末尾点击回车换行', (await exec(`document.querySelectorAll('.ProseMirror > p').length`)) === beforePCount + 1);
+    menuAction('edit:undo');
+    await waitFor(() => exec(`document.querySelectorAll('.ProseMirror > p').length === ${beforePCount}`), { label: '撤销图片后换行' });
+  }
+
+  // 边界：点代码块内文字仍应落进代码里编辑，不能被行末逻辑一刀切挪到块后
+  {
+    await scrollIntoView('.ProseMirror pre'); await new Promise((r) => setTimeout(r, 200));
+    const point = await exec(`(() => {
+      const pre = document.querySelector('.ProseMirror pre');
+      if (!pre) return null;
+      const r = pre.getBoundingClientRect();
+      return { x: Math.round(r.left + 24), y: Math.round(r.top + 15) };
+    })()`);
+    if (!point) throw new Error('代码块内文字坐标不存在');
+    await clickPoint(point);
+    await focusEditor();
+    const beforePre = await exec(`document.querySelector('.ProseMirror pre')?.textContent ?? ''`);
+    await exec(`(() => { document.querySelector('.ProseMirror')?.focus(); return true; })()`);
+    win.webContents.insertText('XYZ');
+    await waitFor(() => exec(`(document.querySelector('.ProseMirror pre')?.textContent ?? '').includes('XYZ')`), { label: '代码块内文字可编辑' });
+    const afterPre = await exec(`document.querySelector('.ProseMirror pre')?.textContent ?? ''`);
+    check('点击代码块内文字仍可编辑（行末逻辑不误伤块内）', afterPre !== beforePre && afterPre.includes('XYZ'), afterPre);
+    menuAction('edit:undo');
+    await waitFor(() => exec(`(document.querySelector('.ProseMirror pre')?.textContent ?? '') === ${JSON.stringify(beforePre)}`), { label: '撤销块内编辑' });
+  }
+
   // ===== 10.8 列表项开头按退格：去掉当前编号变段落，而不是并进上一行 =====
   // 旧行为是把「2. 第二项」的文字并到第一项后面（光标跳到上一行），
   // 列表在文档开头时更是删不动、也没法在最前面写新内容。

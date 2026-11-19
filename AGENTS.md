@@ -219,6 +219,7 @@ ai-md-editor/
 | 68 | 保存链路的三条硬约束：①写盘必须原子（`main/fileWrite.ts` 临时文件 + fsync + rename），不要退回 `writeFile(path)`；②关闭标签必须 `await` 写盘成功再移除标签，失败保留标签与 dirty；③关闭窗口必须按 `requestId` 等渲染层回包（`app:flush-reply`），超时/失败都要弹窗让用户选择，禁止用固定延时假定写盘完成。外部改动检测的版本记录在 `recordDiskStamp`（读成功、写成功后刷新），只有显式保存传 `force: true` 才跳过比对，自动保存永远不 force |
 | 69 | Markdown 日常写作体验（0.14.32）：新建标签初始内容必须为空；示例文档只能通过原生「帮助 → Markdown 语法示例」主动打开，打开后不能标脏；仅当标签存在同名文件时才显示父目录副标题。全文搜索 IPC 的取消控制器按 `webContents` 与请求 ID 隔离，目录遍历、文件扫描和逐行匹配都要定期让出事件循环并检查取消；命中任一结果上限、跳过超大文件或无法读取的目录/文件时都要返回 `truncated=true`，UI 明确提示结果不完整。诊断当前文档时用 `flushMarkdown` 读取编辑器快照，不触发保存/格式化/dirty 状态；未保存文档里的相对图片列为未检查，不误报丢失。往返回归需通过真实文件打开、编辑、切换源码、逐字节比较 Markdown 并检查 HTML 导出；表格夹具按当前 Milkdown 序列化格式建立基线，更新基线前先审查语法变化，不得为了通过测试弱化正文断言 |
 | 70 | 查找跳转不能依赖 ProseMirror 的 `tr.scrollIntoView()`（0.14.33）：该事务在 update 阶段调用 `scrollToSelection()`，后者要求 DOM 选区 `focusNode` 在编辑器内；查找时焦点停在查找框，滚动被整个跳过，表现为「计数在变、正文不跳」。`placeCaretAtTextOffset` 必须按 `view.coordsAtPos` 手动滚 `.editor-scroll`，且不能抢查找框焦点、不能把命中改成整段选区。E2E 要用足够长的文档（命中在视口外）断言 scrollTop 变化与 `.md-find-hit-active` 进入可视区域——短文档下不滚动是「正确」的，测不出这个 bug |
+| 71 | 表格 / 代码块这类占满整行的块，点「同行最后面」（行末右侧空白）必须落光标到块后、回车在块后建段落（0.14.34）：ProseMirror 默认把点击解析进块内（单元格 / 代码文本），官方 gapcursor 只在点块**外侧空隙**时才生效，对此无效。`gapCursor.ts` 在 `handleClick` 用 DOM 几何判定——点击 x 在块 boundingRect 右缘窄条（≤56px）、y 在最后一行区域，命中则 `TextSelection.near(doc.resolve(blockEnd), 1)` 把光标放到块后。**只判行末空白**，必须保留「点块内文字仍走默认编辑」的 E2E 断言，否则一刀切会破坏块内输入。图片是 inline 节点、同行右侧本就在段落内，无需处理 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 

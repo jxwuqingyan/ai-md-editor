@@ -58,6 +58,7 @@ import { calloutPlugin, tocPlugin } from './decorations';
 import { createHighlightParser, highlightConfigKey } from './highlight';
 import { selectionContextPlugin } from './selection';
 import { trailingParagraphPlugin } from './trailing';
+import { blockLineEndCaret } from './gapCursor';
 import { listBackspaceShortcut, listUnlistPendingPlugin } from './listBackspace';
 import { listItemExitPlugin } from './listItemExit';
 import { configureMathView, mathNodeViewPlugin } from './mathView';
@@ -161,6 +162,9 @@ export async function createEditor(
     .use(tableHandlesPlugin((action) => formatRef.current(action)))
     // 末尾是非文本块（表格/分割线等）时补一个空段落，保证表格下方能点进去输入、整表也能被删除
     .use(trailingParagraphPlugin)
+    // 块同行末尾落光标：点击表格 / 代码块最后一行右侧空白时，光标落到块后，
+    // 回车即可在块后新建正文段落（图片是 inline 节点，本就支持，无需处理）。
+    .use(blockLineEndCaret)
     // 查找命中高亮：装饰而非改文本，不影响撤销栈
     .use(searchHighlightPlugin)
     // 列表项开头按退格：去掉当前编号变普通段落，而不是并进上一行；连续按可一路解散列表
