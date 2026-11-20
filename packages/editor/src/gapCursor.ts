@@ -55,17 +55,35 @@ export const blockLineEndCaret = $prose(
     new Plugin({
       key: new PluginKey('MDNOTE_BLOCK_LINE_END_CARET'),
       view: (view: EditorView) => {
+        /** 竖线贴块右缘所需的垂直位移（见 global.css 的 --md-gap-caret-lift） */
+        const markLineEndCaret = (blockDom: HTMLElement) => {
+          // 先清掉上一轮位移再测量，否则量到的是已上移过的位置，偏移会越算越小
+          view.dom.classList.remove('md-gap-at-block-end');
+          view.dom.style.setProperty('--md-gap-caret-lift', '0px');
+          const gapEl = view.dom.querySelector('.ProseMirror-gapcursor');
+          const blockRect = blockDom.getBoundingClientRect();
+          let lift = 0;
+          if (gapEl) {
+            // widget 的静态位置在块下方，上移这段距离让竖线底边贴住块底部
+            lift = Math.max(0, Math.round(gapEl.getBoundingClientRect().bottom - blockRect.bottom)) + 2;
+          }
+          view.dom.style.setProperty('--md-gap-caret-lift', `${lift}px`);
+          view.dom.classList.add('md-gap-at-block-end');
+        };
+
         const onMouseDown = (event: MouseEvent) => {
           if (!view.editable) return;
           const { clientX, clientY } = event;
           let blockPos: number | null = null;
           let blockSize = 0;
+          let blockDom: HTMLElement | null = null;
           view.state.doc.descendants((node, pos) => {
             if (blockPos !== null || !GAP_NODE_NAMES.includes(node.type.name)) return blockPos === null;
             const dom = view.nodeDOM(pos);
             if (!(dom instanceof HTMLElement) || !isLineEndHit(dom, clientX, clientY)) return true;
             blockPos = pos;
             blockSize = node.nodeSize;
+            blockDom = dom;
             return false;
           });
           if (blockPos === null) return;
@@ -78,10 +96,17 @@ export const blockLineEndCaret = $prose(
           if (!(view.state.selection instanceof GapCursor)) {
             view.dispatch(view.state.tr.setSelection(TextSelection.near(after, 1)));
           }
+          if (blockDom) markLineEndCaret(blockDom as HTMLElement);
           view.focus();
         };
         document.addEventListener('mousedown', onMouseDown, true);
-        return { destroy: () => document.removeEventListener('mousedown', onMouseDown, true) };
+        return {
+          update: (v: EditorView) => {
+            // 选区不再是间隙光标时撤掉贴右缘样式，避免影响方向键产生的 gapcursor
+            if (!(v.state.selection instanceof GapCursor)) v.dom.classList.remove('md-gap-at-block-end');
+          },
+          destroy: () => document.removeEventListener('mousedown', onMouseDown, true)
+        };
       }
     })
 );

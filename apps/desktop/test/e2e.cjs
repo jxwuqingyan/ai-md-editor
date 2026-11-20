@@ -1926,6 +1926,18 @@ async function runTests() {
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.right - 2), y: Math.round(r.bottom - 6) };
   })()`);
+  // 量间隙光标与块的位置关系：竖线要贴块右缘、且落在块的高度范围内（不能跑到块下方的下一行）
+  const caretGeometry = (blockSelector) => exec(`(() => {
+    const gap = document.querySelector('.ProseMirror-gapcursor');
+    const block = document.querySelector(${JSON.stringify(blockSelector)});
+    if (!gap || !block) return null;
+    const g = gap.getBoundingClientRect();
+    const b = block.getBoundingClientRect();
+    return {
+      gapTop: Math.round(g.top), gapBottom: Math.round(g.bottom), gapRight: Math.round(g.right),
+      blockTop: Math.round(b.top), blockBottom: Math.round(b.bottom), blockRight: Math.round(b.right)
+    };
+  })()`);
 
   // 代码块：点行末空白 → 回车应在块后新建段落，代码内容不变
   {
@@ -1934,9 +1946,16 @@ async function runTests() {
     if (!point) throw new Error('代码块行末坐标不存在');
     await clickPoint(point);
     await focusEditor();
-    // 点击后应出现间隙光标竖线（紧贴块右缘），这是「能插入光标」的可视证据
-    const gapShown = await exec(`document.querySelectorAll('.ProseMirror-gapcursor').length > 0`);
-    check('代码块同行末尾点击出现间隙光标竖线', gapShown === true);
+    // 点击后应出现间隙光标竖线，且竖线要落在块右缘、块的高度范围内（不是块下方的下一行）
+    const caret = await caretGeometry('.ProseMirror pre');
+    check(
+      '代码块行末光标竖线贴块右缘且落在块内',
+      caret !== null &&
+        Math.abs(caret.gapRight - caret.blockRight) <= 6 &&
+        caret.gapBottom <= caret.blockBottom + 4 &&
+        caret.gapTop >= caret.blockTop - 4,
+      JSON.stringify(caret)
+    );
     const beforePre = await exec(`document.querySelector('.ProseMirror pre')?.textContent ?? ''`);
     const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
     pressReturn();
@@ -1961,6 +1980,15 @@ async function runTests() {
     if (!point) throw new Error('表格行末坐标不存在');
     await clickPoint(point);
     await focusEditor();
+    const caret = await caretGeometry('.ProseMirror table');
+    check(
+      '表格行末光标竖线贴块右缘且落在块内',
+      caret !== null &&
+        Math.abs(caret.gapRight - caret.blockRight) <= 6 &&
+        caret.gapBottom <= caret.blockBottom + 4 &&
+        caret.gapTop >= caret.blockTop - 4,
+      JSON.stringify(caret)
+    );
     const beforeRows = await exec(`document.querySelectorAll('.ProseMirror table tr').length`);
     const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
     pressReturn();

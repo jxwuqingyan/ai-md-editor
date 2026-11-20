@@ -952,15 +952,18 @@ button:focus-visible {
 
 /*
  * 间隙光标：点击表格 / 代码块同行末尾时，竖线紧贴块右缘。
- * ProseMirror 把 GapCursor widget 画在块末尾的文档位置，默认落在块左下方；
- * 这些块占满整行，右缘即编辑区右缘，这里把 widget 水平推到右缘、竖直落在块底部，
- * 视觉上就是一条贴在块右下角的竖线光标。
+ * ProseMirror 把 GapCursor widget 画在块末尾的文档位置（块下方），这里水平推到
+ * 右缘、并按点击时量到的块矩形垂直上移，视觉上落在块最后一行右端；
+ * 位移量由 gapCursor.ts 写入 --md-gap-caret-lift。回车才在块后新建段落。
  */
 .milkdown-container .ProseMirror-gapcursor {
   position: absolute;
-  right: 0;
   pointer-events: none;
   z-index: 5;
+}
+.milkdown-container .ProseMirror.md-gap-at-block-end .ProseMirror-gapcursor {
+  right: 0;
+  transform: translateY(calc(-1 * var(--md-gap-caret-lift, 0px)));
 }
 .milkdown-container .ProseMirror-gapcursor::after {
   content: '';
