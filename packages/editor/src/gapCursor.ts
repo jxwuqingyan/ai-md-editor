@@ -1,75 +1,90 @@
 /**
- * 块级元素同行末尾的落光标处理。
+ * 块级元素同行末尾的「间隙光标」。
  *
  * 图片是 inline 原子节点，同行右侧空白就在段落内，点击后回车本来就能换行；
- * 但表格、代码块这类块级节点会占满整行，点击「同行最后面」（行末右侧空白）时
- * ProseMirror 默认把光标解析到块内部（表格落进单元格、代码块落进代码文本），
- * 回车只在块内换行 / 加行，无法在块后新建正文段落。
+ * 表格、代码块这类块级节点占满整行时，点击「同行最后面」（行末右侧空白，
+ * 甚至块右缘外的 editor-inner）光标会落进块内或跳进下一个块，无法在点击处
+ * 看到一条紧贴块右缘的竖线光标。
  *
- * 这里在 handleClick 阶段用 DOM 几何判断：点击是否落在某个块最后一行右侧空白区
- * （块 boundingRect 内、右边缘附近、垂直方向在块的最后一行）。命中则把光标放到
- * 块后最近的可写位置，回车即可在块后新建正文段落；点块内文字仍走默认编辑逻辑。
+ * 这里用 document 捕获阶段监听 mousedown（块外点击不属于 view.dom，ProseMirror
+ * 的 handleClick 收不到），命中块右缘区域后在块末尾创建 GapCursor；它渲染成一条
+ * 竖线紧贴块右缘（样式见 global.css），回车触发 createParagraphNear 在块后建段落。
  */
 import { $prose } from '@milkdown/kit/utils';
 import { Plugin, PluginKey, TextSelection } from '@milkdown/kit/prose/state';
+import { GapCursor, gapCursor } from '@milkdown/kit/prose/gapcursor';
 import type { EditorView } from '@milkdown/kit/prose/view';
 
-/** 需要处理行末点击的块级节点类型（与 DOM 选择器对应） */
-const LINE_END_BLOCKS: { type: string; selector: string }[] = [
-  { type: 'table', selector: 'table' },
-  { type: 'code_block', selector: 'pre' },
-  { type: 'math_block', selector: '[data-type="math_block"]' }
-];
+/** 需要在其旁侧提供间隙光标的块级节点 */
+const GAP_NODE_NAMES = ['table', 'code_block', 'math_block'];
 
-/** 从文档里收集所有块级节点的「文档位置 + DOM 元素」 */
-function collectBlockDom(view: EditorView): { pos: number; size: number; dom: HTMLElement }[] {
-  const result: { pos: number; size: number; dom: HTMLElement }[] = [];
-  view.state.doc.descendants((node, pos) => {
-    if (!LINE_END_BLOCKS.some((b) => b.type === node.type.name)) return true;
-    const dom = view.nodeDOM(pos);
-    if (dom instanceof HTMLElement) result.push({ pos, size: node.nodeSize, dom });
-    return false;
-  });
-  return result;
+/**
+ * 给块级节点补 createGapCursor 标记：GapCursor.valid 要求相邻节点是 atom /
+ * isolating / createGapCursor，Milkdown 的表格与代码块默认都不是。
+ * 必须在 gapcursor 插件建 view 之前完成，故本插件排在它前面。
+ */
+export const gapCursorSetup = $prose(
+  () =>
+    new Plugin({
+      key: new PluginKey('MDNOTE_GAP_CURSOR_SETUP'),
+      view: (view: EditorView) => {
+        for (const name of GAP_NODE_NAMES) {
+          const type = view.state.schema.nodes[name];
+          if (type) type.spec.createGapCursor = true;
+        }
+        return {};
+      }
+    })
+);
+
+/** 判断某块是否就是点击命中的块（右缘窄条 + 最后一行高度区） */
+function isLineEndHit(dom: HTMLElement, clientX: number, clientY: number): boolean {
+  const rect = dom.getBoundingClientRect();
+  const band = Math.min(56, rect.width * 0.25);
+  if (clientX < rect.right - band || clientX > rect.right + 24) return false;
+  if (clientY < rect.top + rect.height * 0.6 - 8 || clientY > rect.bottom + 16) return false;
+  return true;
 }
 
 /**
- * 块行末落光标插件。
- * handleClick 在 ProseMirror 默认处理之前运行，返回 true 表示本插件已处理、不再走默认解析。
+ * 块行末落间隙光标：document 捕获 mousedown，命中块右缘后在块末尾建 GapCursor。
+ * 返回 true 的 dispatch 会被 ProseMirror 的 gapcursor 插件接管，画出紧贴块右缘的竖线。
  */
 export const blockLineEndCaret = $prose(
   () =>
     new Plugin({
       key: new PluginKey('MDNOTE_BLOCK_LINE_END_CARET'),
-      props: {
-        handleClick(view, _pos, event) {
-          if (!view.editable || !(event instanceof MouseEvent)) return false;
+      view: (view: EditorView) => {
+        const onMouseDown = (event: MouseEvent) => {
+          if (!view.editable) return;
           const { clientX, clientY } = event;
-          for (const block of collectBlockDom(view)) {
-            const rect = block.dom.getBoundingClientRect();
-            // 点击必须在块右边缘附近的窄条内（右缘往左 56px 到右缘往外 4px）
-            const rightBand = Math.min(56, rect.width * 0.25);
-            if (clientX < rect.right - rightBand || clientX > rect.right + 4) continue;
-            // 垂直方向必须在块的最后一行区域：用块内最后文本位置的 y 判定，
-            // 向下留半行容差以覆盖块底部 padding（那也是「同行最后面」）。
-            let lastCoords;
-            try {
-              lastCoords = view.coordsAtPos(block.pos + block.size - 1);
-            } catch {
-              continue;
-            }
-            if (!lastCoords) continue;
-            const tolerance = Math.max(8, (lastCoords.bottom - lastCoords.top) * 0.8);
-            if (clientY < lastCoords.top - tolerance || clientY > rect.bottom + tolerance) continue;
-            // 命中：把光标放到块后最近的可写位置（跳过块落到后面的段落；
-            // 块在末尾时由 trailingParagraphPlugin 补出的空段落承接）。
-            const after = view.state.doc.resolve(block.pos + block.size);
+          let blockPos: number | null = null;
+          let blockSize = 0;
+          view.state.doc.descendants((node, pos) => {
+            if (blockPos !== null || !GAP_NODE_NAMES.includes(node.type.name)) return blockPos === null;
+            const dom = view.nodeDOM(pos);
+            if (!(dom instanceof HTMLElement) || !isLineEndHit(dom, clientX, clientY)) return true;
+            blockPos = pos;
+            blockSize = node.nodeSize;
+            return false;
+          });
+          if (blockPos === null) return;
+          const after = view.state.doc.resolve((blockPos as number) + blockSize);
+          // 直接在块末尾构造 GapCursor。valid 是 internal API（类型未暴露）；
+          // dispatch 后检查实际 selection 是否为 GapCursor，无效则还原、交回默认处理。
+          event.preventDefault();
+          event.stopPropagation();
+          view.dispatch(view.state.tr.setSelection(new GapCursor(after)));
+          if (!(view.state.selection instanceof GapCursor)) {
             view.dispatch(view.state.tr.setSelection(TextSelection.near(after, 1)));
-            view.focus();
-            return true;
           }
-          return false;
-        }
+          view.focus();
+        };
+        document.addEventListener('mousedown', onMouseDown, true);
+        return { destroy: () => document.removeEventListener('mousedown', onMouseDown, true) };
       }
     })
 );
+
+/** 官方间隙光标插件：画出 GapCursor 竖线、支持方向键跨块 */
+export const gapCursorPlugin = $prose(() => gapCursor());

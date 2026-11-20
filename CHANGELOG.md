@@ -2,6 +2,16 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.35 - 2026-11-20
+
+### 修复：块同行末尾落的是「间隙光标竖线」
+
+- **现象**：0.14.34 虽让点表格 / 代码块行末能回车换行，但光标落在块内文本末尾或块后段落，看不到用户期望的「紧贴块右缘的竖线光标」；点块右缘外（`editor-inner`）时事件还落在 ProseMirror 之外，完全无反应。
+- **根因**：①`handleClick` 收不到块外点击；②`TextSelection.near` 会把光标跳进块内 / 下一个块；③官方 gapcursor 只在块外侧空隙触发，且 `findFrom(..., mustMove=true)` 会跳过块末尾的合法位置。
+- **修复**：`gapCursor.ts` 改为 document 捕获阶段监听 mousedown（覆盖块外点击），命中块右缘区域后直接在块末尾构造 `GapCursor` 并 dispatch，dispatch 后验证选区确为 GapCursor、否则回退。`gapCursorSetup` 给 table / code_block / math_block 补 `createGapCursor`。`global.css` 给 `.ProseMirror` 加 `position:relative`、把 gapcursor widget 用 `right:0` 推到块右缘并画成竖线（替代默认横线），带闪烁动画。
+- **验证**：E2E 新增 1 条断言（点击后 `.ProseMirror-gapcursor` 出现），全套 238/238（另有单测 71/71、菜单 3/3）；中途 `npm test` 遇到一次窗口切换竞态的偶发失败，重跑通过。
+- **本地出包**：`MarkdownNote-0.14.35-arm64.dmg`（约 159 MB，Apple Silicon，ad-hoc 签名、未公证），SHA-256 `8b8e6abe9988aa5be837f720cec6cc8c677c034befeef2927fbde07961688ac7`。`hdiutil verify` 通过、`lipo -archs` 为 arm64、`Info.plist` 版本 0.14.35，asar 内 416 个文件与 `out/` 逐字节一致。首次打开仍需「访达中右键→打开」。
+
 ## 0.14.34 - 2026-11-19
 
 ### 修复：图片 / 表格 / 代码块同行末尾点击落光标并回车换行

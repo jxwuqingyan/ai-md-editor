@@ -947,6 +947,32 @@ button:focus-visible {
   outline: none;
   min-height: 60vh;
   word-break: break-word;
+  position: relative;
+}
+
+/*
+ * 间隙光标：点击表格 / 代码块同行末尾时，竖线紧贴块右缘。
+ * ProseMirror 把 GapCursor widget 画在块末尾的文档位置，默认落在块左下方；
+ * 这些块占满整行，右缘即编辑区右缘，这里把 widget 水平推到右缘、竖直落在块底部，
+ * 视觉上就是一条贴在块右下角的竖线光标。
+ */
+.milkdown-container .ProseMirror-gapcursor {
+  position: absolute;
+  right: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+.milkdown-container .ProseMirror-gapcursor::after {
+  content: '';
+  display: block;
+  width: 1px;
+  height: 1.35em;
+  margin-left: -1px;
+  background: var(--text-primary);
+  animation: md-gapcursor-blink 1.1s steps(2, start) infinite;
+}
+@keyframes md-gapcursor-blink {
+  to { visibility: hidden; }
 }
 
 /* 空文档占位提示：整篇只剩一个空段落时显示，一开始输入即消失 */

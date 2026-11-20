@@ -1934,6 +1934,9 @@ async function runTests() {
     if (!point) throw new Error('代码块行末坐标不存在');
     await clickPoint(point);
     await focusEditor();
+    // 点击后应出现间隙光标竖线（紧贴块右缘），这是「能插入光标」的可视证据
+    const gapShown = await exec(`document.querySelectorAll('.ProseMirror-gapcursor').length > 0`);
+    check('代码块同行末尾点击出现间隙光标竖线', gapShown === true);
     const beforePre = await exec(`document.querySelector('.ProseMirror pre')?.textContent ?? ''`);
     const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
     pressReturn();
