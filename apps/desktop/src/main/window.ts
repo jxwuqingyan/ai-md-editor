@@ -29,6 +29,27 @@ const UNSAVED_REPLY_TIMEOUT_MS = 800;
 const FLUSH_REPLY_TIMEOUT_MS = 15000;
 
 /**
+ * 退出 / 关闭的互斥状态。
+ *
+ * 关键背景：`app.quit()` 会依次关闭所有窗口，只要有一个窗口的 `close` 被
+ * `preventDefault()`，整次退出就被**取消**（不会再自动重来）。所以「Dock 退出 /
+ * Cmd+Q」必须显式记住「这是一次退出请求」，等确认流程走完再由我们自己重新
+ * `app.quit()`，否则窗口关掉了、应用却还挂在 Dock 上，用户得再点一次才退。
+ */
+/** 用户已发起退出（Dock 菜单退出 / Cmd+Q / 系统关机） */
+let quitRequested = false;
+/** 退出确认已通过，可以真正退出：此后所有 close 一律放行 */
+let quitAllowed = false;
+/** 已经在跑退出确认流程，避免连点退出时叠出多个对话框 / 多次写盘 */
+let quitFlowRunning = false;
+/** 已确认可关闭的窗口，close 事件里直接放行 */
+const closableWindows = new WeakSet<BrowserWindow>();
+/** 本应用创建的窗口；导出用的隐藏窗口不参与退出确认 */
+const appWindows = new Set<BrowserWindow>();
+/** 同一窗口的确认流程只跑一份，重复的关闭请求复用同一结果 */
+const confirmTasks = new Map<BrowserWindow, Promise<boolean>>();
+
+/**
  * 向渲染层询问未保存文档数量。
  * 用一次性回复通道实现「主进程发问 → 渲染层同步回答」，比让渲染层主动上报更准确：
  * 关闭动作发生的那一刻的标签状态才是要判断的对象。
@@ -156,6 +177,101 @@ async function confirmClose(win: BrowserWindow): Promise<boolean> {
 }
 
 /**
+ * 同一窗口的关闭确认只跑一次。
+ * 「红点关闭」与「Dock 退出」可能几乎同时发生，重入会重复弹框、重复写盘。
+ */
+function confirmOnce(win: BrowserWindow): Promise<boolean> {
+  const running = confirmTasks.get(win);
+  if (running) return running;
+  const task = confirmClose(win).finally(() => {
+    confirmTasks.delete(win);
+  });
+  confirmTasks.set(win, task);
+  return task;
+}
+
+/** 还需确认的窗口（导出窗口、已确认关闭的窗口都不算） */
+function windowsToConfirm(): BrowserWindow[] {
+  return [...appWindows].filter((win) => !win.isDestroyed() && !closableWindows.has(win));
+}
+
+/**
+ * 走完一个窗口的确认流程后真正关闭它。
+ * 任何异常都按「不拦用户」处理，避免卡在关不掉的状态。
+ */
+function closeAfterConfirm(win: BrowserWindow): void {
+  void confirmOnce(win)
+    .then((ok) => {
+      if (!ok || win.isDestroyed()) return;
+      closableWindows.add(win);
+      win.close();
+    })
+    .catch(() => {
+      if (win.isDestroyed()) return;
+      closableWindows.add(win);
+      win.close();
+    });
+}
+
+/**
+ * 退出确认流程：逐个窗口确认，全部通过后重新发起一次 `app.quit()`。
+ * 任一步被用户取消就把状态复位，让下次退出重新走一遍。
+ */
+async function runQuitFlow(): Promise<void> {
+  if (quitFlowRunning) return;
+  quitFlowRunning = true;
+  try {
+    for (const win of windowsToConfirm()) {
+      if (win.isDestroyed()) continue;
+      const ok = await confirmOnce(win);
+      if (!ok) {
+        quitRequested = false;
+        return;
+      }
+      closableWindows.add(win);
+    }
+    quitAllowed = true;
+    app.quit();
+  } finally {
+    quitFlowRunning = false;
+  }
+}
+
+/**
+ * 安装退出拦截（主入口在 `app.whenReady()` 之前调用）。
+ *
+ * 之前没有这层拦截：Dock 退出 → 窗口 close 被拦 → Electron 取消整次退出，
+ * 确认流程结束后只关了窗口，应用仍留在 Dock 上，于是「退出要连点好几次」。
+ */
+export function setupQuitGuard(): void {
+  app.on('before-quit', (event) => {
+    if (quitAllowed) return;
+    // 没有需要确认的窗口（例如红点已经关完了）就正常退出
+    if (windowsToConfirm().length === 0) return;
+    event.preventDefault();
+    quitRequested = true;
+    // 确认流程本身出错时不把用户困在退不掉的窗口里
+    void runQuitFlow().catch(() => {
+      quitAllowed = true;
+      app.quit();
+    });
+  });
+}
+
+/**
+ * 窗口 close 事件处理：先拦下，确认通过后再关一次。
+ *
+ * @returns 无（事件对象由调用方持有）
+ */
+function handleWindowClose(win: BrowserWindow, event: Electron.Event): void {
+  if (quitAllowed || closableWindows.has(win)) return;
+  event.preventDefault();
+  // 退出流程已在跑：由它统一负责关窗与再次退出，这里不再另起一份
+  if (quitRequested) return;
+  closeAfterConfirm(win);
+}
+
+/**
  * 判断上次保存的窗口位置是否还在某块屏幕内。
  * 显示器拔掉/改分辨率后旧坐标可能完全在屏幕外，此时退回默认居中。
  */
@@ -202,6 +318,7 @@ export function createWindow(): void {
   });
 
   mainWindow = win;
+  appWindows.add(win);
 
   // 窗口就绪后再显示，避免白屏闪烁
   win.on('ready-to-show', () => win.show());
@@ -226,26 +343,12 @@ export function createWindow(): void {
 
   // 关闭前确认：未落盘的文档关掉就真的没了，先问一句。
   // 只有确认通过后才真正关闭（先 preventDefault，再在回调里 close 一次）。
-  let closeConfirmed = false;
-  win.on('close', (event) => {
-    if (closeConfirmed) return;
-    event.preventDefault();
-    void confirmClose(win)
-      .then((ok) => {
-        if (!ok || win.isDestroyed()) return;
-        closeConfirmed = true;
-        win.close();
-      })
-      .catch(() => {
-        // 确认流程本身出错时不拦用户退出
-        if (!win.isDestroyed()) {
-          closeConfirmed = true;
-          win.close();
-        }
-      });
-  });
+  // 真正的互斥逻辑在 handleWindowClose 里，和「Dock 退出」共用同一套状态。
+  win.on('close', (event) => handleWindowClose(win, event));
 
   win.on('closed', () => {
+    appWindows.delete(win);
+    confirmTasks.delete(win);
     if (mainWindow === win) mainWindow = null;
   });
 

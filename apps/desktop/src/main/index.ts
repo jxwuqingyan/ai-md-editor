@@ -3,7 +3,7 @@ import { registerIpcHandlers } from './ipc';
 import { setupApplicationMenu } from './menu';
 import { loadRecent } from './recent';
 import { flushSettings, loadSettings } from './settings';
-import { createWindow, flushPendingOpenFiles, openFileInRenderer } from './window';
+import { createWindow, flushPendingOpenFiles, openFileInRenderer, setupQuitGuard } from './window';
 
 /**
  * macOS 会往「编辑」菜单自动追加「自动填充 / 开始听写… / 表情与符号」三项，
@@ -36,6 +36,12 @@ const singleInstance = app.requestSingleInstanceLock();
 if (!singleInstance) {
   app.quit();
 } else {
+  /**
+   * 退出拦截必须尽早装：Dock 菜单退出 / Cmd+Q 触发 `before-quit` 时，
+   * 窗口的 close 会拦下退出，得由这层把确认结果重新转成一次 `app.quit()`。
+   */
+  setupQuitGuard();
+
   /**
    * 应用就绪后创建窗口。
    * macOS 特有：点击 dock 图标且无窗口时重新创建窗口。

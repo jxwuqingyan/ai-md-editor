@@ -48,7 +48,7 @@ Electron + React 18 + TypeScript + Vite（electron-vite），编辑器内核为 
 npm install          # 安装依赖
 npm run dev          # 开发模式（热更新）
 npm run build        # 构建产物
-npm test             # 单元测试 + 菜单校验 + Electron 端到端测试（需先 build）
+npm test             # 单元测试 + 菜单校验 + 退出流程 + Electron 端到端测试（需先 build）
 ```
 
 ## 打包
@@ -63,7 +63,7 @@ cd ../..
 bash scripts/make-dmg.sh <版本号> arm64
 ```
 
-产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。为节省 Actions 额度（私有仓库 2000 分钟/月，macOS runner 10 倍计费），CI 策略是：push / PR 只跑测试，打 `v*` tag 或手动触发才三平台打包并传 Release。当前版本 0.14.37，GitHub Actions 因账号计费暂停，三平台 Release 待恢复；本地包为 ad-hoc 签名、未公证，首次打开请右键→打开。
+产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。为节省 Actions 额度（私有仓库 2000 分钟/月，macOS runner 10 倍计费），CI 策略是：push / PR 只跑测试，打 `v*` tag 或手动触发才三平台打包并传 Release。当前版本 0.14.38，GitHub Actions 因账号计费暂停，三平台 Release 待恢复；本地包为 ad-hoc 签名、未公证，首次打开请右键→打开。
 
 ## 版本与文档
 
