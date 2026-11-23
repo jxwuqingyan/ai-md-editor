@@ -1904,8 +1904,9 @@ async function runTests() {
   await resetDoc('# 行末换行\n\n' +
     '![红块](img/a.png)\n\n图片后正文\n\n' +
     '| A | B |\n| --- | --- |\n| 1 | 2 |\n\n表格后正文\n\n' +
+    '---\n\n分割线后正文\n\n' +
     '```js\nconst a = 1;\n```\n\n代码后正文\n');
-  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table') && document.querySelector('.ProseMirror pre'))`), {
+  await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table') && document.querySelector('.ProseMirror pre') && document.querySelector('.ProseMirror hr'))`), {
     label: '行末换行用例渲染', timeout: 20000
   });
   const pressReturn = () => {
@@ -1926,18 +1927,21 @@ async function runTests() {
     const r = el.getBoundingClientRect();
     return { x: Math.round(r.right - 2), y: Math.round(r.bottom - 6) };
   })()`);
-  // 量间隙光标与块的位置关系：竖线要贴块右缘、且落在块的高度范围内（不能跑到块下方的下一行）
-  const caretGeometry = (blockSelector) => exec(`(() => {
+  // 量间隙光标与目标元素的位置关系：竖线要贴目标右缘、底边对齐目标底部
+  const caretVs = (expr) => exec(`(() => {
     const gap = document.querySelector('.ProseMirror-gapcursor');
-    const block = document.querySelector(${JSON.stringify(blockSelector)});
-    if (!gap || !block) return null;
+    const target = ${expr};
+    if (!gap || !target) return null;
     const g = gap.getBoundingClientRect();
-    const b = block.getBoundingClientRect();
+    const b = target.getBoundingClientRect();
     return {
       gapTop: Math.round(g.top), gapBottom: Math.round(g.bottom), gapRight: Math.round(g.right),
       blockTop: Math.round(b.top), blockBottom: Math.round(b.bottom), blockRight: Math.round(b.right)
     };
   })()`);
+  const caretGeometry = (blockSelector) => caretVs(`document.querySelector(${JSON.stringify(blockSelector)})`);
+  // 真实图片元素：ProseMirror 会插入 class=ProseMirror-separator 的零宽 img，必须排除
+  const REAL_IMG = `[...document.querySelectorAll('.ProseMirror img')].find((el) => !el.classList.contains('ProseMirror-separator'))`;
 
   // 代码块：点行末空白 → 回车应在块后新建段落，代码内容不变
   {
@@ -2006,27 +2010,74 @@ async function runTests() {
     await waitFor(() => exec(`document.querySelectorAll('.ProseMirror > p').length === ${beforePCount}`), { label: '撤销表后换行' });
   }
 
-  // 图片：inline 图片同行右侧空白点击即落在段落内，回车正常换行
+  // 图片：点图片右缘的同行空白 → 竖线贴图片右缘，回车在图片段落后新建段落
   {
-    await scrollIntoView('.ProseMirror img'); await new Promise((r) => setTimeout(r, 200));
-    const point = await exec(`(() => {
-      const img = document.querySelector('.ProseMirror img');
+    await scrollIntoView('.ProseMirror p'); await new Promise((r) => setTimeout(r, 200));
+    // 1x1 测试图看不出右缘，临时给个尺寸模拟真实图片（撤销会重建 DOM，每次点击前都重新给）
+    const sizeImg = () => exec(`(() => {
+      const img = ${REAL_IMG};
       if (!img) return null;
+      img.style.width = '200px';
+      img.style.height = '120px';
       const r = img.getBoundingClientRect();
-      return { x: Math.round(r.right + 30), y: Math.round(r.top + r.height / 2) };
+      return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) };
     })()`);
-    if (!point) throw new Error('图片同行坐标不存在');
-    await clickPoint(point);
+    await sizeImg();
+    await new Promise((r) => setTimeout(r, 150));
+    const rect = await sizeImg();
+    if (!rect) throw new Error('图片元素不存在');
+    await clickPoint({ x: rect.r + 2, y: Math.round((rect.t + rect.b) / 2) });
     await focusEditor();
+    const caret = await caretVs(REAL_IMG);
+    check(
+      '图片同行末尾光标竖线贴图片右缘且落在图片内',
+      caret !== null && Math.abs(caret.gapRight - caret.blockRight) <= 6 && Math.abs(caret.gapBottom - caret.blockBottom) <= 8,
+      JSON.stringify(caret)
+    );
     const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
     pressReturn();
     await waitFor(
       () => exec(`document.querySelectorAll('.ProseMirror > p').length > ${beforePCount}`),
       { label: '图片同行末尾回车换行' }
     );
-    check('图片同行末尾点击回车换行', (await exec(`document.querySelectorAll('.ProseMirror > p').length`)) === beforePCount + 1);
+    check('图片同行末尾点击回车在图片后换行', (await exec(`document.querySelectorAll('.ProseMirror > p').length`)) === beforePCount + 1);
     menuAction('edit:undo');
     await waitFor(() => exec(`document.querySelectorAll('.ProseMirror > p').length === ${beforePCount}`), { label: '撤销图片后换行' });
+  }
+
+  // 分割线：点右缘 → 竖线贴横线右端，回车在分割线后新建段落，分割线数量不变
+  {
+    await scrollIntoView('.ProseMirror hr'); await new Promise((r) => setTimeout(r, 200));
+    const point = await exec(`(() => {
+      const hr = document.querySelector('.ProseMirror hr');
+      if (!hr) return null;
+      const r = hr.getBoundingClientRect();
+      return { x: Math.round(r.right - 3), y: Math.round(r.top + 1) };
+    })()`);
+    if (!point) throw new Error('分割线坐标不存在');
+    await clickPoint(point);
+    await focusEditor();
+    const caret = await caretGeometry('.ProseMirror hr');
+    check(
+      '分割线行末光标竖线贴横线右端',
+      caret !== null && Math.abs(caret.gapRight - caret.blockRight) <= 6 && Math.abs(caret.gapBottom - caret.blockBottom) <= 6,
+      JSON.stringify(caret)
+    );
+    const beforePCount = await exec(`document.querySelectorAll('.ProseMirror > p').length`);
+    const beforeHr = await exec(`document.querySelectorAll('.ProseMirror hr').length`);
+    pressReturn();
+    await waitFor(
+      () => exec(`document.querySelectorAll('.ProseMirror > p').length > ${beforePCount}`),
+      { label: '分割线行末回车在分割线后建段落' }
+    );
+    const hrState = await exec(`(() => ({
+      p: document.querySelectorAll('.ProseMirror > p').length,
+      hr: document.querySelectorAll('.ProseMirror hr').length
+    }))()`);
+    check('分割线行末点击回车在分割线后换行', hrState.p === beforePCount + 1 && hrState.hr === beforeHr,
+      `p:${beforePCount}->${hrState.p} hr:${beforeHr}->${hrState.hr}`);
+    menuAction('edit:undo');
+    await waitFor(() => exec(`document.querySelectorAll('.ProseMirror > p').length === ${beforePCount}`), { label: '撤销分割线后换行' });
   }
 
   // 边界：点代码块内文字仍应落进代码里编辑，不能被行末逻辑一刀切挪到块后

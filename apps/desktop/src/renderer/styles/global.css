@@ -951,10 +951,10 @@ button:focus-visible {
 }
 
 /*
- * 间隙光标：点击表格 / 代码块同行末尾时，竖线紧贴块右缘。
- * ProseMirror 把 GapCursor widget 画在块末尾的文档位置（块下方），这里水平推到
- * 右缘、并按点击时量到的块矩形垂直上移，视觉上落在块最后一行右端；
- * 位移量由 gapCursor.ts 写入 --md-gap-caret-lift。回车才在块后新建段落。
+ * 间隙光标：点击表格 / 代码块 / 分割线 / 图片同行末尾时，竖线贴在目标右缘。
+ * ProseMirror 把 GapCursor widget 画在目标末尾的文档位置（目标下方），这里按类别
+ * 分别摆位：块贴编辑区右缘、图片贴图片右缘，垂直用 --md-gap-caret-lift 抬到目标底部。
+ * 位移量由 gapCursor.ts 写入。回车才在目标后新建段落。
  */
 .milkdown-container .ProseMirror-gapcursor {
   position: absolute;
@@ -963,6 +963,12 @@ button:focus-visible {
 }
 .milkdown-container .ProseMirror.md-gap-at-block-end .ProseMirror-gapcursor {
   right: 0;
+  left: auto;
+  transform: translateY(calc(-1 * var(--md-gap-caret-lift, 0px)));
+}
+.milkdown-container .ProseMirror.md-gap-at-image-end .ProseMirror-gapcursor {
+  left: var(--md-gap-caret-left, 0px);
+  right: auto;
   transform: translateY(calc(-1 * var(--md-gap-caret-lift, 0px)));
 }
 .milkdown-container .ProseMirror-gapcursor::after {
