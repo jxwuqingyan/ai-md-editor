@@ -5,7 +5,7 @@
  * 读取一次后常驻内存，写入按 300ms 防抖，避免拖动窗口时高频落盘。
  */
 import { app } from 'electron';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   DEFAULT_SETTINGS,
@@ -13,6 +13,7 @@ import {
   type SessionSnapshot,
   type WindowBounds
 } from '@ai-md-editor/shared';
+import { logError } from './logger';
 
 /** 内存中的当前设置 */
 let cache: AppSettings = { ...DEFAULT_SETTINGS };
@@ -73,7 +74,11 @@ export function loadSettings(): AppSettings {
   try {
     const text = readFileSync(settingsFile(), 'utf-8');
     cache = normalize(JSON.parse(text));
-  } catch {
+  } catch (err) {
+    // 首次启动没有文件是正常的；文件损坏时留一条日志，便于解释「偏好被重置」
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logError('读取设置失败，已回退默认值', err);
+    }
     cache = { ...DEFAULT_SETTINGS };
   }
   return cache;
@@ -90,18 +95,33 @@ export function getSettings(): AppSettings {
   };
 }
 
-/** 立即落盘（内部使用） */
+/**
+ * 立即落盘（内部使用）。
+ *
+ * 用「同目录临时文件 + rename」原子替换：直接 writeFileSync 在崩溃 / 断电时
+ * 可能留下被截断的 JSON，下一次启动所有偏好（主题、会话、窗口位置）会被静默重置。
+ * 目标被占用（Windows 常见）时退回直接覆盖，保证不至于完全存不下。
+ */
 function writeNow(): void {
   if (writeTimer) {
     clearTimeout(writeTimer);
     writeTimer = null;
   }
+  const file = settingsFile();
+  const text = `${JSON.stringify(cache, null, 2)}\n`;
   try {
-    const file = settingsFile();
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(cache, null, 2)}\n`, 'utf-8');
+    const temp = `${file}.${process.pid}.tmp`;
+    writeFileSync(temp, text, 'utf-8');
+    try {
+      renameSync(temp, file);
+    } catch {
+      // Windows 上目标被其它进程短暂占用时 rename 会失败，退回直接写
+      writeFileSync(file, text, 'utf-8');
+      rmSync(temp, { force: true });
+    }
   } catch (err) {
-    console.error('写入设置失败:', err);
+    logError('写入设置失败', err);
   }
 }
 

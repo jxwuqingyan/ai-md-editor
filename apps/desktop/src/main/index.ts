@@ -1,6 +1,8 @@
 import { app, BrowserWindow, systemPreferences } from 'electron';
+import { setupCrashGuard } from './crashGuard';
 import { registerIpcHandlers } from './ipc';
-import { setupApplicationMenu } from './menu';
+import { logInfo } from './logger';
+import { refreshRecentMenu, setupApplicationMenu } from './menu';
 import { loadRecent } from './recent';
 import { flushSettings, loadSettings } from './settings';
 import { createWindow, flushPendingOpenFiles, openFileInRenderer, setupQuitGuard } from './window';
@@ -41,6 +43,8 @@ if (!singleInstance) {
    * 窗口的 close 会拦下退出，得由这层把确认结果重新转成一次 `app.quit()`。
    */
   setupQuitGuard();
+  // 崩溃兜底要能捕获最早的异常，因此和退出守卫一样尽早安装
+  setupCrashGuard();
 
   /**
    * 应用就绪后创建窗口。
@@ -49,15 +53,19 @@ if (!singleInstance) {
   app.whenReady().then(async () => {
     // 先读设置：窗口尺寸、主题、缩放等都依赖它
     loadSettings();
-    // 加载最近文件列表（启动时）
-    await loadRecent();
 
     // 注册文件操作相关 IPC handler
     registerIpcHandlers();
     // 安装原生应用菜单（macOS 位于屏幕顶部，不占窗口高度）
     setupApplicationMenu();
 
+    // 先建窗口：最近文件列表不影响首屏，别让它挡在窗口出现之前
     createWindow();
+    logInfo(`应用启动（${process.platform}/${process.arch}，版本 ${app.getVersion()}）`);
+
+    // 最近文件读完后刷新「打开最近文件」子菜单（展开下拉时渲染层也会重新拉取）
+    await loadRecent();
+    refreshRecentMenu();
 
     // 「打开方式」启动时 open-file 在就绪前触发，路径已排队；现在窗口已建，依次打开
     flushPendingOpenFiles();
@@ -89,6 +97,7 @@ if (!singleInstance) {
 
 // 退出前把防抖中的设置立即落盘
 app.on('will-quit', () => {
+  logInfo('应用退出');
   flushSettings();
 });
 

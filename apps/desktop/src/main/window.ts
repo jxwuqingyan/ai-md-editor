@@ -12,9 +12,11 @@ import {
   UnsavedReplyChannel,
   type FlushBeforeCloseMessage,
   type FlushReplyMessage,
-  type UnsavedSummary
+  type UnsavedSummary,
+  type WindowDocumentState
 } from '@ai-md-editor/shared';
 import { getSettings, saveWindowBounds } from './settings';
+import { attachWindowGuards } from './crashGuard';
 
 /** 主窗口引用（供 open-file 事件访问） */
 let mainWindow: BrowserWindow | null = null;
@@ -46,6 +48,8 @@ let quitFlowRunning = false;
 const closableWindows = new WeakSet<BrowserWindow>();
 /** 本应用创建的窗口；导出用的隐藏窗口不参与退出确认 */
 const appWindows = new Set<BrowserWindow>();
+/** 负责持久化窗口位置的那个窗口（首个窗口）；其余窗口只在内存里层叠，不回写设置 */
+let boundsOwner: BrowserWindow | null = null;
 /** 同一窗口的确认流程只跑一份，重复的关闭请求复用同一结果 */
 const confirmTasks = new Map<BrowserWindow, Promise<boolean>>();
 
@@ -272,6 +276,27 @@ function handleWindowClose(win: BrowserWindow, event: Electron.Event): void {
 }
 
 /**
+ * 把渲染层的「当前文档」同步到窗口标题栏。
+ *
+ * - 标题显示文档名，多窗口 / Mission Control / 窗口菜单里能分清谁是谁
+ * - macOS 用系统原生的「已编辑」小圆点（标题栏关闭按钮上的点）表示未保存
+ * - macOS 还设置代表文件（representedFilename）：标题栏出现文件图标，⌘点击可看路径
+ *
+ * macOS 有原生小圆点，标题里不再加 `•` 前缀（重复显示很脏）；
+ * 其他平台没有这个小圆点，用 `•` 前缀补上「未保存」信息。
+ */
+export function applyWindowDocumentState(win: BrowserWindow, state: WindowDocumentState): void {
+  if (win.isDestroyed()) return;
+  const name = (state.name || '').trim() || 'MarkdownNote';
+  const dirty = Boolean(state.dirty);
+  win.setTitle(dirty && process.platform !== 'darwin' ? `• ${name}` : name);
+  if (process.platform === 'darwin') {
+    win.setDocumentEdited(dirty);
+    win.setRepresentedFilename(state.path ?? '');
+  }
+}
+
+/**
  * 判断上次保存的窗口位置是否还在某块屏幕内。
  * 显示器拔掉/改分辨率后旧坐标可能完全在屏幕外，此时退回默认居中。
  */
@@ -292,12 +317,33 @@ function usableBounds(): { x?: number; y?: number; width: number; height: number
 }
 
 /**
+ * 计算新窗口的位置与尺寸。
+ *
+ * 第一个窗口沿用上次保存的位置；之后新建的窗口在前一个窗口基础上**层叠偏移**，
+ * 否则 `⇧⌘N` 建出来的窗口会和已有窗口完全重合，看着像没反应。
+ */
+function nextWindowBounds(): { x?: number; y?: number; width: number; height: number } {
+  const existing = [...appWindows].filter((win) => !win.isDestroyed());
+  if (existing.length === 0) return usableBounds();
+
+  const ref = existing[existing.length - 1].getBounds();
+  const area = screen.getDisplayMatching(ref).workArea;
+  const step = 28;
+  let x = ref.x + step;
+  let y = ref.y + step;
+  // 贴到屏幕右下边时回到工作区左上，继续往右下层叠，不会跑到屏幕外
+  if (x + ref.width > area.x + area.width) x = area.x + step * 2;
+  if (y + ref.height > area.y + area.height) y = area.y + step * 2;
+  return { x, y, width: ref.width, height: ref.height };
+}
+
+/**
  * 创建主窗口。
  * 遵循安全基线：contextIsolation 开启、nodeIntegration 关闭、sandbox 开启。
  * 开发环境加载 Vite dev server，生产环境加载打包后的 index.html。
  */
 export function createWindow(): void {
-  const bounds = usableBounds();
+  const bounds = nextWindowBounds();
   const win = new BrowserWindow({
     x: bounds.x,
     y: bounds.y,
@@ -319,6 +365,9 @@ export function createWindow(): void {
 
   mainWindow = win;
   appWindows.add(win);
+  // 只有一个窗口负责持久化位置/尺寸：多窗口各自回写会互相覆盖，
+  // 下次启动的窗口位置就变成「最后一个被拖动的那个」随机值
+  if (!boundsOwner) boundsOwner = win;
 
   // 窗口就绪后再显示，避免白屏闪烁
   win.on('ready-to-show', () => win.show());
@@ -326,6 +375,7 @@ export function createWindow(): void {
   // 记住窗口尺寸与位置（防抖在 settings 内部处理）
   let boundsTimer: NodeJS.Timeout | null = null;
   const rememberBounds = (): void => {
+    if (win !== boundsOwner) return;
     if (win.isDestroyed() || win.isFullScreen() || win.isMinimized() || win.isMaximized()) return;
     if (boundsTimer) clearTimeout(boundsTimer);
     boundsTimer = setTimeout(() => {
@@ -336,6 +386,7 @@ export function createWindow(): void {
   win.on('move', rememberBounds);
   win.on('close', () => {
     if (boundsTimer) clearTimeout(boundsTimer);
+    if (win !== boundsOwner) return;
     if (!win.isDestroyed() && !win.isFullScreen() && !win.isMinimized() && !win.isMaximized()) {
       saveWindowBounds(win.getBounds());
     }
@@ -346,9 +397,13 @@ export function createWindow(): void {
   // 真正的互斥逻辑在 handleWindowClose 里，和「Dock 退出」共用同一套状态。
   win.on('close', (event) => handleWindowClose(win, event));
 
+  // 卡死 / 崩溃兜底（见 crashGuard.ts）
+  attachWindowGuards(win);
+
   win.on('closed', () => {
     appWindows.delete(win);
     confirmTasks.delete(win);
+    if (boundsOwner === win) boundsOwner = null;
     if (mainWindow === win) mainWindow = null;
   });
 

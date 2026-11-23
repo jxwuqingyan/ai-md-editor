@@ -96,7 +96,9 @@ export const IpcChannel = {
   /** 在目录内搜索所有 Markdown 文件内容 */
   SearchFolder: 'search:folder',
   /** 取消一次进行中的文件夹搜索（按请求 id） */
-  SearchCancel: 'search:cancel'
+  SearchCancel: 'search:cancel',
+  /** 同步窗口标题 / 代表文件 / 已编辑状态（按窗口，多窗口互不影响） */
+  SetWindowDocument: 'app:set-window-document'
 } as const;
 
 /** 导出类型 */
@@ -415,6 +417,16 @@ export const EXTERNAL_CHANGE_ERROR = 'EXTERNAL_CHANGED';
 /** 判断异常信息是否为外部改动冲突 */
 export function isExternalChangeError(message: string): boolean {
   return message.includes(EXTERNAL_CHANGE_ERROR);
+}
+
+/** 窗口标题栏展示的文档状态（渲染层同步给主进程，按窗口独立） */
+export interface WindowDocumentState {
+  /** 标签显示名（未命名文档为「未命名」之类） */
+  name: string;
+  /** 文档磁盘路径；未落盘为 null */
+  path: string | null;
+  /** 是否有未保存改动 */
+  dirty: boolean;
 }
 
 /** 关闭窗口前的未保存文档汇总 */

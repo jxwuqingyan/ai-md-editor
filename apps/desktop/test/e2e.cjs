@@ -32,6 +32,10 @@ const PROFILE_DIR = join(tmpdir(), 'md-note-e2e-profile');
 rmSync(PROFILE_DIR, { recursive: true, force: true });
 mkdirSync(PROFILE_DIR, { recursive: true });
 app.setPath('userData', PROFILE_DIR);
+// 日志也写到临时目录：真实运行写系统日志目录，测试不能污染用户的日志
+const LOG_DIR = join(PROFILE_DIR, 'logs');
+mkdirSync(LOG_DIR, { recursive: true });
+app.setPath('logs', LOG_DIR);
 writeFileSync(
   join(PROFILE_DIR, 'settings.json'),
   `${JSON.stringify(
@@ -738,6 +742,34 @@ async function runTests() {
   );
   await waitFor(() => execIn(second, `Boolean(document.querySelector('.app'))`), { label: '新窗口渲染', timeout: 20000 });
   await new Promise((resolve) => setTimeout(resolve, 800));
+
+  // 新窗口必须相对已有窗口层叠偏移：否则两个窗口完全重合，用户以为「新建窗口没反应」
+  const primaryBounds = win.getBounds();
+  const secondBounds = second.getBounds();
+  if (secondBounds.width === 0 || primaryBounds.width === 0) {
+    skip('新窗口相对主窗口层叠偏移', '当前会话拿不到可靠的窗口 bounds');
+  } else {
+    const samePlace =
+      Math.abs(secondBounds.x - primaryBounds.x) < 8 && Math.abs(secondBounds.y - primaryBounds.y) < 8;
+    check(
+      '新窗口相对主窗口层叠偏移',
+      !samePlace,
+      `primary=${primaryBounds.x},${primaryBounds.y} second=${secondBounds.x},${secondBounds.y}`
+    );
+  }
+
+  // 窗口标题要与当前标签名一致（多窗口 / Mission Control 里才分得清）
+  const secondTabName = await execIn(
+    second,
+    `document.querySelector('.tab-active .tab-name')?.textContent ?? ''`
+  );
+  const secondTitle = second.getTitle();
+  check(
+    '新窗口标题显示当前文档名',
+    typeof secondTabName === 'string' && secondTabName.length > 0 && secondTitle === secondTabName,
+    `title="${secondTitle}" tab="${secondTabName}"`
+  );
+
   const restored = await execIn(
     second,
     `JSON.stringify({
@@ -3669,6 +3701,61 @@ async function runTests() {
     win.restore();
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
+
+  // ===== 12. 窗口标题栏与日志 =====
+  // 标题要跟着当前文档走（文件名 + 未保存状态），否则多窗口互相认不出
+  await ensureSourceMode();
+  await exec(`window.__setSource(${JSON.stringify('# 标题同步用例\n\n这里有一处改动\n')}, 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
+  const tabState = JSON.parse(
+    await exec(
+      `JSON.stringify((() => {
+        const tab = document.querySelector('.tab-active');
+        return {
+          name: tab?.querySelector('.tab-name')?.textContent ?? '',
+          dirty: Boolean(tab?.querySelector('.tab-dirty'))
+        };
+      })())`
+    )
+  );
+  const titleSynced = await waitFor(
+    async () => {
+      const title = win.getTitle();
+      return tabState.name && (title === tabState.name || title === `• ${tabState.name}`) ? title : null;
+    },
+    { timeout: 5000, interval: 100, label: '窗口标题同步' }
+  ).catch(() => null);
+  check(
+    '窗口标题显示当前文档名',
+    Boolean(titleSynced) && tabState.name.length > 0,
+    `title="${win.getTitle()}" tab="${tabState.name}"`
+  );
+
+  if (process.platform === 'darwin') {
+    // macOS 用原生「已编辑」小圆点而不是改标题文字
+    check(
+      'macOS 已编辑状态同步到标题栏',
+      win.isDocumentEdited() === tabState.dirty,
+      `isDocumentEdited=${win.isDocumentEdited()} dirty=${tabState.dirty}`
+    );
+  } else {
+    check(
+      '未保存时标题带 • 前缀',
+      tabState.dirty ? win.getTitle().startsWith('• ') : !win.getTitle().startsWith('• '),
+      `title="${win.getTitle()}" dirty=${tabState.dirty}`
+    );
+  }
+  await ensureWysiwygMode();
+
+  // 日志落盘：启动与生命周期事件要能在日志文件里查到，用户报问题时才有据可依
+  const logFile = join(LOG_DIR, 'main.log');
+  const logReady = await waitFor(() => (existsSync(logFile) ? readFileSync(logFile, 'utf-8') : null), {
+    timeout: 5000,
+    interval: 150,
+    label: '主进程日志生成'
+  }).catch(() => null);
+  check('主进程日志写入日志目录', typeof logReady === 'string' && logReady.includes('应用启动'), `log=${logFile}`);
 
 }
 

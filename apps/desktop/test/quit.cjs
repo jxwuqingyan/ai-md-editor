@@ -20,6 +20,10 @@ const PROFILE_DIR = join(tmpdir(), 'md-note-quit-profile');
 rmSync(PROFILE_DIR, { recursive: true, force: true });
 mkdirSync(PROFILE_DIR, { recursive: true });
 app.setPath('userData', PROFILE_DIR);
+// 日志写到临时目录，测试不污染用户真实日志
+const LOG_DIR = join(PROFILE_DIR, 'logs');
+mkdirSync(LOG_DIR, { recursive: true });
+app.setPath('logs', LOG_DIR);
 writeFileSync(
   join(PROFILE_DIR, 'settings.json'),
   `${JSON.stringify(

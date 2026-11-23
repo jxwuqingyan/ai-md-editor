@@ -28,7 +28,8 @@ import type {
   FileChangedMessage,
   FlushBeforeCloseMessage,
   FlushReplyMessage,
-  WriteFileOptions
+  WriteFileOptions,
+  WindowDocumentState
 } from '@ai-md-editor/shared';
 import {
   FileChangedChannel,
@@ -187,6 +188,13 @@ const api = {
 
   /** 新建独立窗口 */
   newWindow: (): Promise<void> => ipcRenderer.invoke(IpcChannel.NewWindow),
+
+  /**
+   * 同步窗口标题栏状态（文档名 / 代表文件 / 已编辑小圆点）。
+   * 多窗口各自上报自己的活动标签，主进程按 event.sender 定位窗口。
+   */
+  setWindowDocument: (state: WindowDocumentState): void =>
+    ipcRenderer.send(IpcChannel.SetWindowDocument, state),
 
   /** 同步界面状态到主进程，刷新原生菜单勾选项 */
   updateMenuState: (state: MenuViewState): void => ipcRenderer.send(MenuStateChannel, state),

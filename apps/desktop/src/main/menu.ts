@@ -4,7 +4,7 @@
  * - 菜单动作经白名单 IPC 转发到渲染层执行，主进程只负责菜单结构与系统级动作。
  * - 界面勾选项状态由渲染层通过 MenuStateChannel 同步，保持菜单与界面一致。
  */
-import { BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron';
+import { BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import {
   MenuActionChannel,
   MenuActions,
@@ -14,6 +14,7 @@ import {
   DEFAULT_MENU_VIEW_STATE
 } from '@ai-md-editor/shared';
 import { getRecent } from './recent';
+import { getLogDir } from './logger';
 import { createWindow } from './window';
 
 /** 当前界面状态（渲染层同步） */
@@ -370,7 +371,19 @@ function buildTemplate(): MenuItemConstructorOptions[] {
     },
     {
       label: '帮助',
-      submenu: [item('Markdown 语法示例', MenuActions.ShowMarkdownExample)]
+      submenu: [
+        item('Markdown 语法示例', MenuActions.ShowMarkdownExample),
+        sep,
+        {
+          label: '打开日志目录',
+          toolTip: '排查问题时把这里的日志提供给开发者',
+          click: () => {
+            const dir = getLogDir();
+            if (!dir) return;
+            void shell.openPath(dir);
+          }
+        }
+      ]
     }
   ];
 }

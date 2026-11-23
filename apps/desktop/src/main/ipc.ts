@@ -32,7 +32,8 @@ import type {
   SaveImageFromPathInput,
   OpenExternalResult,
   TextEncoding,
-  WriteFileOptions
+  WriteFileOptions,
+  WindowDocumentState
 } from '@ai-md-editor/shared';
 import {
   IpcChannel,
@@ -46,7 +47,7 @@ import { getRecent, addRecent } from './recent';
 import { getSettings, updateSettings } from './settings';
 import { exportFile } from './export';
 import { updateMenuState, refreshRecentMenu } from './menu';
-import { createWindow } from './window';
+import { applyWindowDocumentState, createWindow } from './window';
 import { markSelfWrite, watchDocumentFile, unwatchDocumentFile } from './fileWatcher';
 import { assertDiskUnchanged, forgetDiskStamp, recordDiskStamp, writeFileAtomic } from './fileWrite';
 
@@ -659,6 +660,18 @@ export function registerIpcHandlers(): void {
   });
   ipcMain.handle(IpcChannel.NewWindow, () => {
     createWindow();
+  });
+
+  // 渲染层同步当前文档到窗口标题栏（标题 / macOS 代表文件 / 已编辑小圆点）
+  ipcMain.on(IpcChannel.SetWindowDocument, (event, state: WindowDocumentState) => {
+    if (!state || typeof state !== 'object') return;
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    applyWindowDocumentState(win, {
+      name: typeof state.name === 'string' ? state.name : '',
+      path: typeof state.path === 'string' && state.path.length > 0 ? state.path : null,
+      dirty: Boolean(state.dirty)
+    });
   });
 
   // 渲染层同步界面状态：重建原生菜单以刷新勾选项

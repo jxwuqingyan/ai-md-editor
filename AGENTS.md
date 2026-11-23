@@ -233,6 +233,8 @@ ai-md-editor/
 
 | 72 | Dock / Cmd+Q 退出必须由我们重新发起 `app.quit()`（0.14.38）：`app.quit()` 会依次 close 所有窗口，只要有一个窗口 `preventDefault()`，Electron 就**取消整次退出**且不会自动重来。旧实现确认完只 `win.close()`，结果是窗口关了、进程还挂在 Dock 上，用户得连点好几次才退（每次点击又重开一份确认流程，还会叠对话框）。正解是 `main/window.ts` 里的退出守卫：`setupQuitGuard()` 在主入口 `whenReady` 之前注册 `before-quit`，拦住后用 `quitRequested` 记住「这次是退出」、`quitAllowed` 记住「已确认」；确认全部通过才置 `quitAllowed` 并重新 `app.quit()`（第二次 `before-quit` 直接放行）。同一窗口的确认流程用 `confirmTasks` 复用同一个 Promise（红点关闭与 Dock 退出可能同时发生，重入会重复弹框 / 重复写盘），`closableWindows` 决定哪些窗口的 close 直接放行，`appWindows` 只含自己创建的窗口（导出用的隐藏窗口不参与确认，否则要白等 15s 超时）。回归测试 `test/quit.cjs` 连调两次 `app.quit()`，断言「首次被拦 → 再次放行 → 数秒内走到 will-quit」 |
 
+| 73 | 窗口层与可观测性（0.14.39）：①窗口标题必须跟着当前文档走——渲染层通过 `app:set-window-document` 上报 `{name, path, dirty}`，主进程按 `event.sender` 定位窗口后 `setTitle`，macOS 另用 `setDocumentEdited`（原生小圆点）与 `setRepresentedFilename`（标题栏文件图标），其他平台退回 `•` 前缀；不要把标题写死或在 HTML 里改 `document.title` 了事。②窗口位置持久化只能有一个所有者（`boundsOwner` = 首个窗口），其余窗口基于前一个窗口偏移 28px 层叠并夹到 `workArea` 内；否则多窗口互相覆盖位置、新建窗口与旧窗口完全重合。③崩溃兜底走 `main/crashGuard.ts`：`render-process-gone` 弹「重新加载 / 退出应用」（隐藏窗口如导出窗口只记日志）、`unresponsive` 弹「继续等待 / 重新加载」、主进程 `uncaughtException` 只记录并提示一次不直接退出。④`main/logger.ts` 写 `app.getPath('logs')` 下的 `main.log`（2MB 轮转保留三份），打包后没有终端，日志是唯一排障依据；测试脚本必须 `app.setPath('logs', 临时目录)` 以免污染真实日志。⑤`settings.json` 必须原子写（临时文件 + rename），损坏时记日志再回退默认值 |
+
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
 | 语法 | 实现文件 | 要点 |
@@ -249,7 +251,10 @@ ai-md-editor/
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
 | 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |
-| 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验；`lastSession` 只保留非空路径且最多 40 条 |
+| 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验；`lastSession` 只保留非空路径且最多 40 条；写盘走「临时文件 + rename」原子替换 |
+| 窗口标题 / 多窗口位置 | `main/window.ts` `applyWindowDocumentState` / `nextWindowBounds` | 标题按窗口同步文档名与已编辑状态；首个窗口独占 position 持久化，后续窗口偏移 28px 层叠（见 #73） |
+| 崩溃与卡死兜底 | `main/crashGuard.ts` | `render-process-gone` / `unresponsive` / 主进程未捕获异常；只对本应用可见窗口弹提示，隐藏窗口（PDF 导出）只记日志 |
+| 主进程日志 | `main/logger.ts` | 写 `app.getPath('logs')/main.log`，2MB 轮转保留三份；帮助 → 打开日志目录；测试脚本需重定向到临时目录 |
 | 会话恢复 | `renderer/hooks/useTabs.ts` | 挂载时读设置 → 逐条 `readPathQuiet`（失败静默跳过）→ 替换标签并选中 `activePath`；`sessionReady` 之前禁止回写，否则默认标签会覆盖上次会话 |
 | 关闭前确认 / 退出守卫 | `main/window.ts` `confirmClose` + `setupQuitGuard` | `close` 事件先 `preventDefault`，向渲染层要汇总；确认后发带 `requestId` 的 `app:flush-before-close`，等 `app:flush-reply`（15s 超时）；有失败项或超时弹窗让用户「取消 / 仍要退出」，不再用固定延时。Dock 退出 / Cmd+Q 会先把整次 `app.quit()` 取消，必须由守卫在确认通过后重新发起一次退出（见 #72） |
 | 文件写入 | `main/fileWrite.ts` | `writeFileAtomic`：同目录临时文件 → `handle.sync()` → `rename` 替换（Windows rename 失败退回直接覆盖）；写成功刷新 `recordDiskStamp`。写入前 `assertDiskUnchanged` 比对 mtime/size，不一致抛 `EXTERNAL_CHANGED`（用户显式保存传 `force: true` 跳过） |
@@ -315,6 +320,8 @@ ai-md-editor/
 | 查找高亮只想要匹配文字 | 用 `setSelection` 整段选中，块多了就糊一大片，而且会把焦点从查找框抢走 | `packages/editor/src/search.ts` 用 `Decoration.inline` 加 `.md-find-hit`（当前项 `.md-find-hit-active`），`placeCaretAtTextOffset` 只放光标不 `focus()`；替换后要立刻用编辑器当前纯文本重算，不能等 React 状态防抖回写 |
 | 改完内容立刻切源码/切标签，改动丢失 | 编辑器 → 标签状态的回写走 Milkdown 变更监听，**200ms 防抖**；切模式/切标签/关标签会卸载编辑器，监听 destroy 时 `debouncedHandler.cancel()`，那次回写被取消 | 新增 `EditorInstance.flushMarkdown()`（`serializerCtx` 同步序列化当前 doc），切模式、切标签、关标签、保存 / 另存为 / 全部保存前先 flush，不能用带缓存的 `getMarkdown()` |
 | Dock 菜单「退出」要点好几次才退，窗口关了应用还挂在 Dock 上 | `app.quit()` 被窗口 `close` 里的 `preventDefault()` 打断后整次退出被取消，确认流程结束只 `win.close()`，没有重新发起退出；连点还会各起一份确认流程 | `setupQuitGuard()` 记住退出意图，确认通过后重新 `app.quit()`；同一窗口的确认流程共用同一 Promise。回归测试 `test/quit.cjs`（见 #72） |
+| 多窗口全叠在一起、`⇧⌘N` 新建后「没反应」 | 每个窗口都读同一份 `settings.windowBounds`，且各自回写 | 首个窗口独占位置持久化（`boundsOwner`），后续窗口相对前一个偏移 28px 并夹到 `workArea`（见 #73） |
+| 用户报「保存失败 / 白屏」但没有任何信息 | 打包后没有终端，主进程只 `console.error` | 关键路径写 `main/logger.ts`，崩溃/卡死由 `crashGuard.ts` 接管；帮助菜单可打开日志目录 |
 
 ## 13. 开发交付约定（用户明确要求，必须遵守）
 

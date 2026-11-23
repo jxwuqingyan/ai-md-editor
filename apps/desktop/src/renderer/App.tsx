@@ -672,6 +672,17 @@ export default function App(): JSX.Element {
     [reloadPath, markExternalChange]
   );
 
+  // ===== 窗口标题栏 =====
+  // 多窗口 / Mission Control / 窗口菜单里要能分清哪个窗口是哪篇文档：
+  // 标题同步当前标签名，dirty 状态交给 macOS 原生「已编辑」小圆点（其他平台用 • 前缀）。
+  // 只依赖三个原始值，避免每次敲键都发一次 IPC。
+  const documentName = activeTab?.name ?? 'MarkdownNote';
+  const documentPath = activeTab?.path ?? null;
+  const documentDirty = Boolean(activeTab?.dirty);
+  useEffect(() => {
+    window.api.setWindowDocument({ name: documentName, path: documentPath, dirty: documentDirty });
+  }, [documentName, documentPath, documentDirty]);
+
   // ===== 关闭窗口前的未保存确认 =====
   // 主进程发问 → 这里同步回答当前标签状态；确认后主进程会再要求立即写盘一次
   useEffect(
