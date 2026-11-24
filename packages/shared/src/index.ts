@@ -336,7 +336,12 @@ export interface SessionSnapshot {
  * 只存「下次启动仍然希望保持」的偏好，不存临时状态。
  */
 export interface AppSettings {
-  /** 主题 */
+  /**
+   * 主题模式：显式浅色 / 深色，或跟随系统外观。
+   * 旧版本只写 themeId，读取时会被迁移成对应的显式模式，外观不会突然改变。
+   */
+  themeMode: ThemeMode;
+  /** 实际生效的主题（system 时为主进程读到的系统外观；仅供旧版本与主进程参考） */
   themeId: 'light' | 'dark';
   /** 侧栏展开 */
   sidebarOpen: boolean;
@@ -354,10 +359,22 @@ export interface AppSettings {
   restoreSession: boolean;
   /** 上次会话的标签路径（restoreSession 为 false 时忽略） */
   lastSession: SessionSnapshot | null;
+  /**
+   * 自动保存间隔（毫秒）。0 表示关闭自动保存，只能靠 ⌘S 手动保存。
+   * 有路径且已修改的文档在停止输入该时长后写盘。
+   */
+  autoSaveDelayMs: number;
 }
+
+/** 主题模式：跟随系统时由渲染层按 `prefers-color-scheme` 决定实际主题 */
+export type ThemeMode = 'light' | 'dark' | 'system';
+
+/** 自动保存可选间隔（毫秒，0 为关闭）；菜单与设置校验共用同一份清单 */
+export const AUTO_SAVE_DELAYS: readonly number[] = [0, 1000, 1500, 3000];
 
 /** 默认设置 */
 export const DEFAULT_SETTINGS: AppSettings = {
+  themeMode: 'system',
   themeId: 'light',
   sidebarOpen: true,
   sidebarPanel: 'files',
@@ -366,8 +383,79 @@ export const DEFAULT_SETTINGS: AppSettings = {
   zoomPercent: 100,
   windowBounds: null,
   restoreSession: true,
-  lastSession: null
+  lastSession: null,
+  autoSaveDelayMs: 1500
 };
+
+/**
+ * 校验并规整会话快照：只保留非空字符串路径，最多 40 条。
+ * 放在 shared 里是为了让主进程与单测共用同一份规则。
+ */
+export function normalizeSessionSnapshot(raw: unknown): SessionSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const input = raw as Partial<SessionSnapshot>;
+  const paths = Array.isArray(input.paths)
+    ? input.paths.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, 40)
+    : [];
+  if (paths.length === 0) return null;
+  const activePath =
+    typeof input.activePath === 'string' && paths.includes(input.activePath) ? input.activePath : paths[0];
+  return { paths, activePath };
+}
+
+/** 主题模式合法性判断 */
+function normalizeThemeMode(raw: unknown): ThemeMode | null {
+  return raw === 'light' || raw === 'dark' || raw === 'system' ? raw : null;
+}
+
+/** 自动保存间隔合法性判断：0（关闭）或 500~30000 毫秒 */
+function normalizeAutoSaveDelay(raw: unknown): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return DEFAULT_SETTINGS.autoSaveDelayMs;
+  if (raw === 0) return 0;
+  return raw >= 500 && raw <= 30000 ? Math.round(raw) : DEFAULT_SETTINGS.autoSaveDelayMs;
+}
+
+/**
+ * 校验并规整读取到的设置（避免旧版本 / 损坏文件带入非法值）。
+ *
+ * 主题迁移：旧版本只保存 themeId，没有 themeMode。此时把 themeId 当作显式模式，
+ * 升级后外观保持不变；全新安装（两者都没有）才落到默认的「跟随系统」。
+ */
+export function normalizeAppSettings(raw: unknown): AppSettings {
+  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS };
+  const input = raw as Partial<AppSettings>;
+  const bounds = input.windowBounds;
+  const validBounds =
+    bounds &&
+    Number.isFinite(bounds.width) &&
+    Number.isFinite(bounds.height) &&
+    bounds.width >= 400 &&
+    bounds.height >= 300
+      ? { x: Number(bounds.x) || 0, y: Number(bounds.y) || 0, width: bounds.width, height: bounds.height }
+      : null;
+  const legacyTheme = input.themeId === 'dark' || input.themeId === 'light' ? input.themeId : null;
+  const themeMode = normalizeThemeMode(input.themeMode) ?? legacyTheme ?? DEFAULT_SETTINGS.themeMode;
+  // themeId 只是给旧版本读的「实际生效主题」；system 时无法在这里判断系统外观，
+  // 由渲染层写入时覆盖（见 useDisplayState 的落盘逻辑）。
+  const themeId = themeMode === 'system' ? legacyTheme ?? 'light' : themeMode;
+  return {
+    themeMode,
+    themeId,
+    sidebarOpen: typeof input.sidebarOpen === 'boolean' ? input.sidebarOpen : DEFAULT_SETTINGS.sidebarOpen,
+    sidebarPanel: input.sidebarPanel === 'outline' ? 'outline' : 'files',
+    tabbarVisible: typeof input.tabbarVisible === 'boolean' ? input.tabbarVisible : DEFAULT_SETTINGS.tabbarVisible,
+    toolbarVisible: typeof input.toolbarVisible === 'boolean' ? input.toolbarVisible : DEFAULT_SETTINGS.toolbarVisible,
+    zoomPercent:
+      typeof input.zoomPercent === 'number' && input.zoomPercent >= 50 && input.zoomPercent <= 300
+        ? input.zoomPercent
+        : DEFAULT_SETTINGS.zoomPercent,
+    windowBounds: validBounds,
+    restoreSession:
+      typeof input.restoreSession === 'boolean' ? input.restoreSession : DEFAULT_SETTINGS.restoreSession,
+    lastSession: normalizeSessionSnapshot(input.lastSession),
+    autoSaveDelayMs: normalizeAutoSaveDelay(input.autoSaveDelayMs)
+  };
+}
 
 /** 路径类型查询结果 */
 export interface StatPathResult {
@@ -516,6 +604,10 @@ export interface MenuViewState {
   inTableHeader: boolean;
   /** 当前界面缩放百分比（100 表示原始大小） */
   zoomPercent: number;
+  /** 主题模式（浅色 / 深色 / 跟随系统），用于菜单勾选 */
+  themeMode: ThemeMode;
+  /** 自动保存间隔（毫秒，0 为关闭），用于菜单勾选 */
+  autoSaveDelayMs: number;
 }
 
 /** 默认菜单状态（主进程启动时使用） */
@@ -534,7 +626,9 @@ export const DEFAULT_MENU_VIEW_STATE: MenuViewState = {
   hasPath: false,
   inTable: false,
   inTableHeader: false,
-  zoomPercent: 100
+  zoomPercent: 100,
+  themeMode: 'system',
+  autoSaveDelayMs: 1500
 };
 
 /** 原生应用菜单可触发的动作（集中定义，避免跨进程魔法字符串） */
@@ -548,6 +642,10 @@ export const MenuActions = {
   QuickOpen: 'file:quick-open',
   ImportFile: 'file:import',
   CloseTab: 'file:close-tab',
+  /** 重新打开最近关闭的标签 */
+  ReopenClosedTab: 'file:reopen-closed-tab',
+  /** 设置自动保存间隔（payload 为毫秒字符串，'0' 表示关闭） */
+  SetAutoSave: 'file:set-auto-save',
   Save: 'file:save',
   SaveAll: 'file:save-all',
   SaveAs: 'file:save-as',
@@ -643,6 +741,8 @@ export const MenuActions = {
   ZoomIn: 'view:zoom-in',
   ZoomOut: 'view:zoom-out',
   ZoomReset: 'view:zoom-reset',
+  /** 切换主题模式（payload 为 light / dark / system） */
+  SetThemeMode: 'view:set-theme-mode',
   ToggleAlwaysOnTop: 'view:toggle-always-on-top',
   ToggleFullScreen: 'view:toggle-fullscreen',
   MinimizeWindow: 'view:minimize-window'

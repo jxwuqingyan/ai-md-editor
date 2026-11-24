@@ -6,6 +6,7 @@
  */
 import { BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import {
+  AUTO_SAVE_DELAYS,
   MenuActionChannel,
   MenuActions,
   type MenuAction,
@@ -117,6 +118,21 @@ function buildTemplate(): MenuItemConstructorOptions[] {
         }),
         sep,
         item('关闭', MenuActions.CloseTab, { accelerator: 'CommandOrControl+W' }),
+        item('重新打开关闭的标签', MenuActions.ReopenClosedTab, {
+          accelerator: 'Shift+CommandOrControl+T',
+          toolTip: '按关闭的先后顺序倒着恢复，最多记住 25 个'
+        }),
+        {
+          // 自动保存是可关闭的：在 git 仓库里写稿、或还在犹豫的段落，
+          // 频繁自动落盘反而增加心智负担
+          label: '自动保存',
+          submenu: AUTO_SAVE_DELAYS.map((delay) =>
+            item(delay === 0 ? '关闭自动保存' : `停止输入 ${delay / 1000} 秒后保存`, MenuActions.SetAutoSave, {
+              payload: String(delay),
+              checked: s.autoSaveDelayMs === delay
+            })
+          )
+        },
         item('保存', MenuActions.Save, { accelerator: 'CommandOrControl+S' }),
         item('保存全部打开的文件', MenuActions.SaveAll, {
           accelerator: key('Ctrl+Command+S', 'Ctrl+Alt+S')
@@ -314,9 +330,22 @@ function buildTemplate(): MenuItemConstructorOptions[] {
       label: '显示',
       submenu: [
         item(s.tabbarVisible ? '隐藏标签页栏' : '显示标签页栏', MenuActions.ToggleTabbar, {
-          accelerator: 'Shift+CommandOrControl+T',
+          accelerator: key('Ctrl+Command+2', 'Ctrl+Alt+2'),
           checked: s.tabbarVisible
         }),
+        {
+          // 三态主题：跟随系统时由渲染层按 prefers-color-scheme 实时切换
+          label: '主题',
+          submenu: [
+            item('浅色', MenuActions.SetThemeMode, { payload: 'light', checked: s.themeMode === 'light' }),
+            item('深色', MenuActions.SetThemeMode, { payload: 'dark', checked: s.themeMode === 'dark' }),
+            item('跟随系统', MenuActions.SetThemeMode, {
+              payload: 'system',
+              checked: s.themeMode === 'system',
+              toolTip: '系统切换浅色 / 深色时界面自动跟随'
+            })
+          ]
+        },
         sep,
         item('源码模式', MenuActions.ToggleMode, {
           accelerator: 'CommandOrControl+/',

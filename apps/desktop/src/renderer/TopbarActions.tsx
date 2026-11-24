@@ -1,23 +1,48 @@
+import type { ThemeMode } from '@ai-md-editor/shared';
 import type { ThemeId } from '@ai-md-editor/theme';
 
 /** 标签栏右侧动作区属性 */
 interface TopbarActionsProps {
-  /** 当前主题 */
+  /** 当前主题模式（浅色 / 深色 / 跟随系统） */
+  themeMode: ThemeMode;
+  /** 实际生效的主题（用于提示当前真实明暗） */
   themeId: ThemeId;
-  /** 切换主题 */
-  onThemeChange: (themeId: ThemeId) => void;
+  /** 切换主题模式 */
+  onThemeModeChange: (mode: ThemeMode) => void;
   /** 侧栏是否展开 */
   sidebarOpen: boolean;
   /** 展开/收起侧栏 */
   onToggleSidebar: () => void;
 }
 
-/** 主题图标：半圆表达明暗，不依赖平台 Emoji */
-function ThemeIcon(): JSX.Element {
+/** 点击时的循环顺序：浅色 → 深色 → 跟随系统 */
+const NEXT_MODE: Record<ThemeMode, ThemeMode> = {
+  light: 'dark',
+  dark: 'system',
+  system: 'light'
+};
+
+/** 主题模式名称 */
+const MODE_LABEL: Record<ThemeMode, string> = {
+  light: '浅色',
+  dark: '深色',
+  system: '跟随系统'
+};
+
+/** 主题图标：半圆表达明暗，跟随系统时加一条中线区分 */
+function ThemeIcon({ mode }: { mode: ThemeMode }): JSX.Element {
+  if (mode === 'dark') {
+    return (
+      <svg className="tabbar-action-icon" viewBox="0 0 20 20" aria-hidden="true">
+        <circle cx="10" cy="10" r="7" fill="currentColor" />
+      </svg>
+    );
+  }
   return (
     <svg className="tabbar-action-icon" viewBox="0 0 20 20" aria-hidden="true">
       <circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" strokeWidth="1.5" />
       <path d="M10 3a7 7 0 0 1 0 14z" fill="currentColor" />
+      {mode === 'system' && <path d="M3 10h14" stroke="currentColor" strokeWidth="1.5" />}
     </svg>
   );
 }
@@ -35,28 +60,28 @@ function SidebarIcon({ open }: { open: boolean }): JSX.Element {
 
 /**
  * 标签栏右侧动作区。
- * 主题按钮单击即在浅色/深色之间直接切换（不做下拉选择），侧栏开关固定在右上角。
+ * 主题按钮单击在「浅色 → 深色 → 跟随系统」之间循环，侧栏开关固定在右上角。
  */
 export default function TopbarActions({
+  themeMode,
   themeId,
-  onThemeChange,
+  onThemeModeChange,
   sidebarOpen,
   onToggleSidebar
 }: TopbarActionsProps): JSX.Element {
-  /** 单击主题按钮：切到另一个主题 */
-  const toggleTheme = (): void => {
-    onThemeChange(themeId === 'dark' ? 'light' : 'dark');
-  };
+  const next = NEXT_MODE[themeMode];
+  const current = themeMode === 'system' ? `跟随系统（当前${MODE_LABEL[themeId]}）` : MODE_LABEL[themeMode];
+  const hint = `主题：${current}，点击切换到${MODE_LABEL[next]}`;
 
   return (
     <div className="tabbar-actions">
       <button
         className="icon-btn icon-btn-icon"
-        title={themeId === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
-        aria-label={themeId === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
-        onClick={toggleTheme}
+        title={hint}
+        aria-label={hint}
+        onClick={() => onThemeModeChange(next)}
       >
-        <ThemeIcon />
+        <ThemeIcon mode={themeMode} />
       </button>
       <button
         className="icon-btn icon-btn-icon"

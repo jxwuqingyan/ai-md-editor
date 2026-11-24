@@ -7,11 +7,15 @@
  */
 
 import {
+  AUTO_SAVE_DELAYS,
+  DEFAULT_SETTINGS,
   baseNameOf,
   decodeBytes,
   dirNameOf,
   localImagePath,
   encodeText,
+  normalizeAppSettings,
+  normalizeSessionSnapshot,
   stripMarkdown,
   toFileUrl,
   moveOutlineSection,
@@ -427,6 +431,35 @@ equal('图片目标解析会去掉查询参数与片段', localImagePath('img/ph
 equal('协议相对图片不当作本地文件', localImagePath('//cdn.example.com/photo.png'), null);
 equal('远程图片地址不当作本地文件', localImagePath('https://example.com/photo.png'), null);
 equal('空文档扫描结果为空', scanDocLinks(''), { emptyTargets: [], localImages: [] });
+
+// ===== 设置迁移与规整 =====
+equal('空设置回退默认（跟随系统）', normalizeAppSettings(null).themeMode, DEFAULT_SETTINGS.themeMode);
+equal('旧设置只有 themeId=dark 时迁移为显式深色', normalizeAppSettings({ themeId: 'dark' }).themeMode, 'dark');
+equal('旧设置只有 themeId=light 时迁移为显式浅色', normalizeAppSettings({ themeId: 'light' }).themeMode, 'light');
+equal(
+  '新设置的 themeMode 优先于 themeId',
+  normalizeAppSettings({ themeMode: 'system', themeId: 'dark' }).themeMode,
+  'system'
+);
+equal('非法 themeMode 退回迁移后的值', normalizeAppSettings({ themeMode: 'blue', themeId: 'dark' }).themeMode, 'dark');
+equal(
+  '非法自动保存间隔回退默认',
+  normalizeAppSettings({ autoSaveDelayMs: 123 }).autoSaveDelayMs,
+  DEFAULT_SETTINGS.autoSaveDelayMs
+);
+equal('自动保存关闭（0）被保留', normalizeAppSettings({ autoSaveDelayMs: 0 }).autoSaveDelayMs, 0);
+equal('自动保存 3 秒被保留', normalizeAppSettings({ autoSaveDelayMs: 3000 }).autoSaveDelayMs, 3000);
+ok('自动保存档位包含「关闭」', AUTO_SAVE_DELAYS.includes(0), AUTO_SAVE_DELAYS.join(','));
+equal(
+  '会话快照裁掉非字符串与空路径',
+  normalizeSessionSnapshot({ paths: ['a', '', 3, 'b'], activePath: 'b' }),
+  { paths: ['a', 'b'], activePath: 'b' }
+);
+equal(
+  '会话快照 activePath 不在列表时取首个',
+  normalizeSessionSnapshot({ paths: ['a', 'b'], activePath: 'x' })?.activePath,
+  'a'
+);
 
 // ===== 结果 =====
 console.log(`\n单元测试：${total - failed}/${total} 通过`);

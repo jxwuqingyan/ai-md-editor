@@ -4,7 +4,7 @@ import type { EditorInstance, TableContext } from '@ai-md-editor/editor';
 import { TEXT_ENCODING_LABELS, dirNameOf, localImagePath, moveOutlineSection, scanDocLinks } from '@ai-md-editor/shared';
 import { NO_TABLE_CONTEXT } from './constants';
 import MarkdownEditor from './MarkdownEditor';
-import Tabs from './Tabs';
+import Tabs, { type TabContextAction } from './Tabs';
 import TopbarActions from './TopbarActions';
 import Sidebar from './Sidebar';
 import Toolbar from './Toolbar';
@@ -84,6 +84,10 @@ export default function App(): JSX.Element {
     showMarkdownExample,
     selectTab,
     closeTab,
+    closeTabs,
+    reopenClosedTab,
+    autoSaveDelayMs,
+    setAutoSaveDelayMs,
     chooseFolder,
     openFile,
     openPath,
@@ -109,8 +113,9 @@ export default function App(): JSX.Element {
 
   // ===== 界面状态 =====
   const {
+    themeMode,
+    setThemeMode,
     themeId,
-    setThemeId,
     sidebarOpen,
     setSidebarOpen,
     sidebarPanel,
@@ -137,7 +142,7 @@ export default function App(): JSX.Element {
     toggleAlwaysOnTop,
     toggleFullScreen,
     zoom
-  } = useDisplayState({ hasPath: Boolean(activeTab?.path) });
+  } = useDisplayState({ hasPath: Boolean(activeTab?.path), autoSaveDelayMs });
 
   // 当前文档所在目录：编辑器用它把相对图片路径解析成可显示地址
   const docDir = useMemo(() => {
@@ -421,6 +426,54 @@ export default function App(): JSX.Element {
     if (target) void window.api.revealInFolder(target);
     else showNotice('没有可显示的目录');
   }, [treeRoot, docDir, activeTab?.path, showNotice]);
+
+  /**
+   * 标签右键菜单动作。
+   * 批量关闭从「离被右键标签最远」的一端开始关，被右键的标签最后才轮到，
+   * 视觉上不会出现内容反复跳动。
+   */
+  const handleTabContextAction = useCallback(
+    (id: string, action: TabContextAction) => {
+      const list = tabsRef.current;
+      const index = list.findIndex((tab) => tab.id === id);
+      if (index < 0) return;
+      const tab = list[index];
+      switch (action) {
+        case 'close':
+          void closeTab(id);
+          return;
+        case 'closeOthers':
+          void closeTabs(list.filter((item) => item.id !== id).map((item) => item.id).reverse());
+          return;
+        case 'closeLeft':
+          void closeTabs(list.slice(0, index).map((item) => item.id).reverse());
+          return;
+        case 'closeRight':
+          void closeTabs(list.slice(index + 1).map((item) => item.id));
+          return;
+        case 'copyPath':
+          if (!tab.path) return;
+          void navigator.clipboard
+            .writeText(tab.path)
+            .then(() => showNotice('已复制文件路径'))
+            .catch(() => showNotice('复制失败'));
+          return;
+        case 'copyName':
+          void navigator.clipboard
+            .writeText(tab.name)
+            .then(() => showNotice('已复制文件名'))
+            .catch(() => showNotice('复制失败'));
+          return;
+        case 'reveal':
+          if (tab.path) void window.api.revealInFolder(tab.path);
+          else showNotice('这个文档还没有保存到磁盘');
+          return;
+        default:
+          return;
+      }
+    },
+    [closeTab, closeTabs, showNotice]
+  );
 
   // ===== 侧栏搜索跳转 =====
 
@@ -718,6 +771,12 @@ export default function App(): JSX.Element {
     openPath: (path) => void openPath(path),
     quickOpen: () => void handleQuickOpen(),
     closeTab: () => void closeTab(activeIdRef.current),
+    reopenClosedTab: () => void reopenClosedTab(),
+    setAutoSave: (delay) => {
+      setAutoSaveDelayMs(delay);
+      showNotice(delay === 0 ? '已关闭自动保存（用 ⌘S 手动保存）' : `自动保存：停止输入 ${delay / 1000} 秒后写入`);
+    },
+    setThemeMode,
     save: () => void save(),
     saveAll: () => void saveAll(),
     saveAs: () => void saveAs(),
@@ -777,6 +836,7 @@ export default function App(): JSX.Element {
           onSelect={selectTab}
           onClose={closeTab}
           onNew={newTab}
+          onContextAction={handleTabContextAction}
           onRename={(id) => {
             if (id === activeId) openRenameDialog();
             else {
@@ -786,8 +846,9 @@ export default function App(): JSX.Element {
           }}
           actions={
             <TopbarActions
+              themeMode={themeMode}
               themeId={themeId}
-              onThemeChange={setThemeId}
+              onThemeModeChange={setThemeMode}
               sidebarOpen={sidebarOpen}
               onToggleSidebar={() => setSidebarOpen((v) => !v)}
             />

@@ -4,7 +4,7 @@
  * 从根组件拆出，保证 App.tsx 只负责状态与界面组合；
  * 所有菜单动作都调用渲染层提供的回调，不直接触碰主进程 API。
  */
-import { MenuActions, type MenuAction } from '@ai-md-editor/shared';
+import { MenuActions, type MenuAction, type ThemeMode } from '@ai-md-editor/shared';
 import type { FormatAction } from '@ai-md-editor/editor';
 
 /** 菜单动作回调（payload 用于最近文件路径、警告框类型等） */
@@ -28,6 +28,12 @@ export interface MenuHandlerDeps {
   quickOpen: () => void;
   /** 关闭当前标签 */
   closeTab: () => void;
+  /** 重新打开最近关闭的标签 */
+  reopenClosedTab: () => void;
+  /** 设置自动保存间隔（毫秒，0 为关闭） */
+  setAutoSave: (delayMs: number) => void;
+  /** 切换主题模式 */
+  setThemeMode: (mode: ThemeMode) => void;
   /** 保存当前文档 */
   save: () => void;
   /** 保存全部已修改文档 */
@@ -105,6 +111,11 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.QuickOpen]: deps.quickOpen,
     [MenuActions.ImportFile]: deps.openFile,
     [MenuActions.CloseTab]: deps.closeTab,
+    [MenuActions.ReopenClosedTab]: deps.reopenClosedTab,
+    [MenuActions.SetAutoSave]: (payload) => {
+      const delay = Number(payload);
+      if (Number.isFinite(delay) && delay >= 0) deps.setAutoSave(delay);
+    },
     [MenuActions.Save]: deps.save,
     [MenuActions.SaveAll]: deps.saveAll,
     [MenuActions.SaveAs]: deps.saveAs,
@@ -198,6 +209,9 @@ export function buildMenuHandlers(deps: MenuHandlerDeps): Partial<Record<MenuAct
     [MenuActions.ZoomIn]: () => deps.zoom('in'),
     [MenuActions.ZoomOut]: () => deps.zoom('out'),
     [MenuActions.ZoomReset]: () => deps.zoom('reset'),
+    [MenuActions.SetThemeMode]: (payload) => {
+      if (payload === 'light' || payload === 'dark' || payload === 'system') deps.setThemeMode(payload);
+    },
     [MenuActions.ToggleAlwaysOnTop]: deps.toggleAlwaysOnTop,
     [MenuActions.ToggleFullScreen]: deps.toggleFullScreen,
     [MenuActions.MinimizeWindow]: deps.minimizeWindow

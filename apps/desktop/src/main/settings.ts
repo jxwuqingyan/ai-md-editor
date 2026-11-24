@@ -9,8 +9,8 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import {
   DEFAULT_SETTINGS,
+  normalizeAppSettings,
   type AppSettings,
-  type SessionSnapshot,
   type WindowBounds
 } from '@ai-md-editor/shared';
 import { logError } from './logger';
@@ -26,54 +26,11 @@ function settingsFile(): string {
   return join(app.getPath('userData'), 'settings.json');
 }
 
-/** 校验会话快照：只保留非空字符串路径，最多 40 个（避免设置文件无限膨胀） */
-function normalizeSession(raw: unknown): SessionSnapshot | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const input = raw as Partial<SessionSnapshot>;
-  const paths = Array.isArray(input.paths)
-    ? input.paths.filter((item): item is string => typeof item === 'string' && item.length > 0).slice(0, 40)
-    : [];
-  if (paths.length === 0) return null;
-  const activePath =
-    typeof input.activePath === 'string' && paths.includes(input.activePath) ? input.activePath : paths[0];
-  return { paths, activePath };
-}
-
-/** 校验并规整读取到的设置（避免旧版本/损坏文件带入非法值） */
-function normalize(raw: unknown): AppSettings {
-  if (!raw || typeof raw !== 'object') return { ...DEFAULT_SETTINGS };
-  const input = raw as Partial<AppSettings>;
-  const bounds = input.windowBounds;
-  const validBounds =
-    bounds &&
-    Number.isFinite(bounds.width) &&
-    Number.isFinite(bounds.height) &&
-    bounds.width >= 400 &&
-    bounds.height >= 300
-      ? { x: Number(bounds.x) || 0, y: Number(bounds.y) || 0, width: bounds.width, height: bounds.height }
-      : null;
-  return {
-    themeId: input.themeId === 'dark' ? 'dark' : 'light',
-    sidebarOpen: typeof input.sidebarOpen === 'boolean' ? input.sidebarOpen : DEFAULT_SETTINGS.sidebarOpen,
-    sidebarPanel: input.sidebarPanel === 'outline' ? 'outline' : 'files',
-    tabbarVisible: typeof input.tabbarVisible === 'boolean' ? input.tabbarVisible : DEFAULT_SETTINGS.tabbarVisible,
-    toolbarVisible: typeof input.toolbarVisible === 'boolean' ? input.toolbarVisible : DEFAULT_SETTINGS.toolbarVisible,
-    zoomPercent:
-      typeof input.zoomPercent === 'number' && input.zoomPercent >= 50 && input.zoomPercent <= 300
-        ? input.zoomPercent
-        : DEFAULT_SETTINGS.zoomPercent,
-    windowBounds: validBounds,
-    restoreSession:
-      typeof input.restoreSession === 'boolean' ? input.restoreSession : DEFAULT_SETTINGS.restoreSession,
-    lastSession: normalizeSession(input.lastSession)
-  };
-}
-
 /** 启动时读取设置（失败则回到默认值，不阻塞启动） */
 export function loadSettings(): AppSettings {
   try {
     const text = readFileSync(settingsFile(), 'utf-8');
-    cache = normalize(JSON.parse(text));
+    cache = normalizeAppSettings(JSON.parse(text));
   } catch (err) {
     // 首次启动没有文件是正常的；文件损坏时留一条日志，便于解释「偏好被重置」
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -127,7 +84,7 @@ function writeNow(): void {
 
 /** 更新部分设置，返回合并后的结果 */
 export function updateSettings(patch: Partial<AppSettings>): AppSettings {
-  cache = normalize({ ...cache, ...patch });
+  cache = normalizeAppSettings({ ...cache, ...patch });
   if (writeTimer) clearTimeout(writeTimer);
   writeTimer = setTimeout(writeNow, 300);
   return getSettings();

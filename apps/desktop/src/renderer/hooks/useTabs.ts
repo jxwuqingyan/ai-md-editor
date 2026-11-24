@@ -5,7 +5,7 @@
  * 对外的回调都是稳定引用，供菜单分发表与其它 hook 直接使用。
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react';
-import { isExternalChangeError, type FlushFailure, type TextEncoding } from '@ai-md-editor/shared';
+import { isExternalChangeError, DEFAULT_SETTINGS, type FlushFailure, type TextEncoding } from '@ai-md-editor/shared';
 import type { EditorInstance } from '@ai-md-editor/editor';
 import type { SaveState, Tab } from '../types';
 import type { QuickEntry } from '../Dialogs';
@@ -35,6 +35,21 @@ function parentDir(targetPath: string): string {
   return index > 0 ? targetPath.slice(0, index) : '';
 }
 
+/** 关闭栈里的一条记录：够还原标签名字与内容即可，不存整个 Tab */
+interface ClosedTab {
+  /** 磁盘路径（未命名标签为 null） */
+  path: string | null;
+  /** 标签名 */
+  name: string;
+  /** 关闭时的内容（未命名标签靠它恢复） */
+  content: string;
+  /** 编码 */
+  encoding: TextEncoding;
+}
+
+/** 关闭栈上限：够救回误关的标签，又不会把整份文档无限期留在内存里 */
+const CLOSED_TAB_LIMIT = 25;
+
 /** useTabs 的入参 */
 interface UseTabsOptions {
   /** 编辑器实例引用（切换文档时同步内容） */
@@ -58,6 +73,10 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
   const [treeRoot, setTreeRoot] = useState<string | null>(null);
   /** 当前文档的保存状态（状态栏展示，比脏点更明确） */
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  /** 自动保存间隔（毫秒，0 为关闭）；启动时从设置读回 */
+  const [autoSaveDelayMs, setAutoSaveDelayMsState] = useState(DEFAULT_SETTINGS.autoSaveDelayMs);
+  /** 最近关闭的标签，用于「重新打开关闭的标签」 */
+  const closedTabsRef = useRef<ClosedTab[]>([]);
 
   // 保存最新的 tabs / activeId，供事件回调使用（避免闭包过期）
   const tabsRef = useRef(tabs);
@@ -168,14 +187,16 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
    *
    * 有路径且 dirty 的标签必须**等写盘成功**再关闭：写失败时保留标签和脏点并提示，
    * 不把「最后一次保存」交给一个没人等的后台写入。
+   *
+   * @returns true 表示标签已关闭；false 表示用户取消或写盘失败（批量关闭据此停止）
    */
   const closeTab = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<boolean> => {
       // 关闭前先落定未回写的改动，避免刚敲的内容没进 content 就被写盘/丢弃
       const markdown = flushEditor();
       const prev = tabsRef.current;
       const index = prev.findIndex((t) => t.id === id);
-      if (index < 0) return;
+      if (index < 0) return true;
       const target = prev[index];
       const content =
         target.id === activeIdRef.current && markdown !== undefined ? markdown : target.content;
@@ -193,30 +214,62 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
           notifyRef.current.onNotice?.(
             `已取消关闭：${target.name} 保存失败 — ${message}`
           );
-          return;
+          return false;
         }
       }
       // 未落盘的新文档没有兜底，关掉就真的没了，必须问一句
       if (!target.path && dirty) {
         const confirmed = window.confirm(`「${target.name}」尚未保存到磁盘，关闭后内容会丢失。仍要关闭吗？`);
-        if (!confirmed) return;
+        if (!confirmed) return false;
       }
+
+      // 记入关闭栈：未命名标签的内容也一起存，⇧⌘T 才能把它救回来
+      closedTabsRef.current.push({
+        path: target.path,
+        name: target.name,
+        content,
+        encoding: target.encoding
+      });
+      if (closedTabsRef.current.length > CLOSED_TAB_LIMIT) closedTabsRef.current.shift();
 
       const rest = prev.filter((t) => t.id !== id);
 
+      // 批量关闭是串行 await：setState 提交前 tabsRef 仍是旧快照，
+      // 第二次调用会基于「还包含已关闭标签」的旧列表计算，导致前一个标签被加回来。
+      // 这里同步推进 ref 与 activeIdRef，保证下一次调用读到的是最新列表。
       if (id !== activeIdRef.current) {
+        tabsRef.current = rest;
         setTabs(rest);
-        return;
+        return true;
       }
       // 关掉的是当前标签：没有剩余标签时补一个空白页
       const next = rest.length === 0 ? createTab('未命名.md', '') : rest[Math.min(index, rest.length - 1)];
+      const committed = rest.length === 0 ? [next] : rest;
       history.reset();
-      setTabs(rest.length === 0 ? [next] : rest);
+      tabsRef.current = committed;
+      activeIdRef.current = next.id;
+      setTabs(committed);
       setActiveId(next.id);
       editorRef.current?.setMarkdown(next.content);
       setSaveState({ kind: 'idle' });
+      return true;
     },
     [editorRef, history, flushEditor]
+  );
+
+  /**
+   * 批量关闭（关闭其他 / 左侧 / 右侧）。
+   * 逐个串行关闭：遇到用户取消（未保存确认）或写盘失败就停下，
+   * 不再继续关后面的标签——否则一次误点会连带关掉一堆文档。
+   */
+  const closeTabs = useCallback(
+    async (ids: string[]): Promise<void> => {
+      for (const id of ids) {
+        const closed = await closeTab(id);
+        if (!closed) return;
+      }
+    },
+    [closeTab]
   );
 
   /** 打开文件内容（新建/复用标签），供对话框、拖拽、open-file 事件复用 */
@@ -278,6 +331,46 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     },
     [openFileContent]
   );
+
+  /**
+   * 重新打开最近关闭的标签（⇧⌘T）。
+   *
+   * 有路径的标签重新从磁盘读，拿到的是磁盘上的最新版本；
+   * 未命名标签没有磁盘副本，用关闭时记下的内容还原（标记为已修改，避免被当成已保存）。
+   */
+  const reopenClosedTab = useCallback(async (): Promise<void> => {
+    const entry = closedTabsRef.current.pop();
+    if (!entry) {
+      notifyRef.current.onNotice?.('没有可重新打开的标签');
+      return;
+    }
+    if (entry.path) {
+      const result = await window.api.openPath(entry.path);
+      if (result.canceled || !result.path || result.content === null) {
+        notifyRef.current.onNotice?.(`无法重新打开：${entry.name}`);
+        return;
+      }
+      openFileContent(
+        result.path,
+        result.name ?? entry.name,
+        result.content,
+        result.encoding ?? 'utf-8'
+      );
+      return;
+    }
+    // 未命名标签：还原内容并保持「已修改」，用户仍需要自己保存
+    const restored: Tab = { ...createTab(entry.name, entry.content, null, entry.encoding), dirty: true };
+    history.reset();
+    setTabs((prev) => [...prev, restored]);
+    setActiveId(restored.id);
+    editorRef.current?.setMarkdown(restored.content);
+  }, [editorRef, history, openFileContent]);
+
+  /** 设置自动保存间隔（毫秒，0 为关闭）；改动立即落盘，下次编辑生效 */
+  const setAutoSaveDelayMs = useCallback((delay: number) => {
+    setAutoSaveDelayMsState(delay);
+    void window.api.updateSettings({ autoSaveDelayMs: delay });
+  }, []);
 
   /**
    * 写盘并把标签标记为已保存。
@@ -560,6 +653,10 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     void (async () => {
       const settings = await window.api.getSettings().catch(() => null);
       if (cancelled) return;
+      // 自动保存间隔是独立偏好，和会话恢复一起读，省一次 IPC
+      if (typeof settings?.autoSaveDelayMs === 'number') {
+        setAutoSaveDelayMsState(settings.autoSaveDelayMs);
+      }
       const session = settings?.restoreSession ? settings.lastSession : null;
       if (session && session.paths.length > 0) {
         const restored: Tab[] = [];
@@ -610,11 +707,13 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     return () => clearTimeout(timer);
   }, [sessionReady, tabs, activeId]);
 
-  // 自动保存：内容变化后防抖 1.5s 写入所有「有路径且 dirty」的标签。
+  // 自动保存：内容变化后按设置的间隔（默认 1.5s）写入所有「有路径且 dirty」的标签。
   // 只保存当前标签会丢稿：敲完立刻切到别的标签（或新建标签）时，
   // 原标签的计时器被清掉且再也不会重新触发。
   // 外部改动冲突的标签会被跳过（等用户决定用哪个版本），失败要在状态栏说清楚。
   useEffect(() => {
+    // 0 = 用户关闭了自动保存，只能手动 ⌘S
+    if (autoSaveDelayMs <= 0) return;
     const timer = setTimeout(() => {
       const dirty = tabsRef.current.filter((tab) => tab.path && tab.dirty && !tab.externalChanged);
       if (dirty.length === 0) return;
@@ -665,9 +764,9 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
           setSaveState({ kind: 'saved' });
         }
       });
-    }, 1500);
+    }, autoSaveDelayMs);
     return () => clearTimeout(timer);
-  }, [tabs]);
+  }, [tabs, autoSaveDelayMs]);
 
   return {
     tabs,
@@ -684,6 +783,10 @@ export function useTabs({ editorRef, history, onSessionRestored, onNotice }: Use
     showMarkdownExample,
     selectTab,
     closeTab,
+    closeTabs,
+    reopenClosedTab,
+    autoSaveDelayMs,
+    setAutoSaveDelayMs,
     openFileContent,
     chooseFolder,
     openFile,

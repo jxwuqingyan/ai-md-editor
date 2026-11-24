@@ -195,7 +195,7 @@ ai-md-editor/
 | 33 | 原生菜单重建前比较 `MenuViewState` 签名，未变化直接跳过；`useMenuBridge` 的分发表只构造一次并用代理读取最新回调 |
 | 34 | 导出公式渲染：`extractMath` 先把 `$...$` / `$$...$$` 换成占位符再交给 marked（防止 TeX 里的 `*`/`_` 被当 Markdown），渲染后用 KaTeX 还原；代码段用掩码保护；`katex.min.css` 与 woff2 字体 data URI 内联（仅含公式的文档才嵌入）；Word 保留 TeX 原文 |
 | 35 | 侧栏是纵向 flex：树区/大纲区自身滚动（`flex:1; min-height:0; overflow-y:auto`），`.sidebar` 本身 `overflow:hidden`；「打开文件夹」固定在底部，不要移回顶部 |
-| 36 | 主题按钮是**单击直接切换**浅色/深色（不做下拉选择），写回 `settings.themeId` 并同步 `data-theme` |
+| 36 | 主题是**三态**（0.14.40）：`themeMode` 为 `light` / `dark` / `system`，顶栏按钮单击按「浅色 → 深色 → 跟随系统」循环（不做下拉，按钮 title 写明当前模式与下一步），显示菜单里也有一份带勾选的子菜单。实际生效的 `themeId` 是派生值：显式模式直接用，`system` 时取 `prefers-color-scheme` 并监听变化实时切换。落盘写 `themeMode`，同时写生效的 `themeId` 供旧版本读取；读到只有 `themeId` 的旧文件时迁移成对应的显式模式 |
 | 37 | 侧栏搜索在主进程执行（`main/searcher.ts`）：渲染层只发 `search:folder` IPC；扫描跳过 node_modules/.git/隐藏目录/img，单文件 2MB、结果 50 文件/每文件 20 行上限；行匹配器是纯函数（`buildLineMatcher`，可单测），全单词用第 1 个捕获组修正列与长度 |
 | 38 | 文件树 ⋮ 菜单依赖 `rootDir`（未打开目录不显示）；「刷新」走 `refreshToken` 计数信号驱动 FileTree 重读**所有已展开目录**（不只根目录），否则深层的新建/改名会留在树里显示旧名字 |
 | 40 | 所有输入框的 Enter 都要先判输入法组合态（`renderer/ime.ts` 的 `isImeKey` + `compositionstart/end` 记录）：中文输入法用 Enter 上屏时 `keydown` 也带 `Enter`，不判会让改名/搜索用到还没上屏的拼音 |
@@ -234,6 +234,8 @@ ai-md-editor/
 | 72 | Dock / Cmd+Q 退出必须由我们重新发起 `app.quit()`（0.14.38）：`app.quit()` 会依次 close 所有窗口，只要有一个窗口 `preventDefault()`，Electron 就**取消整次退出**且不会自动重来。旧实现确认完只 `win.close()`，结果是窗口关了、进程还挂在 Dock 上，用户得连点好几次才退（每次点击又重开一份确认流程，还会叠对话框）。正解是 `main/window.ts` 里的退出守卫：`setupQuitGuard()` 在主入口 `whenReady` 之前注册 `before-quit`，拦住后用 `quitRequested` 记住「这次是退出」、`quitAllowed` 记住「已确认」；确认全部通过才置 `quitAllowed` 并重新 `app.quit()`（第二次 `before-quit` 直接放行）。同一窗口的确认流程用 `confirmTasks` 复用同一个 Promise（红点关闭与 Dock 退出可能同时发生，重入会重复弹框 / 重复写盘），`closableWindows` 决定哪些窗口的 close 直接放行，`appWindows` 只含自己创建的窗口（导出用的隐藏窗口不参与确认，否则要白等 15s 超时）。回归测试 `test/quit.cjs` 连调两次 `app.quit()`，断言「首次被拦 → 再次放行 → 数秒内走到 will-quit」 |
 
 | 73 | 窗口层与可观测性（0.14.39）：①窗口标题必须跟着当前文档走——渲染层通过 `app:set-window-document` 上报 `{name, path, dirty}`，主进程按 `event.sender` 定位窗口后 `setTitle`，macOS 另用 `setDocumentEdited`（原生小圆点）与 `setRepresentedFilename`（标题栏文件图标），其他平台退回 `•` 前缀；不要把标题写死或在 HTML 里改 `document.title` 了事。②窗口位置持久化只能有一个所有者（`boundsOwner` = 首个窗口），其余窗口基于前一个窗口偏移 28px 层叠并夹到 `workArea` 内；否则多窗口互相覆盖位置、新建窗口与旧窗口完全重合。③崩溃兜底走 `main/crashGuard.ts`：`render-process-gone` 弹「重新加载 / 退出应用」（隐藏窗口如导出窗口只记日志）、`unresponsive` 弹「继续等待 / 重新加载」、主进程 `uncaughtException` 只记录并提示一次不直接退出。④`main/logger.ts` 写 `app.getPath('logs')` 下的 `main.log`（2MB 轮转保留三份），打包后没有终端，日志是唯一排障依据；测试脚本必须 `app.setPath('logs', 临时目录)` 以免污染真实日志。⑤`settings.json` 必须原子写（临时文件 + rename），损坏时记日志再回退默认值 |
+| 74 | 标签批量关闭与恢复（0.14.40）：①**批量关闭必须串行 await，并同步推进 `tabsRef` / `activeIdRef`**——`closeTab` 基于 `tabsRef.current` 快照过滤，React 提交前 ref 不会更新，第二次调用会把前一次关掉的标签加回来（表现为「关闭其他标签」后标签数不减）。②`closeTab` 返回 `boolean`：写盘失败或用户取消返回 `false`，`closeTabs` 遇到 `false` 立即停止，避免一次误点连带关掉一堆文档。③关闭栈 `closedTabsRef` 最多 25 条，`⇧⌘T` 从栈顶恢复：有路径的重新 `openPath`（拿磁盘最新版本），未命名标签用记录的内容还原并置 `dirty`。④右键菜单是渲染层自绘（`Tabs.tsx` + `.tab-context-menu`），打开时先用 `onSelect` 切换被右键的标签，批量关闭才有明确主体；点空白 / Esc / 滚动 / 窗口失焦都要关闭。⑤⇧⌘T 原本是「显示标签页栏」，已改为 `⌃⌘2`（Windows `Ctrl+Alt+2`），与大纲 `⌃⌘1`、文件树 `⌃⌘3` 对齐，改加速键时记得同步 `menuAccelerators.cjs` 的唯一性校验 |
+| 75 | 自动保存是可配置的（0.14.40）：`autoSaveDelayMs` 为 0 时表示关闭，其余为 500~30000 毫秒（菜单只提供 1 / 1.5 / 3 秒三档，`AUTO_SAVE_DELAYS` 是唯一清单）。`useTabs` 在定时器 effect 里直接 `if (autoSaveDelayMs <= 0) return;`，并把该值放进依赖数组——切换档位会重排计时器，关闭时立刻取消已排队的写入。设置读回与会话恢复共用同一次 `getSettings()`，不要为了一个字段多发一次 IPC |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -251,7 +253,7 @@ ai-md-editor/
 | 表格上下文上报 | `packages/editor/src/selection.ts` | ProseMirror 插件监听选区变化，仅在「是否在表格/表头」变化时回调；编辑器创建时先上报一次 |
 | 图片显示路径解析 | `packages/editor/src/images.ts` | 只改 DOM 的 `src`（转绝对 `file://`），Markdown 节点属性保持相对路径；切标签时 `setImageBaseDir` 重新解析 |
 | 图片落盘 | `apps/desktop/src/main/ipc.ts` `saveImageToDocDir` | 传文档绝对路径，主进程 `dirname` 算同级 `img/`；**禁止**在渲染层拼相对目录（空目录会写到进程 cwd） |
-| 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；字段做了越界与损坏校验；`lastSession` 只保留非空路径且最多 40 条；写盘走「临时文件 + rename」原子替换 |
+| 设置持久化 | `apps/desktop/src/main/settings.ts` | `loadSettings()` 启动读入内存、`updateSettings()` 防抖写盘、`flushSettings()` 退出前落盘；校验规则在 `@ai-md-editor/shared` 的 `normalizeAppSettings`（可单测）：越界/损坏字段回退默认、旧 `themeId` 迁移为 `themeMode`、`lastSession` 只保留非空路径且最多 40 条；写盘走「临时文件 + rename」原子替换 |
 | 窗口标题 / 多窗口位置 | `main/window.ts` `applyWindowDocumentState` / `nextWindowBounds` | 标题按窗口同步文档名与已编辑状态；首个窗口独占 position 持久化，后续窗口偏移 28px 层叠（见 #73） |
 | 崩溃与卡死兜底 | `main/crashGuard.ts` | `render-process-gone` / `unresponsive` / 主进程未捕获异常；只对本应用可见窗口弹提示，隐藏窗口（PDF 导出）只记日志 |
 | 主进程日志 | `main/logger.ts` | 写 `app.getPath('logs')/main.log`，2MB 轮转保留三份；帮助 → 打开日志目录；测试脚本需重定向到临时目录 |
@@ -262,7 +264,7 @@ ai-md-editor/
 | 外部修改监听 | `main/fileWatcher.ts` | 按文件登记 watcher，250ms 去抖、自身写入 1.5s 宽限；`rename` 事件后重建 watcher（保存常是「写临时文件 + rename」） |
 | 编辑器动态加载 | `renderer/MarkdownEditor.tsx` | `await import('@ai-md-editor/editor')`，卸载时判 `disposed` 后销毁；加载期间渲染 `.editor-loading` 占位 |
 | 文件树无障碍 | `renderer/FileTree.tsx` | 条目为 `<button>`（Enter/Space 生效），容器 `onKeyDown` 处理 ↑↓←→/Home/End，`data-depth` 用于「回父级」 |
-| 自动保存范围 | `renderer/hooks/useTabs.ts` | 防抖到点写入**所有**「有路径且 dirty 且未标记 externalChanged」的标签，按内容快照清 dirty；只写当前标签会在切标签时丢稿。失败要在状态栏展示（`saveState`），不能静默吞掉 |
+| 自动保存范围 | `renderer/hooks/useTabs.ts` | 按 `autoSaveDelayMs`（默认 1500，0 为关闭）防抖到点写入**所有**「有路径且 dirty 且未标记 externalChanged」的标签，按内容快照清 dirty；只写当前标签会在切标签时丢稿。失败要在状态栏展示（`saveState`），不能静默吞掉 |
 | 打开文件校验 | `apps/desktop/src/main/ipc.ts` `readTextFile` | 先 `stat`：> 20 MB 或含 NUL 字节（二进制）直接拒绝并弹窗说明；不要静默返回「已取消」 |
 | 拖拽取路径 | `apps/desktop/src/preload/index.ts` | `getPathForFile(file)` = `webUtils.getPathForFile`；渲染层据此区分 图片 / 文件夹 / 文档 |
 | 导出公式 | `main/mathExport.ts` + `main/export.ts` | 提取/还原纯函数（可单测）；块级公式先于行内提取；`throwOnError:false` 下非法 TeX 渲染成 `katex-error` 标记而非抛异常 |
@@ -295,6 +297,7 @@ ai-md-editor/
 | CI 上「窗口尺寸写入设置文件」断言失败 | 硬编码请求值 `1000×700`，macOS runner 工作区较小会裁剪成 `1000×684` | 与 `win.getBounds()` 实际值比对，请求值只做容差检查 |
 | Intel job 打 dmg 偶发 `hdiutil detach` 失败（exit 16） | runner 上磁盘镜像卸载冲突，非代码问题，重试 5 次仍可能失败 | `gh run rerun --failed` 重跑失败 job，或等下次 push 重新触发 |
 | 敲完立刻切标签，改动没落盘 | 自动保存只写「当前活动标签」，切走后计时器被清理且不再重排 | 防抖到点遍历所有 `path && dirty` 的标签批量写入 |
+| 「关闭其他标签」后标签数不减 / 关掉的又回来 | `closeTab` 基于 `tabsRef.current` 快照算剩余列表，而 React 提交前 ref 不更新；批量关闭串行 await 时每次都在旧列表上过滤 | `closeTab` 里同步推进 `tabsRef` 与 `activeIdRef` 再 `setTabs`，并返回 `boolean` 让 `closeTabs` 遇到取消就停（见 #74） |
 | 拖入二进制/超大文件后窗口卡死 | `readFile(path, 'utf-8')` 无体积与类型校验，几百 MB 直接进内存 | 打开前 `stat` 校验体积上限，内容含 NUL 视为非文本 |
 | 大文档导出 PDF 得到空白页 | 用 `data:text/html,<整篇 HTML>` 导航，超过 Chromium 的 URL 长度上限 | 先写临时 HTML 文件再 `win.loadFile`，导出后删除 |
 | Windows 图片显示不出来 | `encodeURIComponent` 把盘符编成 `C%3A`，`file:///C%3A/...` 不是合法地址 | 盘符段（`/^[A-Za-z]:$/`）跳过编码 |

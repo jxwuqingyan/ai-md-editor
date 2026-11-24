@@ -7,19 +7,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { themes, tokensToCssVars, type ThemeId } from '@ai-md-editor/theme';
 import type { TableContext } from '@ai-md-editor/editor';
-import { DEFAULT_SETTINGS, type MenuViewState } from '@ai-md-editor/shared';
+import { DEFAULT_SETTINGS, type MenuViewState, type ThemeMode } from '@ai-md-editor/shared';
 import { NO_TABLE_CONTEXT } from '../constants';
 
 /** useDisplayState 的入参 */
 interface UseDisplayStateOptions {
   /** 当前文档是否已关联磁盘路径（决定菜单项是否可用） */
   hasPath: boolean;
+  /** 自动保存间隔（毫秒，0 为关闭）；由 useTabs 管理，仅用于同步菜单勾选 */
+  autoSaveDelayMs: number;
+}
+
+/** 读取系统当前是否处于深色外观 */
+function systemPrefersDark(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
 /** 界面显示状态 hook */
-export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
+export function useDisplayState({ hasPath, autoSaveDelayMs }: UseDisplayStateOptions) {
   // ===== 主题与布局 =====
-  const [themeId, setThemeId] = useState<ThemeId>('light');
+  // 主题模式是唯一状态，实际生效的 themeId 由「跟随系统」+ 系统外观派生
+  const [themeMode, setThemeMode] = useState<ThemeMode>(DEFAULT_SETTINGS.themeMode);
+  const [systemDark, setSystemDark] = useState(systemPrefersDark);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarPanel, setSidebarPanel] = useState<'files' | 'outline'>('files');
   const [viewMode, setViewMode] = useState<'wysiwyg' | 'source'>('wysiwyg');
@@ -51,8 +60,20 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
   const alwaysOnTopRef = useRef(alwaysOnTop);
   alwaysOnTopRef.current = alwaysOnTop;
 
+  /** 实际生效的主题：显式选择直接用，跟随系统时看系统外观 */
+  const themeId: ThemeId = themeMode === 'system' ? (systemDark ? 'dark' : 'light') : themeMode;
   const tokens = themes[themeId];
   const cssVars = useMemo(() => tokensToCssVars(tokens), [tokens]);
+
+  // 跟随系统外观：系统切换浅色 / 深色时实时生效，不需要重启
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (event: MediaQueryListEvent): void => setSystemDark(event.matches);
+    setSystemDark(query.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
 
   // 启动时应用持久化设置（主题 / 侧栏 / 标签栏 / 工具栏 / 缩放）
   useEffect(() => {
@@ -61,7 +82,7 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
       // 读取失败时也放开落盘，但用默认值，避免界面卡在未初始化状态
       .catch(() => ({ ...DEFAULT_SETTINGS }))
       .then((settings) => {
-        setThemeId(settings.themeId);
+        setThemeMode(settings.themeMode);
         setSidebarOpen(settings.sidebarOpen);
         setSidebarPanel(settings.sidebarPanel);
         setTabbarVisible(settings.tabbarVisible);
@@ -78,6 +99,8 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
     if (!settingsReady) return;
     const timer = setTimeout(() => {
       void window.api.updateSettings({
+        themeMode,
+        // 同时写入实际生效主题，旧版本读回时不会退回错误的明暗
         themeId,
         sidebarOpen,
         sidebarPanel,
@@ -87,7 +110,7 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
       });
     }, 300);
     return () => clearTimeout(timer);
-  }, [settingsReady, themeId, sidebarOpen, sidebarPanel, tabbarVisible, toolbarVisible, zoomPercent]);
+  }, [settingsReady, themeMode, themeId, sidebarOpen, sidebarPanel, tabbarVisible, toolbarVisible, zoomPercent]);
 
   // 应用主题到 <html>，保证全局 CSS 变量生效
   useEffect(() => {
@@ -145,18 +168,21 @@ export function useDisplayState({ hasPath }: UseDisplayStateOptions) {
       hasPath,
       inTable: tableContext.inTable,
       inTableHeader: tableContext.inHeader,
-      zoomPercent
+      zoomPercent,
+      themeMode,
+      autoSaveDelayMs
     };
     window.api.updateMenuState(state);
   }, [
     tabbarVisible, viewMode, readOnly, focusMode, toolbarVisible,
     sidebarOpen, sidebarPanel, wordCountVisible, outlineWindowVisible, alwaysOnTop,
-    fullscreen, hasPath, tableContext, zoomPercent
+    fullscreen, hasPath, tableContext, zoomPercent, themeMode, autoSaveDelayMs
   ]);
 
   return {
+    themeMode,
+    setThemeMode,
     themeId,
-    setThemeId,
     sidebarOpen,
     setSidebarOpen,
     sidebarPanel,

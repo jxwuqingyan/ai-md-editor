@@ -733,7 +733,10 @@ async function runTests() {
   }
 
   // 写入一份「非默认」偏好，再开新窗口，验证渲染层启动时会读取并应用
-  await exec(`window.api.updateSettings({ themeId: 'dark', toolbarVisible: false, zoomPercent: 125 })`);
+  // themeMode 是权威字段，themeId 只是给旧版本读的镜像
+  await exec(
+    `window.api.updateSettings({ themeMode: 'dark', themeId: 'dark', toolbarVisible: false, zoomPercent: 125 })`
+  );
   const before = BrowserWindow.getAllWindows().length;
   menuAction('file:new-window');
   const second = await waitFor(
@@ -1036,20 +1039,40 @@ async function runTests() {
     label: '重新打开测试根目录'
   });
 
-  // 主题按钮单击直接在浅色/深色之间切换
-  const themeBefore = await exec(`document.documentElement.getAttribute('data-theme')`);
+  // 主题按钮在「浅色 → 深色 → 跟随系统」之间循环（预置设置是浅色）
+  const themeButtonTitle = () => exec(`document.querySelector('.tabbar-actions button').title`);
+  const titleAtStart = await themeButtonTitle();
+  check('主题按钮提示当前为浅色', titleAtStart.includes('主题：浅色'), titleAtStart);
+
   await exec(`document.querySelector('.tabbar-actions button').click()`);
-  const themeAfterOnce = await waitFor(
-    () => exec(`document.documentElement.getAttribute('data-theme')`).then((v) => (v !== themeBefore ? v : null)),
-    { label: '主题单击切换' }
+  const darkState = await waitFor(
+    () =>
+      Promise.all([exec(`document.documentElement.getAttribute('data-theme')`), themeButtonTitle()]).then(
+        ([theme, title]) => (title.includes('主题：深色') ? `${theme}|${title}` : null)
+      ),
+    { label: '切换到深色' }
   ).catch(() => null);
-  check('主题按钮单击即切换主题', themeAfterOnce !== null, `${themeBefore} -> ${themeAfterOnce}`);
+  check('主题按钮第一次点击切到深色', darkState !== null && darkState.startsWith('dark|'), String(darkState));
+
   await exec(`document.querySelector('.tabbar-actions button').click()`);
-  const themeBack = await waitFor(
-    () => exec(`document.documentElement.getAttribute('data-theme')`).then((v) => (v === themeBefore ? v : null)),
-    { label: '主题再切回来' }
+  const systemTitle = await waitFor(
+    () => themeButtonTitle().then((title) => (title.includes('主题：跟随系统') ? title : null)),
+    { label: '切换到跟随系统' }
   ).catch(() => null);
-  check('主题按钮再次单击切回原主题', themeBack === themeBefore, `theme=${themeBack}`);
+  // 跟随系统时实际主题必须与系统外观一致
+  const systemThemeOk = await exec(
+    `(() => { const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      return document.documentElement.getAttribute('data-theme') === (dark ? 'dark' : 'light'); })()`
+  );
+  check('主题按钮第二次点击切到跟随系统且外观与系统一致', systemTitle !== null && systemThemeOk === true, `${systemTitle} match=${systemThemeOk}`);
+
+  await exec(`document.querySelector('.tabbar-actions button').click()`);
+  const backTitle = await waitFor(
+    () => themeButtonTitle().then((title) => (title.includes('主题：浅色') ? title : null)),
+    { label: '循环回浅色' }
+  ).catch(() => null);
+  const themeBack = await exec(`document.documentElement.getAttribute('data-theme')`);
+  check('主题按钮第三次点击循环回浅色', backTitle !== null && themeBack === 'light', `${backTitle} theme=${themeBack}`);
 
   // 段落菜单不再包含 YAML Front Matter
   const appMenu = Menu.getApplicationMenu();
@@ -3756,6 +3779,134 @@ async function runTests() {
     label: '主进程日志生成'
   }).catch(() => null);
   check('主进程日志写入日志目录', typeof logReady === 'string' && logReady.includes('应用启动'), `log=${logFile}`);
+
+  // ===== 18. 标签右键菜单 / 恢复关闭的标签 / 自动保存开关 =====
+  // 单开一个窗口做破坏性用例（批量关闭），不影响主窗口前面用例留下的标签
+  const knownWindowIds = new Set(BrowserWindow.getAllWindows().map((item) => item.id));
+  menuAction('file:new-window');
+  const ctxWin = await waitFor(
+    () =>
+      BrowserWindow.getAllWindows().find((item) => !item.isDestroyed() && !knownWindowIds.has(item.id)) ?? null,
+    { label: '标签菜单测试窗口', timeout: 20000 }
+  );
+  const winAction = (target, action, payload) => {
+    target.webContents.send('menu:action', payload === undefined ? { action } : { action, payload });
+  };
+  await waitFor(() => execIn(ctxWin, `Boolean(document.querySelector('.app'))`), {
+    label: '标签菜单测试窗口渲染',
+    timeout: 20000
+  });
+  // 等会话把上次的文档恢复完，避免恢复中的标签与右键操作竞争
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+
+  const ctxFiles = ['ctx-a.md', 'ctx-b.md', 'ctx-c.md'];
+  for (const name of ctxFiles) {
+    const filePath = join(root, name);
+    writeFileSync(filePath, `# ${name}\n\n正文\n`, 'utf-8');
+    winAction(ctxWin, 'file:open-recent-path', filePath);
+    await waitFor(
+      () => execIn(ctxWin, `[...document.querySelectorAll('.tab-name')].some((el) => el.textContent === ${JSON.stringify(name)})`),
+      { label: `打开 ${name}`, timeout: 15000 }
+    );
+  }
+
+  // 右键中间那个标签：菜单要能弹出并包含批量关闭项
+  const contextOpened = await execIn(
+    ctxWin,
+    `(() => {
+      const tab = [...document.querySelectorAll('.tab')].find((el) => el.textContent.includes('ctx-b.md'));
+      if (!tab) return false;
+      const rect = tab.getBoundingClientRect();
+      tab.dispatchEvent(new MouseEvent('contextmenu', {
+        bubbles: true, cancelable: true,
+        clientX: Math.round(rect.left + 10), clientY: Math.round(rect.top + rect.height / 2)
+      }));
+      return true;
+    })()`
+  );
+  await waitFor(() => execIn(ctxWin, `Boolean(document.querySelector('.tab-context-menu'))`), {
+    label: '标签右键菜单弹出'
+  }).catch(() => undefined);
+  const ctxLabels = await execIn(
+    ctxWin,
+    `[...document.querySelectorAll('.tab-context-item')].map((el) => el.querySelector('span')?.textContent ?? '')`
+  );
+  const ctxLabelsOk =
+    contextOpened === true &&
+    ['关闭', '关闭其他标签', '关闭左侧标签', '关闭右侧标签', '复制文件路径', '复制文件名', '在文件管理器中显示'].every(
+      (label) => ctxLabels.includes(label)
+    );
+  check('标签右键菜单包含批量关闭与复制项', ctxLabelsOk, JSON.stringify(ctxLabels));
+
+  // 关闭其他：只剩被右键的那个，且它成为活动标签
+  await execIn(
+    ctxWin,
+    `[...document.querySelectorAll('.tab-context-item')].find((el) => el.textContent.includes('关闭其他标签')).click()`
+  );
+  const afterCloseOthers = await waitFor(
+    () =>
+      execIn(
+        ctxWin,
+        `(() => {
+          const tabs = [...document.querySelectorAll('.tab')];
+          return tabs.length === 1 ? tabs[0].querySelector('.tab-name').textContent : null;
+        })()`
+      ),
+    { label: '关闭其他标签', timeout: 15000 }
+  ).catch(() => null);
+  check('关闭其他标签后只剩被右键的标签', afterCloseOthers === 'ctx-b.md', String(afterCloseOthers));
+
+  // 关闭后能用「重新打开关闭的标签」找回
+  winAction(ctxWin, 'file:close-tab');
+  await waitFor(() => execIn(ctxWin, `document.querySelectorAll('.tab').length === 1`), {
+    label: '关闭 ctx-b 标签',
+    timeout: 15000
+  });
+  winAction(ctxWin, 'file:reopen-closed-tab');
+  const reopened = await waitFor(
+    () =>
+      execIn(
+        ctxWin,
+        `(() => {
+          const names = [...document.querySelectorAll('.tab-name')].map((el) => el.textContent);
+          return names.includes('ctx-b.md') ? names.join('|') : null;
+        })()`
+      ),
+    { label: '重新打开关闭的标签', timeout: 15000 }
+  ).catch(() => null);
+  check('重新打开关闭的标签恢复原文档', typeof reopened === 'string' && reopened.includes('ctx-b.md'), String(reopened));
+
+  // 自动保存开关：关掉后编辑不落盘，恢复后按间隔写盘
+  const autoSwitchPath = join(root, 'auto-switch.md');
+  writeFileSync(autoSwitchPath, '# 开关\n\n原始内容\n', 'utf-8');
+  winAction(ctxWin, 'file:open-recent-path', autoSwitchPath);
+  await waitFor(
+    () => execIn(ctxWin, `document.querySelector('.tab-active .tab-name')?.textContent === 'auto-switch.md'`),
+    { label: '打开自动保存开关用例', timeout: 15000 }
+  );
+  winAction(ctxWin, 'file:set-auto-save', '0');
+  winAction(ctxWin, 'view:toggle-mode');
+  await waitFor(() => execIn(ctxWin, `Boolean(document.querySelector('.source-editor'))`), { label: '切到源码模式' });
+  await execIn(ctxWin, SET_TEXTAREA);
+  await execIn(ctxWin, `window.__setSource('# 开关\\n\\n关闭后不该落盘\\n')`);
+  await new Promise((resolve) => setTimeout(resolve, 2400));
+  const offDisk = readFileSync(autoSwitchPath, 'utf-8');
+  check('关闭自动保存后编辑不写盘', offDisk.includes('原始内容'), JSON.stringify(offDisk));
+
+  winAction(ctxWin, 'file:set-auto-save', '1500');
+  const onDisk = await waitFor(
+    () => {
+      const text = readFileSync(autoSwitchPath, 'utf-8');
+      return text.includes('关闭后不该落盘') ? text : null;
+    },
+    { label: '恢复自动保存后写盘', timeout: 8000 }
+  ).catch(() => null);
+  check('恢复自动保存后按间隔写盘', onDisk !== null, String(onDisk));
+
+  // 收尾：关掉测试窗口，别让它留在 Dock / 任务栏上
+  ctxWin.close();
+  await waitFor(() => (ctxWin.isDestroyed() ? true : null), { label: '关闭标签菜单测试窗口', timeout: 15000 });
+
 
 }
 
