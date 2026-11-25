@@ -441,6 +441,29 @@ async function runTests() {
     JSON.stringify(sourceColDeleted)
   );
 
+  // 工具栏行列网格在源码模式也要按所选行列插入（旧实现写死 3 列 3 行）
+  await exec(`window.__setSource('', 0)`);
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  await exec(`(() => {
+    const btn = [...document.querySelectorAll('.toolbar .tb-btn')].find((b) => b.title === '表格（点击选择行列）');
+    if (!btn) return false;
+    btn.click();
+    return true;
+  })()`);
+  await waitFor(() => exec(`Boolean(document.querySelector('.tb-table-pick'))`), {
+    label: '源码模式表格网格展开'
+  });
+  await exec(`document.querySelector('.tb-table-pick-cell[aria-label="2 行 4 列"]')?.click()`);
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const sourcePickedTable = String((await exec(READ_SOURCE)) ?? '').trim();
+  const pickedLines = sourcePickedTable.split('\n');
+  const pickedPipes = pickedLines.map((line) => (line.match(/\|/g) ?? []).length);
+  check(
+    '源码模式按表格网格选择插入 2 行 × 4 列',
+    pickedLines.length === 3 && pickedPipes.every((count) => count === 5),
+    JSON.stringify(sourcePickedTable)
+  );
+
   // ===== 4. 源码撤销栈：连续键入合并 =====
   // 先停顿超过合并窗口，模拟一段新的输入
   await new Promise((resolve) => setTimeout(resolve, 800));
@@ -2794,12 +2817,40 @@ async function runTests() {
   );
   check('原生菜单行内代码在空选区下可用（输入即带代码样式）', String(inlineCodes).includes('abc'), String(inlineCodes));
 
-  // 表格：默认 3 行 × 3 列（表头 + 两行数据）
+  // 表格：点按钮先弹行列网格（与斜杠菜单一致），不再默认插 3×3
   await resetDoc('工具栏表格\n');
   await caretToLastParagraph();
-  check('表格按钮存在且可点', (await clickToolbar('表格（3 行 × 3 列）')) === true);
+  const docBeforePick = String(await exec(`document.querySelector('.ProseMirror')?.innerHTML ?? ''`));
+  check('表格按钮存在且可点', (await clickToolbar('表格（点击选择行列）')) === true);
+  await waitFor(() => exec(`Boolean(document.querySelector('.tb-table-pick'))`), {
+    label: '工具栏表格行列网格展开'
+  });
+  const pickCells = Number(await exec(`document.querySelectorAll('.tb-table-pick-cell').length`));
+  check('表格网格为 8 列 × 6 行', pickCells === 48, `cells=${pickCells}`);
+  // 只点开网格不能插入任何东西（旧行为是直接插一张 3×3）
+  const docAfterPickOpen = String(await exec(`document.querySelector('.ProseMirror')?.innerHTML ?? ''`));
+  check(
+    '打开行列网格本身不插入表格',
+    docAfterPickOpen === docBeforePick && !docAfterPickOpen.includes('<table'),
+    `hasTable=${docAfterPickOpen.includes('<table')}`
+  );
+  // 悬停到「2 行 5 列」：高亮区域与底部文案同步
+  await exec(`(() => {
+    const cell = document.querySelector('.tb-table-pick-cell[aria-label="2 行 5 列"]');
+    if (!cell) return false;
+    cell.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, relatedTarget: document.body }));
+    return true;
+  })()`);
+  const pickLabel = await waitFor(
+    () =>
+      exec(`document.querySelector('.tb-table-pick-label')?.textContent`)
+        .then((v) => (v === '2 行 × 5 列' ? v : null)),
+    { label: '表格网格文案跟随悬停' }
+  ).catch(() => null);
+  check('滑过网格时显示所选行列', pickLabel === '2 行 × 5 列', `label=${pickLabel}`);
+  await exec(`document.querySelector('.tb-table-pick-cell[aria-label="2 行 5 列"]')?.click()`);
   await waitFor(() => exec(`Boolean(document.querySelector('.ProseMirror table'))`), {
-    label: '工具栏插入表格',
+    label: '工具栏按所选行列插入表格',
     timeout: 12000
   });
   const tbShape = JSON.parse(
@@ -2807,11 +2858,16 @@ async function runTests() {
       const table = document.querySelector('.ProseMirror table');
       return JSON.stringify({
         rows: table.querySelectorAll('tr').length,
-        cols: table.querySelectorAll('tr:first-child th, tr:first-child td').length
+        cols: table.querySelectorAll('tr:first-child th, tr:first-child td').length,
+        pickOpen: Boolean(document.querySelector('.tb-table-pick'))
       });
     })()`)
   );
-  check('工具栏表格默认 3 行 × 3 列', tbShape.rows === 3 && tbShape.cols === 3, JSON.stringify(tbShape));
+  check(
+    '工具栏按网格选择插入 2 行 × 5 列并收起网格',
+    tbShape.rows === 2 && tbShape.cols === 5 && tbShape.pickOpen === false,
+    JSON.stringify(tbShape)
+  );
 
   // 公式：块级公式片段应渲染成 KaTeX，而不是一串源码文本
   await resetDoc('工具栏公式\n');
@@ -3196,6 +3252,37 @@ async function runTests() {
     '选中整列后鼠标移开手柄仍保持显示',
     keepState.col === true && keepState.row === true && keepState.corner === true,
     JSON.stringify(keepState)
+  );
+
+  // 整表选中时左上角不能有缺口：角手柄自己收左上圆角，紧邻的第一列 / 第一行手柄必须保持直角，
+  // 两者交界要严丝合缝（之前第一列手柄也带了左上圆角，实色手柄带上露出一块白色小缺口）
+  const cornerSeam = JSON.parse(
+    await exec(`(() => {
+      const corner = document.querySelector('.md-table-block .md-table-corner');
+      const firstCol = document.querySelector('.md-table-col-bar .md-table-col-handle');
+      const firstRow = document.querySelector('.md-table-row-bar .md-table-row-handle');
+      if (!corner || !firstCol || !firstRow) return JSON.stringify({ missing: true });
+      const c = corner.getBoundingClientRect();
+      const col = firstCol.getBoundingClientRect();
+      const row = firstRow.getBoundingClientRect();
+      return JSON.stringify({
+        cornerRadius: getComputedStyle(corner).borderTopLeftRadius,
+        colRadius: getComputedStyle(firstCol).borderTopLeftRadius,
+        rowRadius: getComputedStyle(firstRow).borderTopLeftRadius,
+        seamX: Math.round((col.left - c.right) * 10) / 10,
+        seamY: Math.round((row.top - c.bottom) * 10) / 10
+      });
+    })()`)
+  );
+  check(
+    '整表选中时左上角无缺口（角手柄收圆角、第一列手柄直角且无缝）',
+    cornerSeam.missing !== true &&
+      cornerSeam.cornerRadius === '4px' &&
+      cornerSeam.colRadius === '0px' &&
+      cornerSeam.rowRadius === '0px' &&
+      Math.abs(cornerSeam.seamX) <= 1 &&
+      Math.abs(cornerSeam.seamY) <= 1,
+    JSON.stringify(cornerSeam)
   );
 
   check('可点击第 1 列手柄', (await clickTableHandle('col', 0)) === true);

@@ -8,7 +8,7 @@
 
 ### 斜杠快速插入
 
-正文里敲一个 `/` 就能唤起插入菜单，中文名或拼音缩写都能过滤。表格直接在菜单里扫选行列数，链接展开「文字 + 地址」表单，图片走系统文件选择器并自动存到文档同级 `img/`；常驻条目会记住最近使用。
+正文里敲一个 `/` 就能唤起插入菜单，中文名或拼音缩写都能过滤。表格直接在菜单里扫选行列数，链接展开「文字 + 地址」表单，图片走系统文件选择器并自动存到文档同级 `img/`；常驻条目会记住最近使用。底部工具栏的表格按钮走同一套行列网格，选几行几列就插几行几列。
 
 ![斜杠菜单](./docs/assets/readme-slash.png)
 
@@ -63,7 +63,7 @@ cd ../..
 bash scripts/make-dmg.sh <版本号> arm64
 ```
 
-产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。为节省 Actions 额度（私有仓库 2000 分钟/月，macOS runner 10 倍计费），CI 策略是：push / PR 只跑测试，打 `v*` tag 或手动触发才三平台打包并传 Release。当前版本 0.14.40，GitHub Actions 因账号计费暂停，三平台 Release 待恢复；本地包为 ad-hoc 签名、未公证，首次打开请右键→打开。
+产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。为节省 Actions 额度（私有仓库 2000 分钟/月，macOS runner 10 倍计费），CI 策略是：push / PR 只跑测试，打 `v*` tag 或手动触发才三平台打包并传 Release。当前版本 0.14.41，GitHub Actions 因账号计费暂停，三平台 Release 待恢复；本地包为 ad-hoc 签名、未公证，首次打开请右键→打开。
 
 ## 版本与文档
 

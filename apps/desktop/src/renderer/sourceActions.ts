@@ -311,8 +311,17 @@ export function sourceTableContext(content: string, caret: number): TableContext
   return { inTable: true, inHeader: isTableSeparator(block.lines[1]) && rowIndex === 0 };
 }
 
-/** 3×3 表格片段 */
-const TABLE_SNIPPET = '\n| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |\n';
+/**
+ * 表格片段：cols × rows（含表头与分隔行）。
+ * 与 WYSIWYG 侧 buildTableSnippet 的产出一致，工具栏行列网格与斜杠菜单共用同一 payload。
+ */
+function buildTableSnippet(cols: number, rows: number): string {
+  const header = `| ${Array.from({ length: cols }, (_, i) => `列 ${i + 1}`).join(' | ')} |`;
+  const separator = `| ${Array.from({ length: cols }, () => '---').join(' | ')} |`;
+  const emptyRow = `| ${Array.from({ length: cols }, () => '').join(' | ')} |`;
+  const body = Array.from({ length: Math.max(0, rows - 1) }, () => emptyRow);
+  return ['\n' + header, separator, ...body].join('\n') + '\n';
+}
 
 /** 源码模式的统一格式化分发 */
 export function applySourceFormat(
@@ -387,8 +396,13 @@ export function applySourceFormat(
       return insert(ctx, '\n---\n');
     case 'hardBreak':
       return insert(ctx, '  \n');
-    case 'insertTable':
-      return insert(ctx, TABLE_SNIPPET);
+    case 'insertTable': {
+      // 行列网格带 '列数x行数'（如 '5x2'）；无 payload 时沿用默认 3×3
+      const size = typeof payload === 'string' ? /^(\d+)x(\d+)$/.exec(payload) : null;
+      const cols = size ? Math.min(10, Math.max(1, Number(size[1]))) : 3;
+      const rows = size ? Math.min(20, Math.max(1, Number(size[2]))) : 3;
+      return insert(ctx, buildTableSnippet(cols, rows));
+    }
     case 'tableAddRow':
       return tableLineOperation(ctx, 'addRow');
     case 'tableAddCol':

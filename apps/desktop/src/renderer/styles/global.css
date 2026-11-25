@@ -1410,11 +1410,10 @@ button:focus-visible {
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.05);
 }
 
-/* 手柄带两端收圆角，与表格外框的圆角观感一致 */
-.md-table-col-bar .md-table-col-handle:first-child {
-  border-top-left-radius: 4px;
-}
-
+/* 手柄带只在外侧两端收圆角，与表格外框的圆角观感一致。
+   左上角由 .md-table-corner 自己收圆（4px 0 0 0），第一列手柄必须保持直角：
+   两者相邻，若第一列手柄也带左上圆角，交界的直角边与圆弧之间会露出一块白色缺口
+   （整表选中、手柄带变成实色时最明显）。 */
 .md-table-col-bar .md-table-col-handle:last-child {
   border-top-right-radius: 4px;
 }
@@ -1635,6 +1634,57 @@ button:focus-visible {
 .tb-menu-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+/* 表格行列网格：观感与斜杠菜单的二级网格一致，锚在按钮上方并向右收起，
+   避免靠右的按钮把面板顶出窗口 */
+.tb-table-pick {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  padding: 8px 10px 9px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  z-index: 60;
+}
+
+.tb-table-pick-title {
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  user-select: none;
+}
+
+.tb-table-pick-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 16px);
+  grid-auto-rows: 16px;
+  gap: 3px;
+}
+
+.tb-table-pick-cell {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 2.5px;
+  background: var(--bg-panel);
+  cursor: pointer;
+  transition: background 120ms var(--ease-out), border-color 120ms var(--ease-out);
+}
+
+.tb-table-pick-cell.is-on {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+}
+
+.tb-table-pick-label {
+  margin-top: 7px;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
 }
 
 /* 工具栏链接表单（复用 slash-form 字段样式，锚在链接按钮上方） */

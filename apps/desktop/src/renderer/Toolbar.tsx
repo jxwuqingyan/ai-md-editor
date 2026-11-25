@@ -35,6 +35,15 @@ const CALLOUT_OPTIONS: { label: string; kind: string }[] = [
   { label: 'CAUTION 注意', kind: 'CAUTION' }
 ];
 
+/**
+ * 表格行列网格的规模，与斜杠菜单的二级网格保持一致（8 列 × 6 行）。
+ * 两处上限必须相同：同一个 insertTable 命令会再夹一次（10 列 / 20 行）。
+ */
+const TABLE_PICK_MAX_COLS = 8;
+const TABLE_PICK_MAX_ROWS = 6;
+/** 打开网格时的默认高亮规模（与斜杠菜单一致，但只有点格子才会插入） */
+const TABLE_PICK_DEFAULT = { rows: 3, cols: 3 };
+
 /** 工具栏图标名称 */
 type ToolbarIcon =
   | 'code' | 'link' | 'image' | 'quote' | 'bulletList' | 'orderedList'
@@ -77,6 +86,10 @@ export default function Toolbar({
   const [paraOpen, setParaOpen] = useState(false);
   // 警告框类型下拉展开状态
   const [calloutOpen, setCalloutOpen] = useState(false);
+  // 表格行列网格展开状态（与斜杠菜单一致：先选行列再插入，不再默认插 3×3）
+  const [tableOpen, setTableOpen] = useState(false);
+  // 网格里当前悬停到的行列（决定高亮区域与底部文案）
+  const [tableSize, setTableSize] = useState(TABLE_PICK_DEFAULT);
   // 链接表单展开状态
   const [linkOpen, setLinkOpen] = useState(false);
   // 链接表单内容
@@ -93,12 +106,26 @@ export default function Toolbar({
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setParaOpen(false);
         setCalloutOpen(false);
+        setTableOpen(false);
         setLinkOpen(false);
       }
     };
     window.addEventListener('mousedown', onDown);
     return () => window.removeEventListener('mousedown', onDown);
   }, []);
+
+  // Esc 收起表格网格（网格里没有输入框，键盘只需要这一个出口）
+  useEffect(() => {
+    if (!tableOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setTableOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tableOpen]);
 
   // 打开链接表单时聚焦文本框
   useEffect(() => {
@@ -117,6 +144,7 @@ export default function Toolbar({
   const apply = (action: FormatAction, payload?: number | string): void => {
     setParaOpen(false);
     setCalloutOpen(false);
+    setTableOpen(false);
     setLinkOpen(false);
     onFormat(action, payload);
   };
@@ -171,6 +199,7 @@ export default function Toolbar({
           onClick={() => {
             setParaOpen((v) => !v);
             setCalloutOpen(false);
+            setTableOpen(false);
             setLinkOpen(false);
           }}
         >
@@ -207,6 +236,7 @@ export default function Toolbar({
             setLinkOpen((v) => !v);
             setParaOpen(false);
             setCalloutOpen(false);
+            setTableOpen(false);
           }}
         >
           <ToolbarSvg name="link" />
@@ -258,6 +288,7 @@ export default function Toolbar({
         onClick={() => {
           setParaOpen(false);
           setCalloutOpen(false);
+          setTableOpen(false);
           setLinkOpen(false);
           onPickImage();
         }}
@@ -275,6 +306,7 @@ export default function Toolbar({
           onClick={() => {
             setCalloutOpen((v) => !v);
             setParaOpen(false);
+            setTableOpen(false);
             setLinkOpen(false);
           }}
         >
@@ -301,7 +333,51 @@ export default function Toolbar({
       {btn(<ToolbarSvg name="bulletList" />, '无序列表', 'bulletList')}
       {btn(<ToolbarSvg name="orderedList" />, '有序列表', 'orderedList')}
       {btn(<ToolbarSvg name="taskList" />, '任务列表', 'taskList')}
-      {btn(<ToolbarSvg name="table" />, '表格（3 行 × 3 列）', 'insertTable')}
+
+      {/* 表格：与斜杠菜单一致的行列网格，点哪格就插几行几列（不再固定 3×3） */}
+      <div className="tb-dd-wrap">
+        <button
+          className="tb-btn"
+          title="表格（点击选择行列）"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => {
+            setTableOpen((v) => !v);
+            setTableSize(TABLE_PICK_DEFAULT);
+            setParaOpen(false);
+            setCalloutOpen(false);
+            setLinkOpen(false);
+          }}
+        >
+          <ToolbarSvg name="table" />
+        </button>
+        {tableOpen && (
+          <div className="tb-table-pick" role="grid" aria-label="选择表格行列">
+            <div className="tb-table-pick-title">表格</div>
+            <div className="tb-table-pick-grid">
+              {Array.from({ length: TABLE_PICK_MAX_ROWS * TABLE_PICK_MAX_COLS }, (_, index) => {
+                const row = Math.floor(index / TABLE_PICK_MAX_COLS) + 1;
+                const col = (index % TABLE_PICK_MAX_COLS) + 1;
+                const on = row <= tableSize.rows && col <= tableSize.cols;
+                return (
+                  <i
+                    key={`${row}-${col}`}
+                    className={on ? 'tb-table-pick-cell is-on' : 'tb-table-pick-cell'}
+                    role="gridcell"
+                    aria-label={`${row} 行 ${col} 列`}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onMouseEnter={() => setTableSize({ rows: row, cols: col })}
+                    onClick={() => apply('insertTable', `${col}x${row}`)}
+                  />
+                );
+              })}
+            </div>
+            <div className="tb-table-pick-label">
+              {tableSize.rows} 行 × {tableSize.cols} 列
+            </div>
+          </div>
+        )}
+      </div>
+
       {btn(<ToolbarSvg name="formula" />, '公式', 'snippet', '$$\nE = mc^2\n$$')}
       {btn(<ToolbarSvg name="hr" />, '分割线', 'hr')}
     </div>
