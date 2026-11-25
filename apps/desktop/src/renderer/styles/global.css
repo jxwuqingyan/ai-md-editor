@@ -976,7 +976,7 @@ button:focus-visible {
   outline: none;
 }
 
-/* 源码模式编辑器：等宽字体，占满编辑区 */
+/* 源码模式编辑器：等宽字体 */
 .source-editor {
   width: 100%;
   min-height: 60vh;
@@ -990,6 +990,25 @@ button:focus-visible {
   color: var(--text-primary);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/*
+ * 源码模式的容器：textarea 自己承担滚动，必须撑满可视区。
+ * 不能沿用 WYSIWYG 那套「min-height: 60vh + 底部 96px 呼吸留白」——
+ * 60vh 把高度写死、96px 又是给滚动到底的渲染视图留的，两者叠加会在内容
+ * 下方空出近三分之一屏（实测 667px 编辑区里空了 182px），看起来像渲染缺了一块。
+ */
+.editor-inner--source {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  box-sizing: border-box;
+  padding-bottom: 24px;
+}
+
+.editor-inner--source .source-editor {
+  flex: 1;
+  min-height: 0;
 }
 
 /* ProseMirror 可编辑内容区：贴合设计规范的排版 */

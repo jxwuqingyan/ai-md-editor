@@ -325,6 +325,33 @@ async function runTests() {
 
   menuAction('view:toggle-mode');
   await waitFor(() => exec(`Boolean(document.querySelector('.source-editor'))`), { label: '源码模式' });
+
+  // 源码模式的 textarea 必须撑满编辑区：它曾经沿用 WYSIWYG 的 min-height: 60vh
+  // 加容器 96px 底部呼吸留白，内容下方会空出近三分之一屏（实测 667px 里空 182px）。
+  const sourceLayout = await exec(`(() => {
+    const ta = document.querySelector('.source-editor');
+    const inner = ta && ta.closest('.editor-inner');
+    const scroll = ta && ta.closest('.editor-scroll');
+    if (!ta || !inner || !scroll) return null;
+    const ir = inner.getBoundingClientRect();
+    const tr = ta.getBoundingClientRect();
+    const sr = scroll.getBoundingClientRect();
+    return {
+      fillRatio: Number((tr.height / sr.height).toFixed(3)),
+      gapBelow: Math.round(ir.bottom - tr.bottom),
+      overflowBelow: Math.round(sr.bottom - ir.bottom),
+      padBottom: getComputedStyle(inner).paddingBottom
+    };
+  })()`);
+  check(
+    '源码模式编辑器撑满编辑区，内容下方无多余留白',
+    Boolean(sourceLayout) &&
+      sourceLayout.fillRatio > 0.9 &&
+      sourceLayout.gapBelow <= 32 &&
+      sourceLayout.overflowBelow <= 1,
+    JSON.stringify(sourceLayout)
+  );
+
   await exec(SET_TEXTAREA);
   await exec(`window.__setSource(${JSON.stringify(TABLE_DOC)}, 0)`);
   await new Promise((resolve) => setTimeout(resolve, 200));
@@ -1029,17 +1056,27 @@ async function runTests() {
   );
   const beforeRestore = BrowserWindow.getAllWindows().length;
   menuAction('file:new-window');
+  // 超时给到 30s：CI 上多窗口冷启动 + 读盘偶尔吃掉 20s，曾整条流水线因此变红
   const restoredWin = await waitFor(
     () => BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed() && candidate !== win) ?? null,
-    { label: '会话恢复窗口创建', timeout: 20000 }
+    { label: '会话恢复窗口创建', timeout: 30000 }
   );
   const restoredTab = await waitFor(
     () =>
       execIn(restoredWin, `document.querySelector('.tab .tab-name')?.textContent ?? ''`).then((name) =>
         name === 'external.md' ? name : null
       ),
-    { label: '恢复上次打开的标签', timeout: 20000 }
-  ).catch(() => '');
+    { label: '恢复上次打开的标签', timeout: 30000 }
+  ).catch(async () => {
+    // 超时别再只留一个空字符串，把新窗口的实际状态带出来，下次抖动可直接定位
+    const diag = await execIn(
+      restoredWin,
+      `JSON.stringify({ tabs: document.querySelectorAll('.tab').length,
+         first: document.querySelector('.tab .tab-name')?.textContent ?? '',
+         body: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 100) })`
+    ).catch(() => 'diag-unavailable');
+    return `timeout:${diag}`;
+  });
   check('会话恢复重新打开上次的文档', restoredTab === 'external.md', `tab=${restoredTab}`);
   const restoreNotice = await execIn(
     restoredWin,

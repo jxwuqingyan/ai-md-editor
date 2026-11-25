@@ -898,7 +898,7 @@ export default function App(): JSX.Element {
           )}
           {/* 滚动容器：内容在其内部滚动，工具栏固定在下方，不与内容重叠 */}
           <div className="editor-scroll">
-            <div className="editor-inner">
+            <div className={`editor-inner${viewMode === 'source' ? ' editor-inner--source' : ''}`}>
               {viewMode === 'wysiwyg' ? (
                 <MarkdownEditor
                   initialValue={activeTab?.content ?? ''}

@@ -1,11 +1,10 @@
 name: Build
 
 on:
+  # 只在打 v* tag（正式发版）时自动触发。push 到 main 不触发任何 job——
+  # 日常改动的验证靠本地 npm test，避免每个提交都占一份并发的运行记录。
   push:
-    branches: [main]
     tags: ['v*']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       targets:
@@ -24,8 +23,8 @@ permissions:
 
 jobs:
   # 打包目标由这里统一算出来，build job 只负责消费矩阵。
-  # 省 Actions 额度（GitHub Free 私有仓库每月 $12 计算额度，macOS 单价约 $0.062/分钟，
-  # 约合 193 分钟 macOS）：push / PR 只跑测试，打包只在 v* tag 或手动触发时运行；
+  # 触发面收窄到「打 v* tag」与手动 workflow_dispatch：push 到 main 不跑任何 job，
+  # 日常改动的验证交给本地 npm test，避免同一份提交在 main 与 tag 上各跑一遍。
   # 默认不打 macOS x64（Intel）—— 它最贵又最少用，需要时用 workflow_dispatch 选 all。
   plan:
     name: 计算打包矩阵

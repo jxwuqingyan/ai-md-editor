@@ -97,7 +97,7 @@ ai-md-editor/
 │   ├── markdown-core/        # 解析/序列化/大纲（纯函数）
 │   ├── theme/                # 主题系统（design tokens）
 │   └── shared/               # 跨进程共享类型（IPC 契约）+ 纯函数工具（text.ts：编码/路径/文本）
-├── .github/workflows/        # CI：push/PR 只跑测试；v* tag / 手动触发才打包（默认 arm64 + win x64）
+├── .github/workflows/        # CI：仅 v* tag / 手动触发时运行（push main 不触发）；默认 arm64 + win x64
 ├── docs/                     # 文档（技术方案、设计规范）
 └── package.json              # npm workspaces
 ```
@@ -167,7 +167,7 @@ ai-md-editor/
 | 6 | 视觉：现代极简，动效克制（CSS 过渡），去 AI 味 |
 | 7 | 包管理器：npm workspaces（已从 pnpm 迁移） |
 | 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
-| 9 | 分发：push/PR 只跑测试 job；打 `v*` tag 或手动触发才打包并传 Release，**默认只打 macOS arm64 + Windows x64**（0.14.42 起，macOS x64 改为手动 `targets=all` 才出）——私有仓库的计算额度是**按金额**计的（GitHub Free 约 $12/月，macOS 约 $0.062/分钟≈193 分钟），2026-11 就是被 macOS x64 打包烧穿的（36 次累计约 $7.3，占额度大半），此后只推 main、本地出 arm64 dmg，见 #58 与 #77 |
+| 9 | 分发：**只有打 `v*` tag 或手动 `workflow_dispatch` 才触发 CI**（1.0.0 起），push 到 main 不产生任何运行记录——日常改动的验证完全落在本地 `npm test` 上，提交前必须跑通；打 tag 时并行跑 test 与 build 并传 Release，**默认只打 macOS arm64 + Windows x64**（0.14.42 起，macOS x64 改为手动 `targets=all` 才出）——早期私有仓库的计算额度是**按金额**计的（GitHub Free 约 $12/月，macOS 约 $0.062/分钟≈193 分钟），2026-11 就是被 macOS x64 打包烧穿的（36 次累计约 $7.3，占额度大半），见 #58 与 #77 |
 | 10 | 顶部导航：macOS 原生应用菜单 + 标签栏右侧动作区，窗口内不保留独立功能顶栏 |
 | 11 | 原生菜单为「文件/编辑/段落/格式/显示/帮助」六组；主题走右上角按钮，不单独增加主题或窗口菜单。「帮助」目前只放 Markdown 语法示例入口，示例文档打开后应保持未修改 |
 | 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
@@ -240,6 +240,8 @@ ai-md-editor/
 | 76 | 工具栏「表格」是**行列网格**而不是一键插 3×3（0.14.41）：点按钮展开 8 列 × 6 行的格子（`TABLE_PICK_MAX_COLS/ROWS`，与斜杠菜单 `SUB_MAX_COLS/ROWS` 保持一致），悬停实时高亮并显示「N 行 × M 列」，点格子才发 `insertTable` + `` `${cols}x${rows}` ``；打开网格本身不得插入任何东西。payload 由 `instance.ts` 与 `sourceActions.ts` 各自解析（两处都要夹到 10 列 / 20 行，缺 payload 才退回 3×3），源码模式的片段生成与 WYSIWYG 的 `buildTableSnippet` 必须产出同样结构。面板挂 `.tb-dd-wrap` 内、`right: 0` + `bottom: calc(100% + 8px)`（表格按钮靠右，向右对齐才不会顶出窗口），格子用 `onMouseDown` preventDefault 保住 textarea 选区。手柄圆角同理：**外侧才收圆角**，角手柄 `4px 0 0 0`，紧邻的第一列 / 第一行手柄必须 0，否则整表选中时实色手柄带交界处会露白缺口 |
 | 77 | 打包矩阵要可切换、默认不打 macOS x64（0.14.42）：①`workflow_dispatch` 增加 `targets`（`default` / `mac-arm64` / `win-x64` / `all`），由 `plan` job 拼成矩阵 JSON 输出、`build` 用 `fromJSON(needs.plan.outputs.matrix)` 消费——矩阵只能有一个来源，别在 build 里再写死一份 `include`，否则开关改了也不生效；②tag 触发时 `inputs.targets` 为空，脚本里必须写成 `${TARGETS:-default}` 才不会产出空矩阵；③默认集合是 macOS arm64 + Windows x64：Intel 包单价与 arm64 相同但机器更慢（平均 3.3 分钟/次，arm64 1.1 分钟；本周期 36 次累计约 $7.3，占 $12 额度大半），只留手动 `targets=all` 备用；④加目标只需在 `case` 里加一个分支，`label` 同时用于 job 名与日志可读性 |
 | 78 | 版本号与发布 tag 必须强一致（1.0.0）：①同一版本号有 **5 处**（`package.json`、`apps/desktop/package.json`、`package-lock.json` 的 `version` / `packages[""]` / `packages["apps/desktop"]`）；安装包文件名 `${artifactName}`、`Info.plist` 的 `CFBundleShortVersionString`/`CFBundleVersion` 全由 `package.json` 派生，而 Release 标签来自 tag——**两条独立输入**，不校验就一定错位。②校验只有一份实现 `scripts/check-release-version.mjs`：本地 `npm run release:check -- v1.0.0`，CI 在 `plan` job 里用 `GITHUB_REF_NAME` 调同一个脚本（仅 tag 触发时执行）。③放在 `plan` 而不是 `build`：`plan` 是 `build` 的 `needs`，失败即不产出任何包，也避免两个平台 job 各校验一次。④`test:release` 用子进程当黑盒断言退出码（一致 / 错位 / 缺 `v` 前缀），并入 `npm test` 后每次测试都会顺带发现漏改。⑤**不要全局替换版本号**：`package-lock.json` 里 `assert-plus@1.0.0`、`at-least-node@1.0.0` 这类依赖天生就是 1.0.0，误改会破坏 lockfile |
+| 79 | 源码模式的 textarea 必须撑满编辑区（1.0.0）：`min-height: 60vh`（写死 60% 视口）+ 容器 `padding-bottom: 96px` + 容器不撑满，三者叠加会在内容下方空出 182px（667px 编辑区里占 27%），长文档还会被 textarea 内部滚动裁掉。做法：容器加 `.editor-inner--source`（`flex column` + `height: 100%` + 底部 padding 收到 24px），textarea `flex: 1; min-height: 0`，滚动交给 textarea 自己。**别给 textarea 用 vh 写死高度**，它要随查找栏开合与窗口缩放变化；WYSIWYG 的 96px 呼吸留白也不要沿用，那是给渲染视图滚动到底用的。E2E 断言 `fillRatio > 0.9 && gapBelow ≤ 32 && overflowBelow ≤ 1` |
+| 80 | CI 只在打 tag 时触发（1.0.0）：`on.push` 只留 `tags: ['v*']`，去掉 `branches: [main]` 与 `pull_request`。原因是一次发版会在 main 和 tag 上各跑一遍，main 那条只跑测试、不产出任何东西。代价是 push main 没有 CI 兜底，**提交前必须本地 `npm test` 通过**。手动 `workflow_dispatch` 保留（`targets` 开关要用），它不建 Release。配套把 E2E 会话恢复用例超时从 20s 提到 30s 并在超时分支输出窗口诊断——它正是卡在 20s 上把上一版发版判成失败的 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -345,7 +347,7 @@ ai-md-editor/
    - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号五处一致且 `npm run release:check` 通过（见第 9 节）。
    - 删除无用文件：构建临时配置（`electron.vite.config.*.mjs`）、`*.tsbuildinfo`、空的 `release/`、游离的测试产物与截屏、`.DS_Store`；`out/` 可整体重建后再构建，避免残留旧 chunk。
    - 全仓库检索确认无第三方产品名/品牌标识（含注释、界面示例文案、包描述）。
-4. **CI 打包**：`.github/workflows/build.yml` 中 push/PR 只跑测试（macOS 完整 `npm test` + Windows 单测/菜单校验）；打 `v*` tag 或手动 `workflow_dispatch` 才运行打包并传 Release。打包目标由 `plan` job 按 `targets` 输入生成矩阵：`default`（macOS arm64 + Windows x64）、`mac-arm64`、`win-x64`、`all`（额外出 macOS x64）；tag 触发等同 `default`。**tag 触发时 `plan` 先跑 `scripts/check-release-version.mjs` 校验 tag 与包版本一致**，不一致则 `build` 整体跳过（不产出错位 Release，也不白烧打包时间）。要 Intel 包时 `gh workflow run build.yml -f targets=all`，不要改回常驻三平台。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
+4. **CI 打包**：`.github/workflows/build.yml` 只在打 `v*` tag 或手动 `workflow_dispatch` 时运行——push 到 main 不触发任何 job，**所以提交前必须本地跑通 `npm test`，那是唯一的验证兜底**。tag 触发时 `test` 与 `build` 并行：前者跑 macOS 完整 `npm test` + Windows 单测/菜单校验，后者打包并传 Release。打包目标由 `plan` job 按 `targets` 输入生成矩阵：`default`（macOS arm64 + Windows x64）、`mac-arm64`、`win-x64`、`all`（额外出 macOS x64）；tag 触发等同 `default`。**tag 触发时 `plan` 先跑 `scripts/check-release-version.mjs` 校验 tag 与包版本一致**，不一致则 `build` 整体跳过（不产出错位 Release，也不白烧打包时间）。要 Intel 包时 `gh workflow run build.yml -f targets=all`，不要改回常驻三平台。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
 
 ## 14. 参考文档
 

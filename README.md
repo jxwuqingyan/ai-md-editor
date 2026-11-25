@@ -63,7 +63,9 @@ cd ../..
 bash scripts/make-dmg.sh <版本号> arm64
 ```
 
-产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。公开仓库使用 GitHub 托管 runner 不消耗额度；若转为私有仓库则按金额计（Free 约 $12/月，macOS 约 $0.062/分钟），届时仍应保持「push / PR 只跑测试，打 `v*` tag 或手动触发才打包」的策略。默认只打 **macOS arm64 + Windows x64**，需要 Intel 包时手动触发并选 `targets=all`：
+产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。
+
+CI 只在**打 `v*` tag**（或手动 `workflow_dispatch`）时触发，提交到 main 不产生运行记录——日常改动的验证靠本地 `npm test`。公开仓库使用 GitHub 托管 runner 不消耗额度。默认只打 **macOS arm64 + Windows x64**，需要 Intel 包时手动触发并选 `targets=all`：
 
 ```bash
 gh workflow run build.yml --ref main -f targets=all   # default / mac-arm64 / win-x64 / all
