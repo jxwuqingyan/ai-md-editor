@@ -20,14 +20,15 @@
 - **CI 前置拦截**：`plan` job 增加 checkout 与「校验 tag 与包版本一致」步骤（仅 tag 触发时执行）。`plan` 是 `build` 的 `needs`，校验失败则整个打包阶段跳过——不会出现「Release 标签写 1.0.1、附件却叫 1.0.0」这种错位发布，也不会白烧一次 macOS 打包。
 - **本地自检**：`npm run release:check -- v1.0.0`，打 tag 前跑一次即可；不带参数时取 HEAD 上的 `v*` tag，没有 tag 就只校验 5 处版本是否一致。
 - **自检纳入测试**：新增 `test:release`（`apps/desktop/test/checkReleaseVersion.cjs`），用子进程把脚本当黑盒跑四种输入——当前仓库一致、`v1.0.0` 通过、`v0.0.0` 拦下、缺 `v` 前缀拦下。已并入 `npm test`，此后任何一次测试都会顺带检查版本号有没有漏改。
-- **验证**：另在临时目录把 `packages["apps/desktop"].version` 改成 1.0.1，确认脚本能精确指出漏改的那一处；workflow YAML 解析通过，`plan` 步骤为「检出代码 → 校验 tag 与包版本一致 → 按触发方式与输入生成矩阵」，`build.needs` 仍为 `plan`。全套测试 354 项通过（单测 82、菜单 3、退出 5、发布校验 4、E2E 260）。
+- **验证**：另在临时目录把 `packages["apps/desktop"].version` 改成 1.0.1，确认脚本能精确指出漏改的那一处；workflow YAML 解析通过，`plan` 步骤为「检出代码 → 校验 tag 与包版本一致 → 按触发方式与输入生成矩阵」，`build.needs` 仍为 `plan`。全套测试 355 项通过（单测 82、菜单 3、退出 5、发布校验 4、E2E 261）。
 - **本地出包**：`MarkdownNote-1.0.0-arm64.dmg`（Apple Silicon，ad-hoc 签名、未公证），SHA-256 `70e626d69018bb15b3cbf05a80228a3d78ccc6f58130cbcb58e378fe869cbede`；`hdiutil verify` 通过、`lipo -archs` 为 arm64、`Info.plist` 版本 `1.0.0` / `1.0.0`，asar 内 416 个文件与 `apps/desktop/out` 逐字节一致。首次打开仍需「访达中右键→打开」。
 
 ### 构建：CI 只在打 tag 时触发
 
 - **触发面收窄**：`on.push` 只保留 `tags: ['v*']`，移除 `branches: [main]` 与 `pull_request`。此前打一次 tag 会留下两条运行记录（main 一条、tag 一条），main 那条只跑测试不产出任何东西；现在只有打 tag 才触发，日常提交到 main 不产生运行记录。
 - **手动打包仍可用**：`workflow_dispatch` 的 `targets` 开关保留（`default` / `mac-arm64` / `win-x64` / `all`），想只验证打包而不建 Release 时用它。
-- **代价与补偿**：push 到 main 不再有 CI 兜底，验证完全交给本地 `npm test`（354 项）。因此把 E2E 会话恢复用例的超时从 20s 提到 30s，并在超时分支打印新窗口的标签数、首个标签名与正文片段——上一版发版时它正是卡在 20s 超时上，把整条流水线判成失败，重跑才通过。
+- **代价与补偿**：push 到 main 不再有 CI 兜底，验证完全交给本地 `npm test`（355 项）。因此把 E2E 会话恢复用例的超时从 20s 提到 30s，并加了两道保险：①超时分支打印新窗口的标签数、首个标签名与正文片段，失败时能直接看出恢复成了什么；②注入 `lastSession` 前先等 500ms，让渲染层的会话上报防抖落地——**它会用主窗口真实的多标签会话覆盖测试注入的值**，本地时序恰好躲过，CI 上连续两次把发版判成失败。
+- **测试数**：E2E 261 项（新增「源码模式编辑器撑满编辑区」「会话注入未被渲染层上报覆盖」两条断言），全套 355 项。
 
 ## 0.14.42 - 2026-11-25
 

@@ -1051,9 +1051,24 @@ async function runTests() {
   check('原子写入不残留临时文件', leftoverTemp.length === 0, JSON.stringify(leftoverTemp));
 
   // ===== 14. 会话恢复：新窗口重新打开上次的文档 =====
-  await exec(
-    `window.api.updateSettings({ restoreSession: true, lastSession: { paths: [${JSON.stringify(extPath)}], activePath: ${JSON.stringify(extPath)} } })`
-  );
+  // 渲染层的会话上报带 500ms 防抖（见 useTabs），必须等它落地再注入。
+  // 否则那个排队中的定时器会用主窗口真实的多标签会话覆盖我们写进去的
+  // lastSession，新窗口就恢复成「主窗口那几个标签」而不是期望的单个文档
+  // ——本地时序恰好躲过，CI 上连续两次复现。
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  const injectedSession = `{ restoreSession: true, lastSession: { paths: [${JSON.stringify(extPath)}], activePath: ${JSON.stringify(extPath)} } }`;
+  const expectedPaths = JSON.stringify([extPath]);
+  let sessionApplied = '';
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    await exec(`window.api.updateSettings(${injectedSession})`);
+    sessionApplied = await exec(
+      `window.api.getSettings().then((s) => JSON.stringify(s.lastSession?.paths ?? []))`
+    );
+    if (sessionApplied === expectedPaths) break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  check('会话注入未被渲染层上报覆盖', sessionApplied === expectedPaths, `paths=${sessionApplied}`);
+
   const beforeRestore = BrowserWindow.getAllWindows().length;
   menuAction('file:new-window');
   // 超时给到 30s：CI 上多窗口冷启动 + 读盘偶尔吃掉 20s，曾整条流水线因此变红
