@@ -2,6 +2,20 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 1.0.0 - 2026-11-25
+
+> 首个正式版（GA）。此前的 0.6.x – 0.14.x 属于开发阶段，版本号只代表迭代次序；从 1.0.0 起进入语义化版本，文件格式与主要功能接口视为稳定。
+
+### 发布：版本号与 tag 强一致
+
+- **版本号统一到 1.0.0**：`package.json`、`apps/desktop/package.json`、`package-lock.json` 的 `version` / `packages[""].version` / `packages["apps/desktop"].version` 共 5 处同步。安装包文件名里的 `${version}`、`Info.plist` 的 `CFBundleShortVersionString` 与 `CFBundleVersion` 都由这一处派生，漏改任何一处都会让产物与 Release 标签对不上。
+- **新增 `scripts/check-release-version.mjs`**：一次校验两件事——①5 处版本号必须彼此一致（漏改 `package-lock` 是最常见的疏漏）；②`v*` tag 去掉前缀后必须与包版本完全相同，且 tag 必须以 `v` 开头（否则 `tags: ['v*']` 不会触发打包）。不通过时逐条列出实测值并以退出码 1 结束。
+- **CI 前置拦截**：`plan` job 增加 checkout 与「校验 tag 与包版本一致」步骤（仅 tag 触发时执行）。`plan` 是 `build` 的 `needs`，校验失败则整个打包阶段跳过——不会出现「Release 标签写 1.0.1、附件却叫 1.0.0」这种错位发布，也不会白烧一次 macOS 打包。
+- **本地自检**：`npm run release:check -- v1.0.0`，打 tag 前跑一次即可；不带参数时取 HEAD 上的 `v*` tag，没有 tag 就只校验 5 处版本是否一致。
+- **自检纳入测试**：新增 `test:release`（`apps/desktop/test/checkReleaseVersion.cjs`），用子进程把脚本当黑盒跑四种输入——当前仓库一致、`v1.0.0` 通过、`v0.0.0` 拦下、缺 `v` 前缀拦下。已并入 `npm test`，此后任何一次测试都会顺带检查版本号有没有漏改。
+- **验证**：另在临时目录把 `packages["apps/desktop"].version` 改成 1.0.1，确认脚本能精确指出漏改的那一处；workflow YAML 解析通过，`plan` 步骤为「检出代码 → 校验 tag 与包版本一致 → 按触发方式与输入生成矩阵」，`build.needs` 仍为 `plan`。全套测试 353 项通过（单测 82、菜单 3、退出 5、发布校验 4、E2E 259）。
+- **本地出包**：`MarkdownNote-1.0.0-arm64.dmg`（Apple Silicon，ad-hoc 签名、未公证），SHA-256 `b52ad45fa06867eaab2fa44bd320fcb31167042eb4291120dd2099450e700bb9`；`hdiutil verify` 通过、`lipo -archs` 为 arm64、`Info.plist` 版本 `1.0.0` / `1.0.0`，asar 内 416 个文件与 `apps/desktop/out` 逐字节一致。首次打开仍需「访达中右键→打开」。
+
 ## 0.14.42 - 2026-11-25
 
 ### 构建：打包目标可切换，默认不再打 macOS x64

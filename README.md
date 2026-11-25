@@ -63,13 +63,22 @@ cd ../..
 bash scripts/make-dmg.sh <版本号> arm64
 ```
 
-产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。CI 额度按金额计（GitHub Free 私有仓库每月约 $12 计算额度，macOS 约 $0.062/分钟），所以策略是：push / PR 只跑测试，打 `v*` tag 或手动触发才打包并传 Release；默认只打 **macOS arm64 + Windows x64**，需要 Intel 包时手动触发并选 `targets=all`：
+产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。公开仓库使用 GitHub 托管 runner 不消耗额度；若转为私有仓库则按金额计（Free 约 $12/月，macOS 约 $0.062/分钟），届时仍应保持「push / PR 只跑测试，打 `v*` tag 或手动触发才打包」的策略。默认只打 **macOS arm64 + Windows x64**，需要 Intel 包时手动触发并选 `targets=all`：
 
 ```bash
 gh workflow run build.yml --ref main -f targets=all   # default / mac-arm64 / win-x64 / all
 ```
 
 本地包为 ad-hoc 签名、未公证，首次打开请右键→打开。
+
+### 发布新版本
+
+1. 把版本号统一改到 **5 处**：`package.json`、`apps/desktop/package.json`，以及 `package-lock.json` 的 `version` / `packages[""].version` / `packages["apps/desktop"].version`
+2. 自检：`npm run release:check -- v1.0.1`
+3. 提交并推送 `main`
+4. `git tag v1.0.1 && git push origin v1.0.1` —— CI 会先校验 tag 与包版本一致，再打包并创建 Release
+
+第 2 步的校验在 CI 里也会跑（`plan` job），版本对不上时打包阶段整体跳过，不会产出「标签 1.0.1、包名 1.0.0」的错位附件。
 
 ## 版本与文档
 

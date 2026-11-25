@@ -24,7 +24,7 @@
 
 1. **本地打成 arm64 dmg 供用户测试**：按 #58 的流程（`npm run build` → `electron-builder --mac --arm64 --dir` → `bash scripts/make-dmg.sh <版本> arm64`），产物留在 `apps/desktop/release/`，并用 present_files 交付给用户。
 2. **推送代码到远端**：提交（简体中文说明）后 `git push origin main`。
-3. **只推 main、不打 `v*` tag**：CI 打包额度受限，打 tag 会触发必然失败的 workflow（见 #9 / #58）。
+3. **日常不发版、不打 `v*` tag**：常规修复只推 main，本地 dmg 就是测试产物。打 tag 会触发一次完整打包并创建**公开** Release，只在正式发版时做，且必须先 `npm run release:check -- v<版本号>` 通过（见第 9 节）。早期私有仓库额度受限时完全不能打 tag，仓库转为公开后 runner 不再计费、限制已解除，但「版本一致再打」这条不变。
 
 即「修复 → 测试 → 文档版本同步 → 本地出 dmg → 推送 main」是一个完整闭环，三步收尾不需要用户再次提醒。
 
@@ -139,7 +139,8 @@ ai-md-editor/
   2. `apps/desktop/package.json` 的 `version` 字段。
   3. `package-lock.json` 中的 **顶层 `version`、`packages[""].version`、`packages["apps/desktop"].version` 三处**
      （只改这三处，**不要全局替换**：`@pkgjs/parseargs@0.11.0`、`retry@0.12.0` 这类第三方包版本号可能与项目版本号相同）。
-  4. `CHANGELOG.md` 记录本次更新摘要。
+  4. 改完必须跑一次 `npm run release:check -- v<版本号>`：它校验上述 **5 处**彼此一致，并校验 tag 去掉 `v` 后与版本完全相同、且 tag 以 `v` 开头。安装包的 `${version}` 文件名、`Info.plist` 的 `CFBundleShortVersionString` / `CFBundleVersion` 都由 `package.json` 派生，tag 是另一条独立的输入——两者不校验就一定会错位。CI 的 `plan` job 跑同一个脚本，不一致时整个打包阶段跳过。
+  5. `CHANGELOG.md` 记录本次更新摘要。
 - 版本号格式：`主版本.次版本.修订号`（如 `1.2.1`）。
   - 主版本：重大架构变更或里程碑功能
   - 次版本：新增功能模块
@@ -238,6 +239,7 @@ ai-md-editor/
 | 75 | 自动保存是可配置的（0.14.40）：`autoSaveDelayMs` 为 0 时表示关闭，其余为 500~30000 毫秒（菜单只提供 1 / 1.5 / 3 秒三档，`AUTO_SAVE_DELAYS` 是唯一清单）。`useTabs` 在定时器 effect 里直接 `if (autoSaveDelayMs <= 0) return;`，并把该值放进依赖数组——切换档位会重排计时器，关闭时立刻取消已排队的写入。设置读回与会话恢复共用同一次 `getSettings()`，不要为了一个字段多发一次 IPC |
 | 76 | 工具栏「表格」是**行列网格**而不是一键插 3×3（0.14.41）：点按钮展开 8 列 × 6 行的格子（`TABLE_PICK_MAX_COLS/ROWS`，与斜杠菜单 `SUB_MAX_COLS/ROWS` 保持一致），悬停实时高亮并显示「N 行 × M 列」，点格子才发 `insertTable` + `` `${cols}x${rows}` ``；打开网格本身不得插入任何东西。payload 由 `instance.ts` 与 `sourceActions.ts` 各自解析（两处都要夹到 10 列 / 20 行，缺 payload 才退回 3×3），源码模式的片段生成与 WYSIWYG 的 `buildTableSnippet` 必须产出同样结构。面板挂 `.tb-dd-wrap` 内、`right: 0` + `bottom: calc(100% + 8px)`（表格按钮靠右，向右对齐才不会顶出窗口），格子用 `onMouseDown` preventDefault 保住 textarea 选区。手柄圆角同理：**外侧才收圆角**，角手柄 `4px 0 0 0`，紧邻的第一列 / 第一行手柄必须 0，否则整表选中时实色手柄带交界处会露白缺口 |
 | 77 | 打包矩阵要可切换、默认不打 macOS x64（0.14.42）：①`workflow_dispatch` 增加 `targets`（`default` / `mac-arm64` / `win-x64` / `all`），由 `plan` job 拼成矩阵 JSON 输出、`build` 用 `fromJSON(needs.plan.outputs.matrix)` 消费——矩阵只能有一个来源，别在 build 里再写死一份 `include`，否则开关改了也不生效；②tag 触发时 `inputs.targets` 为空，脚本里必须写成 `${TARGETS:-default}` 才不会产出空矩阵；③默认集合是 macOS arm64 + Windows x64：Intel 包单价与 arm64 相同但机器更慢（平均 3.3 分钟/次，arm64 1.1 分钟；本周期 36 次累计约 $7.3，占 $12 额度大半），只留手动 `targets=all` 备用；④加目标只需在 `case` 里加一个分支，`label` 同时用于 job 名与日志可读性 |
+| 78 | 版本号与发布 tag 必须强一致（1.0.0）：①同一版本号有 **5 处**（`package.json`、`apps/desktop/package.json`、`package-lock.json` 的 `version` / `packages[""]` / `packages["apps/desktop"]`）；安装包文件名 `${artifactName}`、`Info.plist` 的 `CFBundleShortVersionString`/`CFBundleVersion` 全由 `package.json` 派生，而 Release 标签来自 tag——**两条独立输入**，不校验就一定错位。②校验只有一份实现 `scripts/check-release-version.mjs`：本地 `npm run release:check -- v1.0.0`，CI 在 `plan` job 里用 `GITHUB_REF_NAME` 调同一个脚本（仅 tag 触发时执行）。③放在 `plan` 而不是 `build`：`plan` 是 `build` 的 `needs`，失败即不产出任何包，也避免两个平台 job 各校验一次。④`test:release` 用子进程当黑盒断言退出码（一致 / 错位 / 缺 `v` 前缀），并入 `npm test` 后每次测试都会顺带发现漏改。⑤**不要全局替换版本号**：`package-lock.json` 里 `assert-plus@1.0.0`、`at-least-node@1.0.0` 这类依赖天生就是 1.0.0，误改会破坏 lockfile |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -340,10 +342,10 @@ ai-md-editor/
    - 改快捷键后除 `npm test` 外，还要确认 CI 的 Windows `test` job 通过（平台专属键位与动作绑定只在 Windows runner 上实跑）。
 2. **文档同步**：开发功能的同时，同步更新 `README.md`（项目说明）、`AGENTS.md`（协作规范）与 `docs/` 下的设计与方案文档，不得等到最后一次性补。文档中如与实际实现不符（依赖未引入、主题数量、包管理器等），一并订正。
 3. **提交前检查**（每次 `git commit` 前逐条确认）：
-   - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号四处一致（见第 9 节）。
+   - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号五处一致且 `npm run release:check` 通过（见第 9 节）。
    - 删除无用文件：构建临时配置（`electron.vite.config.*.mjs`）、`*.tsbuildinfo`、空的 `release/`、游离的测试产物与截屏、`.DS_Store`；`out/` 可整体重建后再构建，避免残留旧 chunk。
    - 全仓库检索确认无第三方产品名/品牌标识（含注释、界面示例文案、包描述）。
-4. **CI 打包**：`.github/workflows/build.yml` 中 push/PR 只跑测试（macOS 完整 `npm test` + Windows 单测/菜单校验）；打 `v*` tag 或手动 `workflow_dispatch` 才运行打包并传 Release。打包目标由 `plan` job 按 `targets` 输入生成矩阵：`default`（macOS arm64 + Windows x64）、`mac-arm64`、`win-x64`、`all`（额外出 macOS x64）；tag 触发等同 `default`。要 Intel 包时 `gh workflow run build.yml -f targets=all`，不要改回常驻三平台。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
+4. **CI 打包**：`.github/workflows/build.yml` 中 push/PR 只跑测试（macOS 完整 `npm test` + Windows 单测/菜单校验）；打 `v*` tag 或手动 `workflow_dispatch` 才运行打包并传 Release。打包目标由 `plan` job 按 `targets` 输入生成矩阵：`default`（macOS arm64 + Windows x64）、`mac-arm64`、`win-x64`、`all`（额外出 macOS x64）；tag 触发等同 `default`。**tag 触发时 `plan` 先跑 `scripts/check-release-version.mjs` 校验 tag 与包版本一致**，不一致则 `build` 整体跳过（不产出错位 Release，也不白烧打包时间）。要 Intel 包时 `gh workflow run build.yml -f targets=all`，不要改回常驻三平台。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
 
 ## 14. 参考文档
 

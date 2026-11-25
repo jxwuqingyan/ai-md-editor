@@ -34,6 +34,18 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
+      - name: 检出代码
+        # 只需要读 package.json 校验版本，仓库很小，checkout 成本可忽略
+        uses: actions/checkout@v4
+
+      # 版本错位守卫：安装包文件名里的 ${version} 来自 package.json，而 Release 标签来自 tag。
+      # 打 tag 时两者不一致（比如 tag v1.0.1、package.json 还是 1.0.0）会在 Release 里出现
+      # 「标签写 1.0.1、包却叫 1.0.0」的错位，下载者会以为拿错了文件。这里在产出任何包之前
+      # 就拦下来：plan 是 build 的 needs，失败即整个打包阶段跳过。
+      - name: 校验 tag 与包版本一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: node scripts/check-release-version.mjs "$GITHUB_REF_NAME"
+
       - name: 按触发方式与输入生成矩阵
         id: set
         shell: bash
