@@ -97,7 +97,7 @@ ai-md-editor/
 │   ├── markdown-core/        # 解析/序列化/大纲（纯函数）
 │   ├── theme/                # 主题系统（design tokens）
 │   └── shared/               # 跨进程共享类型（IPC 契约）+ 纯函数工具（text.ts：编码/路径/文本）
-├── .github/workflows/        # CI：push/PR 只跑测试；v* tag / 手动触发才三平台打包
+├── .github/workflows/        # CI：push/PR 只跑测试；v* tag / 手动触发才打包（默认 arm64 + win x64）
 ├── docs/                     # 文档（技术方案、设计规范）
 └── package.json              # npm workspaces
 ```
@@ -166,7 +166,7 @@ ai-md-editor/
 | 6 | 视觉：现代极简，动效克制（CSS 过渡），去 AI 味 |
 | 7 | 包管理器：npm workspaces（已从 pnpm 迁移） |
 | 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
-| 9 | 分发：push/PR 只跑测试 job；打 `v*` tag 或手动触发才三平台打包（macOS x64+arm64 dmg + Windows x64 exe）并传 Release——私有仓库 2000 分钟/月、macOS runner 10 倍计费，每次 push 都打包几天就会烧完额度（2026-11 额度就是这么耗尽的，此后只推 main、本地出 arm64 dmg，见 #58） |
+| 9 | 分发：push/PR 只跑测试 job；打 `v*` tag 或手动触发才打包并传 Release，**默认只打 macOS arm64 + Windows x64**（0.14.42 起，macOS x64 改为手动 `targets=all` 才出）——私有仓库的计算额度是**按金额**计的（GitHub Free 约 $12/月，macOS 约 $0.062/分钟≈193 分钟），2026-11 就是被 macOS x64 打包（单项约 $7.3）烧穿的，此后只推 main、本地出 arm64 dmg，见 #58 与 #77 |
 | 10 | 顶部导航：macOS 原生应用菜单 + 标签栏右侧动作区，窗口内不保留独立功能顶栏 |
 | 11 | 原生菜单为「文件/编辑/段落/格式/显示/帮助」六组；主题走右上角按钮，不单独增加主题或窗口菜单。「帮助」目前只放 Markdown 语法示例入口，示例文档打开后应保持未修改 |
 | 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
@@ -237,6 +237,7 @@ ai-md-editor/
 | 74 | 标签批量关闭与恢复（0.14.40）：①**批量关闭必须串行 await，并同步推进 `tabsRef` / `activeIdRef`**——`closeTab` 基于 `tabsRef.current` 快照过滤，React 提交前 ref 不会更新，第二次调用会把前一次关掉的标签加回来（表现为「关闭其他标签」后标签数不减）。②`closeTab` 返回 `boolean`：写盘失败或用户取消返回 `false`，`closeTabs` 遇到 `false` 立即停止，避免一次误点连带关掉一堆文档。③关闭栈 `closedTabsRef` 最多 25 条，`⇧⌘T` 从栈顶恢复：有路径的重新 `openPath`（拿磁盘最新版本），未命名标签用记录的内容还原并置 `dirty`。④右键菜单是渲染层自绘（`Tabs.tsx` + `.tab-context-menu`），打开时先用 `onSelect` 切换被右键的标签，批量关闭才有明确主体；点空白 / Esc / 滚动 / 窗口失焦都要关闭。⑤⇧⌘T 原本是「显示标签页栏」，已改为 `⌃⌘2`（Windows `Ctrl+Alt+2`），与大纲 `⌃⌘1`、文件树 `⌃⌘3` 对齐，改加速键时记得同步 `menuAccelerators.cjs` 的唯一性校验 |
 | 75 | 自动保存是可配置的（0.14.40）：`autoSaveDelayMs` 为 0 时表示关闭，其余为 500~30000 毫秒（菜单只提供 1 / 1.5 / 3 秒三档，`AUTO_SAVE_DELAYS` 是唯一清单）。`useTabs` 在定时器 effect 里直接 `if (autoSaveDelayMs <= 0) return;`，并把该值放进依赖数组——切换档位会重排计时器，关闭时立刻取消已排队的写入。设置读回与会话恢复共用同一次 `getSettings()`，不要为了一个字段多发一次 IPC |
 | 76 | 工具栏「表格」是**行列网格**而不是一键插 3×3（0.14.41）：点按钮展开 8 列 × 6 行的格子（`TABLE_PICK_MAX_COLS/ROWS`，与斜杠菜单 `SUB_MAX_COLS/ROWS` 保持一致），悬停实时高亮并显示「N 行 × M 列」，点格子才发 `insertTable` + `` `${cols}x${rows}` ``；打开网格本身不得插入任何东西。payload 由 `instance.ts` 与 `sourceActions.ts` 各自解析（两处都要夹到 10 列 / 20 行，缺 payload 才退回 3×3），源码模式的片段生成与 WYSIWYG 的 `buildTableSnippet` 必须产出同样结构。面板挂 `.tb-dd-wrap` 内、`right: 0` + `bottom: calc(100% + 8px)`（表格按钮靠右，向右对齐才不会顶出窗口），格子用 `onMouseDown` preventDefault 保住 textarea 选区。手柄圆角同理：**外侧才收圆角**，角手柄 `4px 0 0 0`，紧邻的第一列 / 第一行手柄必须 0，否则整表选中时实色手柄带交界处会露白缺口 |
+| 77 | 打包矩阵要可切换、默认不打 macOS x64（0.14.42）：①`workflow_dispatch` 增加 `targets`（`default` / `mac-arm64` / `win-x64` / `all`），由 `plan` job 拼成矩阵 JSON 输出、`build` 用 `fromJSON(needs.plan.outputs.matrix)` 消费——矩阵只能有一个来源，别在 build 里再写死一份 `include`，否则开关改了也不生效；②tag 触发时 `inputs.targets` 为空，脚本里必须写成 `${TARGETS:-default}` 才不会产出空矩阵；③默认集合是 macOS arm64 + Windows x64：Intel 包单价与 arm64 相同但机器更慢（实测单次约 $7.3，占月额度 $12 的大头），只留手动 `targets=all` 备用；④加目标只需在 `case` 里加一个分支，`label` 同时用于 job 名与日志可读性 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -296,7 +297,7 @@ ai-md-editor/
 | CI 的 Windows job 命令报错 | PowerShell 把 `--workspace @ai-md-editor/desktop` 里的 `@` 当 splatting | workspace 名一律加双引号 |
 | 升版本后第三方依赖版本被误改 | 全局替换 lock 里的版本号，命中 `retry@0.12.0` 等同号第三方包 | 只精确改 lock 顶层 `version` 与两个 workspace 条目 |
 | CI 上「窗口尺寸写入设置文件」断言失败 | 硬编码请求值 `1000×700`，macOS runner 工作区较小会裁剪成 `1000×684` | 与 `win.getBounds()` 实际值比对，请求值只做容差检查 |
-| Intel job 打 dmg 偶发 `hdiutil detach` 失败（exit 16） | runner 上磁盘镜像卸载冲突，非代码问题，重试 5 次仍可能失败 | `gh run rerun --failed` 重跑失败 job，或等下次 push 重新触发 |
+| Intel job 打 dmg 偶发 `hdiutil detach` 失败（exit 16） | runner 上磁盘镜像卸载冲突，非代码问题，重试 5 次仍可能失败；默认矩阵已不含 Intel，只有手动 `targets=all` 才会跑到 | `gh run rerun --failed` 重跑失败 job，或等下次 push 重新触发 |
 | 敲完立刻切标签，改动没落盘 | 自动保存只写「当前活动标签」，切走后计时器被清理且不再重排 | 防抖到点遍历所有 `path && dirty` 的标签批量写入 |
 | 「关闭其他标签」后标签数不减 / 关掉的又回来 | `closeTab` 基于 `tabsRef.current` 快照算剩余列表，而 React 提交前 ref 不更新；批量关闭串行 await 时每次都在旧列表上过滤 | `closeTab` 里同步推进 `tabsRef` 与 `activeIdRef` 再 `setTabs`，并返回 `boolean` 让 `closeTabs` 遇到取消就停（见 #74） |
 | 拖入二进制/超大文件后窗口卡死 | `readFile(path, 'utf-8')` 无体积与类型校验，几百 MB 直接进内存 | 打开前 `stat` 校验体积上限，内容含 NUL 视为非文本 |
@@ -342,7 +343,7 @@ ai-md-editor/
    - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号四处一致（见第 9 节）。
    - 删除无用文件：构建临时配置（`electron.vite.config.*.mjs`）、`*.tsbuildinfo`、空的 `release/`、游离的测试产物与截屏、`.DS_Store`；`out/` 可整体重建后再构建，避免残留旧 chunk。
    - 全仓库检索确认无第三方产品名/品牌标识（含注释、界面示例文案、包描述）。
-4. **CI 打包**：`.github/workflows/build.yml` 中 push/PR 只跑测试（macOS 完整 `npm test` + Windows 单测/菜单校验）；打 `v*` tag 或手动 `workflow_dispatch` 才运行三平台打包并传 Release。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
+4. **CI 打包**：`.github/workflows/build.yml` 中 push/PR 只跑测试（macOS 完整 `npm test` + Windows 单测/菜单校验）；打 `v*` tag 或手动 `workflow_dispatch` 才运行打包并传 Release。打包目标由 `plan` job 按 `targets` 输入生成矩阵：`default`（macOS arm64 + Windows x64）、`mac-arm64`、`win-x64`、`all`（额外出 macOS x64）；tag 触发等同 `default`。要 Intel 包时 `gh workflow run build.yml -f targets=all`，不要改回常驻三平台。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
 
 ## 14. 参考文档
 

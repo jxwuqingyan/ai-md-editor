@@ -7,35 +7,64 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      targets:
+        description: '打包目标（默认 macOS arm64 + Windows x64）'
+        type: choice
+        default: default
+        options:
+          - default
+          - mac-arm64
+          - win-x64
+          - all
 
 # 关键：显式声明写权限，否则 GITHUB_TOKEN 为只读，创建 Release 会 403
 permissions:
   contents: write
 
 jobs:
-  # 省 Actions 分钟数（私有仓库 2000 分钟/月，macOS runner 10 倍计费）：
-  # push / PR 只跑测试 job；三平台打包只在打 v* tag 或手动触发时运行。
-  build:
-    name: Build (${{ matrix.os }} ${{ matrix.arch }})
+  # 打包目标由这里统一算出来，build job 只负责消费矩阵。
+  # 省 Actions 额度（GitHub Free 私有仓库每月 $12 计算额度，macOS 单价约 $0.062/分钟，
+  # 约合 193 分钟 macOS）：push / PR 只跑测试，打包只在 v* tag 或手动触发时运行；
+  # 默认不打 macOS x64（Intel）—— 它最贵又最少用，需要时用 workflow_dispatch 选 all。
+  plan:
+    name: 计算打包矩阵
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - name: 按触发方式与输入生成矩阵
+        id: set
+        shell: bash
+        env:
+          TARGETS: ${{ inputs.targets }}
+        run: |
+          set -euo pipefail
+          # tag 触发时 inputs.targets 为空，落到 default 分支
+          case "${TARGETS:-default}" in
+            mac-arm64)
+              entries='[{"label":"macOS arm64","os":"macos-15","arch":"arm64","target":"mac"}]'
+              ;;
+            win-x64)
+              entries='[{"label":"Windows x64","os":"windows-latest","arch":"x64","target":"win"}]'
+              ;;
+            all)
+              entries='[{"label":"macOS arm64","os":"macos-15","arch":"arm64","target":"mac"},{"label":"macOS x64","os":"macos-15-intel","arch":"x64","target":"mac"},{"label":"Windows x64","os":"windows-latest","arch":"x64","target":"win"}]'
+              ;;
+            *)
+              entries='[{"label":"macOS arm64","os":"macos-15","arch":"arm64","target":"mac"},{"label":"Windows x64","os":"windows-latest","arch":"x64","target":"win"}]'
+              ;;
+          esac
+          echo "matrix={\"include\":${entries}}" >> "$GITHUB_OUTPUT"
+          echo "本次打包目标：${entries}"
+
+  build:
+    name: Build (${{ matrix.label }})
+    needs: plan
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # macOS x64（Intel）—— macos-13 已弃用（2025-12 下线），改用 macos-15-intel
-          - os: macos-15-intel
-            arch: x64
-            target: mac
-          # macOS arm64（Apple Silicon）—— macos-14 已从官方支持列表移除（会报
-          # "configuration 'macos-14-arm64-us-xl' is not supported"），改用 macos-15
-          # 该 label 是 M1 arm64 机器
-          - os: macos-15
-            arch: arm64
-            target: mac
-          # Windows x64
-          - os: windows-latest
-            arch: x64
-            target: win
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
 
     runs-on: ${{ matrix.os }}
 
@@ -111,7 +140,7 @@ jobs:
           if-no-files-found: warn
 
       # 打 tag 时直接把安装包上传到 GitHub Release（不依赖 artifact，绕开存储配额）。
-      # 只发布三个安装包：macOS arm64 dmg、macOS x64 dmg、Windows x64 exe（不含 zip）。
+      # 发布本次矩阵产出的安装包（默认 macOS arm64 dmg + Windows x64 exe；选 all 时多一个 macOS x64 dmg）。
       - name: 上传安装包到 Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

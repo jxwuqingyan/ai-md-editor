@@ -63,7 +63,13 @@ cd ../..
 bash scripts/make-dmg.sh <版本号> arm64
 ```
 
-产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。为节省 Actions 额度（私有仓库 2000 分钟/月，macOS runner 10 倍计费），CI 策略是：push / PR 只跑测试，打 `v*` tag 或手动触发才三平台打包并传 Release。当前版本 0.14.41，GitHub Actions 因账号计费暂停，三平台 Release 待恢复；本地包为 ad-hoc 签名、未公证，首次打开请右键→打开。
+产物在 `apps/desktop/release/`。Windows 安装包需在 Windows 环境或 CI 中打包。CI 额度按金额计（GitHub Free 私有仓库每月约 $12 计算额度，macOS 约 $0.062/分钟），所以策略是：push / PR 只跑测试，打 `v*` tag 或手动触发才打包并传 Release；默认只打 **macOS arm64 + Windows x64**，需要 Intel 包时手动触发并选 `targets=all`：
+
+```bash
+gh workflow run build.yml --ref main -f targets=all   # default / mac-arm64 / win-x64 / all
+```
+
+本地包为 ad-hoc 签名、未公证，首次打开请右键→打开。
 
 ## 版本与文档
 

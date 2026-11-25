@@ -2,6 +2,18 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 0.14.42 - 2026-11-25
+
+### 构建：打包目标可切换，默认不再打 macOS x64
+
+- **默认矩阵收敛为 macOS arm64 + Windows x64**：GitHub 的包含计算额度自 2025-12 起按金额计（GitHub Free 私有仓库约 $12/月，macOS runner 约 $0.062/分钟，约合 193 分钟），而 macOS x64 打包机更慢——实测单次约 $7.3，是本月额度被烧穿的绝对主力；它又是使用人数最少的产物，因此改为**默认不产出**。
+- **新增 `targets` 开关**：`workflow_dispatch` 增加下拉项 `default` / `mac-arm64` / `win-x64` / `all`，`plan` job 按选项生成矩阵 JSON，`build` job 用 `fromJSON` 消费；`v*` tag 触发等同 `default`。需要 Intel 包时执行 `gh workflow run build.yml --ref main -f targets=all`，不必改文件、也不必再恢复常驻三平台。
+- **矩阵单一来源**：目标清单只存在于 `plan` 的 `case` 分支里，build job 不再写死 `include`，以后加目标只改一处；`label` 同时用于 job 名称，日志里能直接看出这次打的是哪个平台。
+- **验证**：`node` 解析 workflow YAML 通过；把 `plan` 的脚本单独抽出来跑了五种输入，矩阵分别为 `(空)/default → macOS arm64 + Windows x64`、`mac-arm64 → macOS arm64`、`win-x64 → Windows x64`、`all → 三平台`，与预期一致。
+- **文档**：README 补上手动触发命令与额度说明；AGENTS 更新第 9 条分发策略、CI 约定第 4 条与技术方案 10.1，新增设计决策 #77。
+- 本次仅改 CI 与文档，应用代码无变更（本地包与 0.14.41 功能一致）。
+- **本地出包**：`MarkdownNote-0.14.42-arm64.dmg`（约 159 MB，ad-hoc 签名、未公证），SHA-256 `960ed36c6bc9948563b0c7b7480cecaec84f3ce560eebac0e5df4662e6d867de`；`hdiutil verify` 通过、`lipo -archs` 为 arm64、`Info.plist` 版本 0.14.42，asar 内 416 个文件与 `out/` 逐字节一致。
+
 ## 0.14.41 - 2026-11-25
 
 ### 修复：整表选中时左上角的白色缺口；工具栏表格改为行列网格
