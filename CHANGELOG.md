@@ -2,6 +2,14 @@
 
 > 项目功能更新记录，编写整体功能说明时需参考本文件。
 
+## 未发布
+
+### 分发：安装包只从 Release 获取
+
+- **取消本地打包**：日常收尾不再在本机出 dmg，用户统一从 [Releases](https://github.com/jxwuqingyan/ai-md-editor/releases) 下载。本地 `electron-builder` + `scripts/make-dmg.sh` 降级为应急路径，仅在 CI 不可用或排查打包问题时使用，产物用完即清。
+- **发版按需**：日常提交只推 `main`，不升版本号、不打 tag；确定发版时才统一升 5 处版本号、跑 `release:check`、打 `v*` tag。
+- **测试不过不发版**：`build` job 的依赖从 `needs: plan` 改为 `needs: [plan, test]`。此前 `test` 与 `build` 并行，测试失败时 Release 照样发布；现在 Release 是唯一下载源，必须先过测试。代价是串行多花 2–3 分钟。
+
 ## 1.0.0 - 2026-11-25
 
 > 首个正式版（GA）。此前的 0.6.x – 0.14.x 属于开发阶段，版本号只代表迭代次序；从 1.0.0 起进入语义化版本，文件格式与主要功能接口视为稳定。

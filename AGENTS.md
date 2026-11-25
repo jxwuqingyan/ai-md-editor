@@ -20,13 +20,18 @@
 
 ### 2.1 每次改动的固定收尾（用户明确要求，勿漏）
 
-用户要求：**每一次功能修复 / 新增完成后，无需再问，直接依次做完以下三件事**：
+用户要求：**每一次功能修复 / 新增完成后，无需再问，直接依次做完以下几件事**：
 
-1. **本地打成 arm64 dmg 供用户测试**：按 #58 的流程（`npm run build` → `electron-builder --mac --arm64 --dir` → `bash scripts/make-dmg.sh <版本> arm64`），产物留在 `apps/desktop/release/`，并用 present_files 交付给用户。
-2. **推送代码到远端**：提交（简体中文说明）后 `git push origin main`。
-3. **日常不发版、不打 `v*` tag**：常规修复只推 main，本地 dmg 就是测试产物。打 tag 会触发一次完整打包并创建**公开** Release，只在正式发版时做，且必须先 `npm run release:check -- v<版本号>` 通过（见第 9 节）。早期私有仓库额度受限时完全不能打 tag，仓库转为公开后 runner 不再计费、限制已解除，但「版本一致再打」这条不变。
+1. **清理无用文件**：构建残留（`electron.vite.config.*.mjs`、`*.tsbuildinfo`、`.DS_Store`）、临时探针脚本、`apps/desktop/release/` 里的旧产物、游离的截图与临时目录，提交前一律清掉，`git status` 必须只包含本次真实改动。
+2. **同步文档**：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md` 按实际改动更新；改了功能就写 CHANGELOG，改了约定就写 AGENTS。
+3. **本地跑通 `npm test`**：因为 push 到 main 不再触发 CI（见 #80），本地测试是提交前**唯一的验证兜底**，没跑通不许提交。
+4. **推送代码到远端**：提交（简体中文说明）后 `git push origin main`。
 
-即「修复 → 测试 → 文档版本同步 → 本地出 dmg → 推送 main」是一个完整闭环，三步收尾不需要用户再次提醒。
+**不做本地打包**（2026-11-25 用户明确要求）：以前第 1 步是「本地打 arm64 dmg 并 present_files 交付」，现在**取消**——用户直接从 GitHub Release 下载安装包，本地 `electron-builder` / `scripts/make-dmg.sh` 只在 CI 不可用或排查打包问题时用（#58 记为应急路径），日常不要跑，跑完也要清掉 `apps/desktop/release/` 的产物。
+
+**发版按需，攒批再发**：日常改动只推 main，**不升版本号、不打 `v*` tag**；用户说「发版」时才走完整发版流程（升 5 处版本号 → `npm run release:check -- v<版本>` → 推 main → 打 tag 推送 → CI 出包 → 用户从 Release 下载）。不要每次提交都发版，那样 Release 列表会被小改动填满。
+
+即「修复 → 测试 → 清理 → 文档同步 → 推送 main」是日常闭环，发版是另一个由用户触发的动作。
 
 ## 3. 项目定位（务必牢记）
 
@@ -167,7 +172,7 @@ ai-md-editor/
 | 6 | 视觉：现代极简，动效克制（CSS 过渡），去 AI 味 |
 | 7 | 包管理器：npm workspaces（已从 pnpm 迁移） |
 | 8 | 编辑器实例：多标签页采用「单实例 + 切换内容」架构 |
-| 9 | 分发：**只有打 `v*` tag 或手动 `workflow_dispatch` 才触发 CI**（1.0.0 起），push 到 main 不产生任何运行记录——日常改动的验证完全落在本地 `npm test` 上，提交前必须跑通；打 tag 时并行跑 test 与 build 并传 Release，**默认只打 macOS arm64 + Windows x64**（0.14.42 起，macOS x64 改为手动 `targets=all` 才出）——早期私有仓库的计算额度是**按金额**计的（GitHub Free 约 $12/月，macOS 约 $0.062/分钟≈193 分钟），2026-11 就是被 macOS x64 打包烧穿的（36 次累计约 $7.3，占额度大半），见 #58 与 #77 |
+| 9 | 分发：**只有打 `v*` tag 或手动 `workflow_dispatch` 才触发 CI**（1.0.0 起），push 到 main 不产生任何运行记录——日常改动的验证完全落在本地 `npm test` 上，提交前必须跑通；打 tag 时按 `plan → test → build` **串行**，测试通过才打包并发 Release（1.0.1 起 `build` 依赖 `test`，见 #81），**安装包只从 Release 下载、本机不再出包**，**默认只打 macOS arm64 + Windows x64**（0.14.42 起，macOS x64 改为手动 `targets=all` 才出）——早期私有仓库的计算额度是**按金额**计的（GitHub Free 约 $12/月，macOS 约 $0.062/分钟≈193 分钟），2026-11 就是被 macOS x64 打包烧穿的（36 次累计约 $7.3，占额度大半），见 #58 与 #77 |
 | 10 | 顶部导航：macOS 原生应用菜单 + 标签栏右侧动作区，窗口内不保留独立功能顶栏 |
 | 11 | 原生菜单为「文件/编辑/段落/格式/显示/帮助」六组；主题走右上角按钮，不单独增加主题或窗口菜单。「帮助」目前只放 Markdown 语法示例入口，示例文档打开后应保持未修改 |
 | 12 | 菜单勾选项由渲染层经 `menu:state` 同步到主进程，主进程重建菜单；动作经 `menu:action` 白名单转发 |
@@ -217,7 +222,7 @@ ai-md-editor/
 | 55 | E2E 断言 DOM 元素别假设「第一个匹配」等于「先插入的」：行内 snippet 插入会拆/并段落，多个同类元素的 DOM 顺序与插入顺序不保证一致，按文本 / href 等内容特征精确匹配目标 |
 | 56 | 编辑器内链接「⌘/Ctrl + 点击打开」必须拦在 **mousedown**：放到 click 再 preventDefault 就晚了——macOS 上修饰键点击的默认行为在 mousedown 阶段已让 ProseMirror 建出 NodeSelection（整段 `ProseMirror-selectednode` 描边框 + 文字选区，打开后残留）。另外 `getComputedStyle().outlineWidth` 在 `outline-style: none` 时也报非零值，截图诊断别把它当真边框来源 |
 | 57 | 底部工具栏、斜杠菜单、原生菜单必须共用同一条插入链路：`Toolbar` 只发 `FormatAction` / `onInsertLink(label,url)` / `onPickImage`，实际动作由 `App.tsx` → `useEditing.applyFormat` 分发；图片一律走 `chooseImage`（系统文件选择器），链接一律走表单，**任何入口都不得再插 `[链接文字](url)` / `![图片](url)` 占位**。菜单「超链接」经 `linkFormRequest` 递增信号复用工具栏表单（工具栏隐藏时先显示）；代码块在工具栏只有「代码块」一个按钮（空选区点击即转成可见代码块），段落下拉只放正文与标题 1~4，不再重复「引用」「代码块」；行内代码只走原生菜单（见 #59）。工具栏按钮增多后用 `flex-wrap` 换行，E2E 有「不溢出编辑区」断言守门 |
-| 58 | **本地出包（CI 额度耗尽时的替代路径）**：`npm run build`（`out/` 必须干净，否则旧 chunk 全被塞进 asar）→ `cd apps/desktop && env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE CSC_IDENTITY_DISABLED=1 ../../node_modules/.bin/electron-builder --mac --arm64 --dir`（**不要直出 dmg**：受限环境拦截挂载卷上 `.BC.T_*` 的删除，hdiutil 清理失败报 `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`）→ `bash scripts/make-dmg.sh <版本号> arm64`（剥签名后补 ad-hoc、HFS+ 镜像挂 `/Volumes/MarkdownNote` 写 `.DS_Store` 布局与卷图标、`COPYFILE_DISABLE=1 ditto` 复制、`hdiutil convert -format UDZO`）。交付前校验：`hdiutil verify`、卷内四点布局、`codesign -dv` 的 `Signature=adhoc`、`Info.plist` 版本、`lipo -archs`、asar 内文件与 `out/` 逐字节比对；ad-hoc 未公证要提示「访达中右键→打开」。额度耗尽期间只推 `main`、不打 `v*` tag，避免触发必然失败的 workflow |
+| 58 | **本地出包（应急路径，日常不用）**：`npm run build`（`out/` 必须干净，否则旧 chunk 全被塞进 asar）→ `cd apps/desktop && env -u NODE_OPTIONS -u ELECTRON_RUN_AS_NODE CSC_IDENTITY_DISABLED=1 ../../node_modules/.bin/electron-builder --mac --arm64 --dir`（**不要直出 dmg**：受限环境拦截挂载卷上 `.BC.T_*` 的删除，hdiutil 清理失败报 `ERR_ELECTRON_BUILDER_CANNOT_EXECUTE`）→ `bash scripts/make-dmg.sh <版本号> arm64`（剥签名后补 ad-hoc、HFS+ 镜像挂 `/Volumes/MarkdownNote` 写 `.DS_Store` 布局与卷图标、`COPYFILE_DISABLE=1 ditto` 复制、`hdiutil convert -format UDZO`）。交付前校验：`hdiutil verify`、卷内四点布局、`codesign -dv` 的 `Signature=adhoc`、`Info.plist` 版本、`lipo -archs`、asar 内文件与 `out/` 逐字节比对；ad-hoc 未公证要提示「访达中右键→打开」。**自 1.0.1 起用户不再要本地包，只从 Release 下载（#81）**，这条仅在 CI 不可用或排查打包问题时启用，跑完清掉 `apps/desktop/release/` |
 | 59 | 预设的 `toggleInlineCodeCommand` 在**空选区直接返回 false**（官方界面层也要手动处理），任何「点按钮没反应」的行内代码入口都改用 ProseMirror `toggleMark(schema.marks.inlineCode)`：空选区切换 storedMark，与加粗/斜体一致，下一次输入即生效；有选区也照常切换。代码块用 `createCodeBlockCommand`（内部 `setBlockType`），空选区同样有效，末尾由 `trailing.ts` 补段落 |
 | 60 | 警告框插入必须**选中占位文字**：`insertSnippet(..., placeholder)` 只在新插入区间内查找文本并 `TextSelection.create` 选中，源码模式对应 `insertAndSelect`。否则光标落在 `[!NOTE]` 前，用户一输入就得到 `77[!NOTE] 内容`，装饰认不出首行标记、警告框退化成普通文本。所有入口统一发 `insertCallout` + 类型 payload（工具栏下拉与原生菜单共用），不要再各自拼 `snippet` 字符串 |
 | 61 | 大纲拖动重排：`OutlineList.tsx` 由侧栏与独立大纲窗口共用，HTML5 drag 的落点按指针在目标条目上 / 下半部决定 before / after，拖到列表空白落到末节之后，插入指示线用 `box-shadow: inset` 画。文本搬运交给 `packages/shared/src/text.ts` 的 `moveOutlineSection`（纯按行切片，章节范围取「下一个层级不高于当前标题的行」之前），目标落在自身章节内 / 拖到自己 / 越界返回 `moved=false`。拖动前必须 `flushEditor()` 并按**最新源码**重新 `extractOutline`（渲染用的 `useDeferredValue` 大纲可能滞后），再 `setActiveContent` + `setMarkdown`；源码模式额外压撤销栈，只读模式拒绝 |
@@ -242,6 +247,7 @@ ai-md-editor/
 | 78 | 版本号与发布 tag 必须强一致（1.0.0）：①同一版本号有 **5 处**（`package.json`、`apps/desktop/package.json`、`package-lock.json` 的 `version` / `packages[""]` / `packages["apps/desktop"]`）；安装包文件名 `${artifactName}`、`Info.plist` 的 `CFBundleShortVersionString`/`CFBundleVersion` 全由 `package.json` 派生，而 Release 标签来自 tag——**两条独立输入**，不校验就一定错位。②校验只有一份实现 `scripts/check-release-version.mjs`：本地 `npm run release:check -- v1.0.0`，CI 在 `plan` job 里用 `GITHUB_REF_NAME` 调同一个脚本（仅 tag 触发时执行）。③放在 `plan` 而不是 `build`：`plan` 是 `build` 的 `needs`，失败即不产出任何包，也避免两个平台 job 各校验一次。④`test:release` 用子进程当黑盒断言退出码（一致 / 错位 / 缺 `v` 前缀），并入 `npm test` 后每次测试都会顺带发现漏改。⑤**不要全局替换版本号**：`package-lock.json` 里 `assert-plus@1.0.0`、`at-least-node@1.0.0` 这类依赖天生就是 1.0.0，误改会破坏 lockfile |
 | 79 | 源码模式的 textarea 必须撑满编辑区（1.0.0）：`min-height: 60vh`（写死 60% 视口）+ 容器 `padding-bottom: 96px` + 容器不撑满，三者叠加会在内容下方空出 182px（667px 编辑区里占 27%），长文档还会被 textarea 内部滚动裁掉。做法：容器加 `.editor-inner--source`（`flex column` + `height: 100%` + 底部 padding 收到 24px），textarea `flex: 1; min-height: 0`，滚动交给 textarea 自己。**别给 textarea 用 vh 写死高度**，它要随查找栏开合与窗口缩放变化；WYSIWYG 的 96px 呼吸留白也不要沿用，那是给渲染视图滚动到底用的。E2E 断言 `fillRatio > 0.9 && gapBelow ≤ 32 && overflowBelow ≤ 1` |
 | 80 | CI 只在打 tag 时触发（1.0.0）：`on.push` 只留 `tags: ['v*']`，去掉 `branches: [main]` 与 `pull_request`。原因是一次发版会在 main 和 tag 上各跑一遍，main 那条只跑测试、不产出任何东西。代价是 push main 没有 CI 兜底，**提交前必须本地 `npm test` 通过**。手动 `workflow_dispatch` 保留（`targets` 开关要用），它不建 Release。配套把 E2E 会话恢复用例超时从 20s 提到 30s 并在超时分支输出窗口诊断——它正是卡在 20s 上把上一版发版判成失败的 |
+| 81 | 交付通道改为 GitHub Release，不再本地打包（1.0.1 起）：①用户明确「不要在我本地打包了，我去 Release 下载」，所以 §2.1 收尾取消「本地出 dmg + present_files」，改为「清理 → 测试 → 文档 → 推 main」，本地出包降级为 #58 应急路径；②因为 Release 成了唯一交付源，**`build` 必须 `needs: [plan, test]`**——原来只 `needs: plan`、`test` 独立并行，测试红了照样发版，等于把坏包推给用户；串行多花 2–3 分钟换「发出去的包一定测过」；③**发版按需攒批**：日常只推 main，不升版本不打 tag，用户说「发版」才升 5 处版本号 + `release:check` + 打 tag；不要每次提交都发版，否则 Release 列表被小改动填满、tag 也会变脏 |
 
 ### 14.1 扩展语法的实现位置（改动前务必先读）
 
@@ -347,7 +353,7 @@ ai-md-editor/
    - 文档已同步：`README.md`、`AGENTS.md`、`docs/*.md`、`CHANGELOG.md`；版本号五处一致且 `npm run release:check` 通过（见第 9 节）。
    - 删除无用文件：构建临时配置（`electron.vite.config.*.mjs`）、`*.tsbuildinfo`、空的 `release/`、游离的测试产物与截屏、`.DS_Store`；`out/` 可整体重建后再构建，避免残留旧 chunk。
    - 全仓库检索确认无第三方产品名/品牌标识（含注释、界面示例文案、包描述）。
-4. **CI 打包**：`.github/workflows/build.yml` 只在打 `v*` tag 或手动 `workflow_dispatch` 时运行——push 到 main 不触发任何 job，**所以提交前必须本地跑通 `npm test`，那是唯一的验证兜底**。tag 触发时 `test` 与 `build` 并行：前者跑 macOS 完整 `npm test` + Windows 单测/菜单校验，后者打包并传 Release。打包目标由 `plan` job 按 `targets` 输入生成矩阵：`default`（macOS arm64 + Windows x64）、`mac-arm64`、`win-x64`、`all`（额外出 macOS x64）；tag 触发等同 `default`。**tag 触发时 `plan` 先跑 `scripts/check-release-version.mjs` 校验 tag 与包版本一致**，不一致则 `build` 整体跳过（不产出错位 Release，也不白烧打包时间）。要 Intel 包时 `gh workflow run build.yml -f targets=all`，不要改回常驻三平台。账号计费导致 workflow 被阻断时，按 #58 本地出 arm64 dmg，交付说明写进 README / CHANGELOG。
+4. **CI 打包**：`.github/workflows/build.yml` 只在打 `v*` tag 或手动 `workflow_dispatch` 时运行——push 到 main 不触发任何 job，**所以提交前必须本地跑通 `npm test`，那是唯一的验证兜底**。job 依赖是 **`plan → test → build`** 串行：`plan` 校验 tag 与包版本一致并生成矩阵，`test` 跑 macOS 完整 `npm test` + Windows 单测/菜单校验，`build` 才打包并传 Release。**`build` 必须 `needs: [plan, test]`，不能只依赖 `plan`**：Release 是用户的唯一下载源（不再本地出包），测试红了还发版等于把坏包推给用户；串行多花 2–3 分钟，换「发出去的包一定测过」。打包目标由 `plan` 按 `targets` 输入生成矩阵：`default`（macOS arm64 + Windows x64）、`mac-arm64`、`win-x64`、`all`（额外出 macOS x64）；tag 触发等同 `default`。**`plan` 里 `scripts/check-release-version.mjs` 校验不一致时 `build` 整体跳过**（不产出错位 Release，也不白烧打包时间）。要 Intel 包时 `gh workflow run build.yml -f targets=all`，不要改回常驻三平台。本地出包只在 CI 不可用或排查打包问题时按 #58 应急。
 
 ## 14. 参考文档
 

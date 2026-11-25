@@ -72,7 +72,9 @@ jobs:
 
   build:
     name: Build (${{ matrix.label }})
-    needs: plan
+    # 必须等测试通过再打包。Release 是用户的唯一下载源（不再本地出包），
+    # 测试红了还发版等于把坏包推给用户；串行多花 2-3 分钟，换「发出去的包一定测过」。
+    needs: [plan, test]
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -165,7 +167,8 @@ jobs:
 
   # 自动化验证：macOS 跑完整测试；Windows runner 实跑菜单构建与键位/动作派发校验，
   # 把「Windows 快捷键只能实机验证」压缩成每次提交都能重复的 CI 检查。
-  # 测试 job 与打包 job 相互独立，互不阻塞 Release 上传。
+  # 因为 push 到 main 不再触发 CI，这次 tag 运行是提交后唯一的自动化验证，
+  # 所以 build 依赖本 job：测试不过就不打包、不发 Release。
   test:
     name: Test (${{ matrix.os }})
     strategy:
